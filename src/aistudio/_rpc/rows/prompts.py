@@ -12,10 +12,9 @@ Response: ``[[prompt, ...]]`` (``[]`` for an empty library). Prompt row:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
-from aistudio._rpc.rows import as_str
+from aistudio._rpc.rows import as_str, as_timestamp
 from aistudio._rpc.wire import opt_index, safe_index
 from aistudio._types.prompts import PROMPT_TYPES, PromptSummary
 from aistudio.exceptions import SchemaDriftError
@@ -46,7 +45,7 @@ def _prompt(response: Any, i: int) -> PromptSummary:
         title=as_str(opt_index(meta, 0)),
         type=PROMPT_TYPES.get(raw_type, raw_type.lower()) if raw_type else "unknown",
         description=as_str(opt_index(meta, 1)),
-        modified=_timestamp(opt_index(meta, 4, 0)),
+        modified=as_timestamp(opt_index(meta, 4, 0)),
         has_images={"true": True, "false": False}.get(props.get("hasImages", "")),
         parent_app_id=props.get("parentAppId"),
     )
@@ -59,11 +58,3 @@ def _properties(pairs: Any) -> dict[str, str]:
         p[0]: p[1] for p in pairs
         if isinstance(p, list) and len(p) == 2 and isinstance(p[0], str) and isinstance(p[1], str)
     }
-
-
-def _timestamp(value: Any) -> str | None:
-    try:
-        moment = datetime.fromtimestamp(int(opt_index(value, 0)), timezone.utc)
-    except (TypeError, ValueError, OverflowError, OSError):
-        return None
-    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
