@@ -122,5 +122,38 @@ class HttpTransport:
                 continue
             raise err
 
+    async def download(self, url: str) -> bytes:
+        """GET a same-origin file with session cookies (Build app files; findings "Export")."""
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if parsed.scheme != "https" or not host.endswith(".google.com"):
+            raise ValidationError(f"refusing to send credentials to {parsed.scheme}://{host}")
+        reloaded = False
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = await self._client.get(
+                    url, headers={"Cookie": self._session.cookie_header(host)}
+                )
+            except httpx.TransportError as exc:
+                if attempt >= self._max_attempts:
+                    raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
+                await self._sleep(self._delay(attempt))
+                continue
+            if response.status_code < 400:
+                return response.content
+            err = error_from_http(response.status_code, response.text)
+            if isinstance(err, AuthError) and not reloaded and self._reload_session is not None:
+                reloaded = True
+                fresh = self._reload_session()
+                if fresh != self._session:
+                    self._session = fresh
+                    continue
+            if err.retriable and attempt < self._max_attempts:
+                await self._sleep(self._delay(attempt))
+                continue
+            raise err
+
     def _delay(self, attempt: int) -> float:
         return self._backoff * 2 ** (attempt - 1) + self._jitter() * self._backoff

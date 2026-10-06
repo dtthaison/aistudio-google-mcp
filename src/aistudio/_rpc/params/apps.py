@@ -20,3 +20,12 @@ def list_gallery() -> list[Any]:
 
 def list_app_runs(app_id: str) -> list[Any]:
     return [app_id]
+
+
+def get_app(app_id: str) -> list[Any]:
+    return [app_id]
+
+
+def get_snapshot(app_id: str, stamp: tuple[str, int]) -> list[Any]:
+    """``[app_id, null, [seconds_str, nanos]]`` (fixture GetCodeAssistantSnapshot/1)."""
+    return [app_id, None, [stamp[0], stamp[1]]]

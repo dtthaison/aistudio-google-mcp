@@ -31,3 +31,5 @@ LIST_APPLET_TRAJECTORIES = RpcSpec("ListAppletTrajectories", Transport.HTTP, ide
 LIST_INCIDENTS = RpcSpec("ListIncidentsHistory", Transport.HTTP, idempotent=True)
 GET_PREFERENCES = RpcSpec("GetUserPreferences", Transport.HTTP, idempotent=True)
 UPDATE_PREFERENCES = RpcSpec("UpdateUserPreferences", Transport.HTTP, idempotent=False)
+GET_APPLET = RpcSpec("GetApplet", Transport.HTTP, idempotent=True)
+GET_SNAPSHOT = RpcSpec("GetCodeAssistantSnapshot", Transport.HTTP, idempotent=True)

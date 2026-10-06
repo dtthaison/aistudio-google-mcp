@@ -14,7 +14,14 @@ from aistudio._rpc.params import preferences as preferences_params
 from aistudio._rpc.params import prompts as prompts_params
 from aistudio._rpc.params import status as status_params
 from aistudio._rpc.registry import RpcSpec, Transport
-from aistudio._rpc.rows.apps import decode_apps, decode_gallery, decode_recent, decode_runs
+from aistudio._rpc.rows.apps import (
+    decode_apps,
+    decode_gallery,
+    decode_recent,
+    decode_runs,
+    decode_snapshot_files,
+    decode_snapshot_stamp,
+)
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
 from aistudio._rpc.rows.preferences import decode_starred
@@ -57,6 +64,9 @@ class AIStudioClient:
                 f"{spec.method} needs the browser backend, which is not available yet"
             )
         return await self._transport.call(spec.method, body, idempotent=spec.idempotent)
+
+    async def download(self, url: str) -> bytes:
+        return await self._transport.download(url)
 
 
 class _Models:
@@ -119,6 +129,21 @@ class _Apps:
         raw = await self._client.call(registry.LIST_APPLET_TRAJECTORIES,
                                       apps_params.list_app_runs(app_id))
         return decode_runs(raw)
+
+    async def snapshot_files(self, app_id: str) -> list[tuple[str, str]] | None:
+        stamp = decode_snapshot_stamp(
+            await self._client.call(registry.GET_APPLET, apps_params.get_app(app_id))
+        )
+        if stamp is None:
+            return None
+        raw = await self._client.call(registry.GET_SNAPSHOT,
+                                      apps_params.get_snapshot(app_id, stamp))
+        return decode_snapshot_files(raw)
+
+    async def download_file(self, app_id: str, sha256: str) -> bytes:
+        return await self._client.download(
+            f"https://aistudio.google.com/_/upload/{app_id}/file/{sha256}"
+        )
 
 
 class _Gallery:

@@ -131,3 +131,24 @@ def decode_runs(response: Any) -> list[AppRun]:
                 updated=as_timestamp(opt_index(run, 2)),
             ))
     return out
+
+
+def decode_snapshot_stamp(response: Any) -> tuple[str, int] | None:
+    """GetApplet ``[0][6]``: the latest code snapshot time ``[seconds_str, nanos]``."""
+    stamp = opt_index(response, 0, 6)
+    seconds = opt_index(stamp, 0)
+    if not isinstance(seconds, (str, int)) or isinstance(seconds, bool):
+        return None
+    nanos = opt_index(stamp, 1)
+    return str(seconds), nanos if isinstance(nanos, int) and not isinstance(nanos, bool) else 0
+
+
+def decode_snapshot_files(response: Any) -> list[tuple[str, str]]:
+    """GetCodeAssistantSnapshot ``[["model", summary, _, ts, [[path, sha256], ...]]]``."""
+    entries = opt_index(response, 0, 4)
+    files: list[tuple[str, str]] = []
+    for entry in entries if isinstance(entries, list) else []:
+        path, digest = opt_index(entry, 0), opt_index(entry, 1)
+        if isinstance(path, str) and isinstance(digest, str):
+            files.append((path, digest))
+    return files

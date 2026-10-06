@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import click
 from rich.table import Table
 
-from aistudio._app.apps import gallery_get, gallery_list, get_app, list_apps, recent_apps
+from aistudio._app.apps import (
+    export_app,
+    gallery_get,
+    gallery_list,
+    get_app,
+    list_apps,
+    recent_apps,
+)
 from aistudio._app.build import DEFAULT_TIMEOUT_S, create_app, prompt_app
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import cells, emit, json_option, stderr, stdout
@@ -186,3 +194,18 @@ def app_prompt(state: CliState, app_id: str, text: str, timeout: int, visible: b
     """Ask the builder to change an app (id or unique prefix) with TEXT."""
     _build(state, prompt_app, app_id, text, timeout=timeout, visible=visible,
            json_output=json_output)
+
+
+@app.command("export")
+@click.argument("app_id")
+@click.argument("dest", type=click.Path(file_okay=False, path_type=Path))
+@click.option("--force", is_flag=True, help="Write into a non-empty folder (overwrites files).")
+@json_option
+@click.pass_obj
+@handle_errors
+def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_output: bool) -> None:
+    """Download an app's latest code into DEST (verified; no browser)."""
+    data = _run(state, lambda c: export_app(c, app_id, dest, force=force))
+    emit(data, json_output=json_output, render=lambda d: stdout.print(
+        f"Exported {d['count']} files ({d['bytes']} bytes) of {d['title'] or d['app_id']} "
+        f"to {d['dir']}", markup=False))
