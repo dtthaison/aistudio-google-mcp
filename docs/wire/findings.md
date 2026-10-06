@@ -39,7 +39,6 @@ The session did **not** exercise:
 | H8 | Catalog metadata comes from one RPC | **likely true** | One `ListModels` response (99 KB) lists 86 models across all picker categories: Gemini, Gemma, image (`nano-banana*`, `*-image`), Veo, TTS, transcribe, Live, Lyria (`lyria-3.5`, `lyria-3-*`), and agents (`antigravity-preview-*`, `deep-research-*`). It also contains price strings (`$`), paid markers and knowledge cutoffs. M2 must still map the field indices. |
 | H9 | Lyria song generation is request/job | not observed | `lyria-3.5` is present in the catalog, but no music was generated. |
 | H10 | Stars are server-side | **true** (follow-up session) | `UpdateUserPreferences` with field `[6]` = `[["models/<id>", [seconds, nanos]]]` and field mask `["starred_models"]`. Unstar sends an empty list with the same mask. |
-| H10-old | (first-session note) | not observed | `GetUserPreferences` and `UpdateUserPreferences` use a positional preferences message with a field mask (for example `["has_seen_ssgc_onboarding"]`). Star state was not seen. |
 
 ## Transport per RPC (plain-HTTP replay, signed by `aistudio`)
 
