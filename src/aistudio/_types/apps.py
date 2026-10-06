@@ -59,3 +59,13 @@ class GalleryApp:
         data["apis"] = list(self.apis)
         data["tags"] = list(self.tags)
         return data
+
+
+@dataclass(frozen=True)
+class BuildProgress:
+    run_id: str | None
+    app_id: str | None
+    steps: int  # highest step counter seen in the stream
+    done: bool  # the final model message (with the produced file list) arrived
+    files: tuple[str, ...] = ()
+    summary: str | None = None
