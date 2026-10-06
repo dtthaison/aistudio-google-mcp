@@ -73,6 +73,10 @@ class NetworkError(AIStudioError):
     default_retriable = True
 
 
+class ConnectFailedError(NetworkError):
+    """The connection failed before the request was sent; always safe to retry."""
+
+
 class ServerError(AIStudioError):
     code = "SERVER_ERROR"
 

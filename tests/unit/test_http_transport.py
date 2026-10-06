@@ -63,7 +63,7 @@ async def test_error_responses_map_to_exceptions(status, body, exc):
 @respx.mock
 async def test_transport_failures_become_network_error():
     respx.post(method_url("ListModels")).mock(side_effect=httpx.ConnectError("boom"))
-    async with HttpTransport(make_session()) as transport:
+    async with HttpTransport(make_session(), max_attempts=1) as transport:
         with pytest.raises(NetworkError):
             await transport.call("ListModels", [])
 

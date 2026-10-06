@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import random
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,6 +15,8 @@ from aistudio._auth.signer import API_HOST, build_headers
 from aistudio._rpc import wire
 from aistudio.exceptions import (
     AIStudioError,
+    AuthError,
+    ConnectFailedError,
     NetworkError,
     ValidationError,
     error_from_http,
@@ -45,10 +50,20 @@ class HttpTransport:
         *,
         client: httpx.AsyncClient | None = None,
         timeout: float = 60.0,
+        reload_session: Callable[[], Session] | None = None,
+        max_attempts: int = 3,
+        backoff: float = 0.5,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        jitter: Callable[[], float] = random.random,
     ) -> None:
         self._session = session
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owns_client = client is None
+        self._reload_session = reload_session
+        self._max_attempts = max_attempts
+        self._backoff = backoff
+        self._sleep = sleep
+        self._jitter = jitter
 
     async def __aenter__(self) -> HttpTransport:
         return self
@@ -68,11 +83,44 @@ class HttpTransport:
         headers = build_headers(self._session, host=host)
         try:
             return await self._client.post(url, content=body_text.encode(), headers=headers)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            raise ConnectFailedError(f"{type(exc).__name__}: {exc}") from exc
         except httpx.TransportError as exc:
             raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
 
-    async def call(self, method: str, body: Any) -> Any:
-        response = await self.post_raw(method_url(method), wire.encode(body))
-        if response.status_code >= 400:
-            raise error_for_response(response.status_code, response.text)
-        return wire.decode(response.text)
+    async def call(self, method: str, body: Any, *, idempotent: bool = False) -> Any:
+        """Send one RPC (spec §9 retries, §4.4 step 1 auth reload)."""
+        text = wire.encode(body)
+        reloaded = False
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = await self.post_raw(method_url(method), text)
+            except ConnectFailedError:
+                if attempt >= self._max_attempts:
+                    raise
+                await self._sleep(self._delay(attempt))
+                continue
+            except NetworkError:
+                if not idempotent or attempt >= self._max_attempts:
+                    raise
+                await self._sleep(self._delay(attempt))
+                continue
+            if response.status_code < 400:
+                return wire.decode(response.text)
+            err = error_for_response(response.status_code, response.text)
+            if isinstance(err, AuthError) and not reloaded and self._reload_session is not None:
+                reloaded = True
+                fresh = self._reload_session()
+                if fresh != self._session:
+                    # Another process (e.g. `aistudio login`) refreshed the cookies on disk.
+                    self._session = fresh
+                    continue
+            if idempotent and err.retriable and attempt < self._max_attempts:
+                await self._sleep(self._delay(attempt))
+                continue
+            raise err
+
+    def _delay(self, attempt: int) -> float:
+        return self._backoff * 2 ** (attempt - 1) + self._jitter() * self._backoff
