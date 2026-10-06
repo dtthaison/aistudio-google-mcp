@@ -60,3 +60,13 @@ def test_models_list_requires_login(aistudio_home):
     result = CliRunner().invoke(cli, ["models", "list", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["code"] == "AUTH_ERROR"
+
+
+@respx.mock
+def test_human_table_shows_full_ids_at_80_columns(logged_in_profile, captured):
+    logged_in_profile()
+    serve_catalog(captured)
+    result = CliRunner().invoke(cli, ["models", "list", "--category", "agents"])
+    assert result.exit_code == 0, result.output
+    for model_id in ("antigravity-preview-09-2026", "deep-research-max-preview-04-2026"):
+        assert model_id in result.stdout

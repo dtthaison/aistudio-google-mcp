@@ -48,3 +48,13 @@ def test_check_test_skips_the_probe_when_not_logged_in(aistudio_home):
     assert result.exit_code == 1
     assert data["checks"]["http_probe"] is False
     assert "probe" not in data
+
+
+@respx.mock
+def test_check_test_human_output_says_why_the_probe_failed(logged_in_profile):
+    logged_in_profile()
+    respx.post(method_url("ListModels")).mock(return_value=httpx.Response(401))
+    result = CliRunner().invoke(cli, ["auth", "check", "--test"])
+    assert result.exit_code == 1
+    assert "AUTH_ERROR" in result.stdout
+    assert "HTTP 401" in result.stdout

@@ -27,6 +27,9 @@ def _render_check(data: dict[str, Any]) -> None:
     stdout.print(f"Status:  {status}")
     for name, value in data["checks"].items():
         stdout.print(f"  {name}: {'yes' if value else 'no'}")
+    probe = data.get("probe")
+    if probe and not probe["ok"]:
+        stdout.print(f"  probe failed: {probe['code']}: {probe['message']}", markup=False)
     for warning in data["warnings"]:
         stdout.print(f"[yellow]warning:[/yellow] {warning}")
     if data.get("hint"):

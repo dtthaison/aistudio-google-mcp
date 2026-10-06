@@ -25,12 +25,21 @@ def _price(model: dict[str, Any]) -> str:
     if model["pricing"]:
         row = model["pricing"][0]
         price = "" if row["price_usd"] is None else f" ${row['price_usd']:g}"
-        return f"{row['direction']}: {row['label']}{price}"
+        label = row["label"] or (f"<={row['up_to_tokens']:,} tokens" if row["up_to_tokens"]
+                                 else "")
+        return f"{row['direction']}: {label}{price}".replace(":  ", ": ").rstrip()
     return model["pricing_summary"] or ""
 
 
 def _render_list(data: dict[str, Any]) -> None:
-    table = Table("id", "categories", "released", "command", "price")
+    # Ids must never be truncated: users copy them into `models get`.
+    width = max((len(m["id"]) for m in data["models"]), default=2)
+    table = Table()
+    table.add_column("id", no_wrap=True, min_width=width)
+    table.add_column("categories")
+    table.add_column("released", no_wrap=True)
+    table.add_column("command")
+    table.add_column("price", max_width=36, overflow="fold")
     for m in data["models"]:
         table.add_row(m["id"], ", ".join(m["categories"]), m["release_date"] or "",
                       m["command"] or "", _price(m))

@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import timedelta, timezone
 
 import pytest
 
@@ -108,7 +108,8 @@ def test_to_dict_is_json_ready(captured):
     data = catalog(captured)["lyria-3.5"].to_dict()
     assert data["categories"] == ["audio", "music"]
     assert data["pricing"] == [
-        {"direction": "output", "label": "Song generation (*Output per song)", "price_usd": 0.08}
+        {"direction": "output", "label": "Song generation (*Output per song)", "price_usd": 0.08,
+         "up_to_tokens": None}
     ]
     assert data["unsupported_category"] is False
 
@@ -119,3 +120,41 @@ def test_opt_index_and_coercions():
     assert wire.opt_index("x", 0) is None
     assert (as_str("a"), as_str(1)) == ("a", None)
     assert (as_int(3), as_int(True), as_int("3")) == (3, None, None)
+
+
+def test_unlabelled_and_tiered_prices_are_kept(captured):
+    models = catalog(captured)
+    assert models["gemini-3.5-flash"].pricing == (
+        PricingRow("input", None, 1.5), PricingRow("output", None, 9.0),
+    )
+    assert models["gemini-3.1-pro-preview"].pricing == (
+        PricingRow("input", None, 2.0, up_to_tokens=200000), PricingRow("input", None, 4.0),
+        PricingRow("output", None, 12.0, up_to_tokens=200000), PricingRow("output", None, 18.0),
+    )
+
+
+def test_no_captured_price_is_lost(captured):
+    response = captured("ListModels").response
+    decoded = {m.id: m for m in decode_models(response, tz=timezone.utc)}
+    for row in response[0]:
+        raw = wire.opt_index(row, 38, 0)
+        entries = [
+            e for idx in (0, 1)
+            for group in (wire.opt_index(raw, idx) or [])
+            for e in (group or [])
+            if isinstance(e, list) and (wire.opt_index(e, 4) is not None
+                                        or wire.opt_index(e, 2) is not None
+                                        or wire.opt_index(e, 5) is not None)
+        ]
+        assert len(decoded[row[0][7:]].pricing) == len(entries), row[0]
+
+
+def test_out_of_range_dates_and_prices_become_null_not_a_crash():
+    card = [None] * 21
+    card[0] = [None, [[[None, 1, 10**400, None, "huge"]]]]
+    card[19], card[20] = ["253402300799"], ["-99999999999999"]
+    row = [None] * 39
+    row[0], row[38] = "models/far", card
+    (model,) = decode_models([[row]], tz=timezone(timedelta(hours=14)))
+    assert model.release_date is None and model.knowledge_cutoff is None
+    assert model.pricing == (PricingRow("output", "huge", None),)

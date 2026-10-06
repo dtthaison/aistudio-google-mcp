@@ -15,7 +15,9 @@ Response: ``[[model, ...]]``. Model row:
 | 74 | picker category codes (CATEGORY_CODES) |
 
 Pricing ``card[0]``: ``[input_groups, output_groups, _, summary_text, pricing_url]``; a group
-is a list of rows ``[_, _, price, _, label, per_item_price]``.
+is a list of rows ``[up_to_tokens, open_ended, price, _, label, per_item_price]``. Plain Gemini
+rows carry no label (``[null, 1, 1.5]``); tiered rows carry a token threshold
+(``[200000, null, 2]`` then ``[null, 1, 4]``).
 """
 
 from __future__ import annotations
@@ -52,8 +54,6 @@ def _model(response: Any, i: int, tz: tzinfo | None) -> Model:
     model_id = name.removeprefix("models/")
     categories = _categories(opt_index(row, 74))
     pricing, summary, pricing_url = _pricing(opt_index(card, 0))
-    release = _epoch(opt_index(card, 19))
-    cutoff = _epoch(opt_index(card, 20))
     methods = opt_index(row, 7)
     return Model(
         id=model_id,
@@ -70,8 +70,8 @@ def _model(response: Any, i: int, tz: tzinfo | None) -> Model:
         pricing_summary=summary,
         pricing_url=pricing_url,
         docs_url=as_str(opt_index(card, 15)),
-        release_date=release.astimezone(tz).date().isoformat() if release else None,
-        knowledge_cutoff=cutoff.astimezone(tz).strftime("%Y-%m") if cutoff else None,
+        release_date=_local(opt_index(card, 19), tz, "%Y-%m-%d"),
+        knowledge_cutoff=_local(opt_index(card, 20), tz, "%Y-%m"),
     )
 
 
@@ -92,19 +92,29 @@ def _pricing(raw: Any) -> tuple[tuple[PricingRow, ...], str | None, str | None]:
         for group in groups if isinstance(groups, list) else []:
             for entry in group if isinstance(group, list) else []:
                 label = as_str(opt_index(entry, 4))
-                if label is None:
-                    continue
                 price = opt_index(entry, 2)
                 if price is None:
                     price = opt_index(entry, 5)
-                is_number = isinstance(price, (int, float)) and not isinstance(price, bool)
-                rows.append(PricingRow(direction, label, float(price) if is_number else None))
+                if label is None and price is None:
+                    continue
+                rows.append(PricingRow(direction, label, _price(price),
+                                       up_to_tokens=as_int(opt_index(entry, 0))))
     return tuple(rows), as_str(opt_index(raw, 3)), as_str(opt_index(raw, 4))
 
 
-def _epoch(value: Any) -> datetime | None:
+def _price(value: Any) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except OverflowError:
+        return None
+
+
+def _local(value: Any, tz: tzinfo | None, fmt: str) -> str | None:
+    """Epoch seconds (``["1788454800"]``) as a date in ``tz``; None if absent or out of range."""
     raw = opt_index(value, 0) if isinstance(value, list) else value
     try:
-        return datetime.fromtimestamp(int(raw), timezone.utc)
+        return datetime.fromtimestamp(int(raw), timezone.utc).astimezone(tz).strftime(fmt)
     except (TypeError, ValueError, OverflowError, OSError):
         return None

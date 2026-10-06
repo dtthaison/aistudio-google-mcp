@@ -14,8 +14,9 @@ CATEGORY_ORDER = (
 @dataclass(frozen=True)
 class PricingRow:
     direction: str  # "input" | "output"
-    label: str  # the unit is part of the label, e.g. "(*per second of output)"
+    label: str | None  # the unit is part of the label, e.g. "(*per second of output)"
     price_usd: float | None
+    up_to_tokens: int | None = None  # tiered prices: this row applies up to N prompt tokens
 
 
 @dataclass(frozen=True)

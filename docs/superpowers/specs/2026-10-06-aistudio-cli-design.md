@@ -310,12 +310,14 @@ The live catalog in AI Studio's model picker drives the CLI.
 `--category` values are the picker's filter chips: `featured`, `gemini`, `gemma`, `images`, `video`, `audio`,
 `music`, `live`, `agents`. Without `--category`, every model is listed, matching the picker's "All" chip.
 
-Each model is returned as:
+Each model is returned as (shape as implemented in M2: `display_name` rather than `name`,
+because `name` reads as the `models/<id>` resource name; the unit lives in the pricing label):
 
 ```json
-{"id": "lyria-3.5", "name": "Lyria 3.5", "categories": ["music"],
+{"id": "lyria-3.5", "display_name": "Lyria 3.5", "categories": ["audio", "music"],
  "badges": ["paid"], "description": "Our advanced, full-song generative model …",
- "pricing": [{"label": "Song generation", "unit": "request", "price": "$0.08"}],
+ "pricing": [{"direction": "output", "label": "Song generation (*Output per song)",
+              "price_usd": 0.08, "up_to_tokens": null}],
  "knowledge_cutoff": "2025-01", "release_date": "2026-09-04", "starred": false,
  "command": "generate music"}
 ```

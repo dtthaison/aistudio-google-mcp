@@ -14,7 +14,7 @@ from aistudio._app.models import (
     normalize_model_id,
 )
 from aistudio._transport.http import method_url
-from aistudio.exceptions import NotFoundError
+from aistudio.exceptions import NotFoundError, ValidationError
 from aistudio.paths import get_profile
 
 T0 = 1_800_000_000.0
@@ -106,3 +106,18 @@ def test_filter_models_without_filters_is_identity(captured):
 
     models = decode_models(captured("ListModels").response)
     assert filter_models(models) == models
+
+
+@respx.mock
+async def test_get_model_resolves_a_unique_prefix(aistudio_home, make_client, captured):
+    serve_catalog(captured)
+    profile = get_profile("default")
+    async with make_client() as client:
+        unique = await get_model(client, profile, "deep-research-max", now=lambda: T0)
+        exact = await get_model(client, profile, "gemini-3.1-flash-lite", now=lambda: T0)
+        with pytest.raises(ValidationError) as info:
+            await get_model(client, profile, "antigravity", now=lambda: T0)
+    assert unique["id"] == "deep-research-max-preview-04-2026"
+    assert exact["id"] == "gemini-3.1-flash-lite"
+    assert "antigravity-preview-05-2026" in info.value.message
+    assert "antigravity-preview-09-2026" in info.value.message
