@@ -210,7 +210,7 @@ is conservative on purpose.
 ## Export, chat gate, status, stars (`scripts/spikes/chat_export_discovery.py`)
 
 - **Export is plain HTTP.**
-  - `GetApplet([app_id])` returns the app; `[0][5]` is the latest snapshot time `[s, ns]`.
+  - `GetApplet([app_id])` returns the app; `[0][6]` is the latest snapshot time `[s, ns]`.
   - `GetCodeAssistantSnapshot([app_id, null, ts])` returns `[["model", summary, _, ts, [[path, sha256], …]]]`.
   - Each file is a plain `GET https://aistudio.google.com/_/upload/<app_id>/file/<sha256>` with
     session cookies only. The body is the raw file, and its SHA-256 equals the listed hash.

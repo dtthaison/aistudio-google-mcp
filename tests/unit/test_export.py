@@ -121,3 +121,55 @@ async def test_an_app_without_saved_code_is_not_found(make_client, tmp_path):
     async with make_client() as client:
         with pytest.raises(NotFoundError):
             await export_app(client, APP, tmp_path / "b")
+
+
+@pytest.mark.parametrize("bad", ["a\x00b", "C:x", "x" * 300])
+async def test_nul_colon_and_overlong_names_are_rejected(make_client, tmp_path, bad):
+    with respx.mock(assert_all_called=False) as router:
+        serve({**FILES, bad: b"evil"}, router=router)
+        async with make_client() as client:
+            with pytest.raises(ValidationError):
+                await export_app(client, APP, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("pair", [("README.md", "readme.md"), ("a", "a/b")])
+async def test_clashing_paths_are_rejected(make_client, tmp_path, pair):
+    with respx.mock(assert_all_called=False) as router:
+        serve({pair[0]: b"1", pair[1]: b"2"}, router=router)
+        async with make_client() as client:
+            with pytest.raises(ValidationError):
+                await export_app(client, APP, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+async def test_a_symlinked_folder_in_dest_cannot_redirect_writes(make_client, tmp_path):
+    outside, dest = tmp_path / "outside", tmp_path / "out"
+    outside.mkdir()
+    dest.mkdir()
+    (dest / "src").symlink_to(outside)
+    with respx.mock(assert_all_called=False) as router:
+        serve(FILES, router=router)
+        async with make_client() as client:
+            with pytest.raises(ValidationError):
+                await export_app(client, APP, dest, force=True)
+    assert list(outside.iterdir()) == []
+
+
+async def test_an_existing_file_where_a_folder_is_needed_writes_nothing(make_client, tmp_path):
+    dest = tmp_path / "out"
+    dest.mkdir()
+    (dest / "src").write_text("i am a file")
+    with respx.mock(assert_all_called=False) as router:
+        serve(FILES, router=router)
+        async with make_client() as client:
+            with pytest.raises(ValidationError):
+                await export_app(client, APP, dest, force=True)
+    assert sorted(p.name for p in dest.iterdir()) == ["src"]
+
+
+def test_malformed_snapshot_entries_are_schema_drift():
+    from aistudio.exceptions import SchemaDriftError
+
+    with pytest.raises(SchemaDriftError):
+        decode_snapshot_files([["model", "s", None, None, [["a", "h"], ["b"]]]])

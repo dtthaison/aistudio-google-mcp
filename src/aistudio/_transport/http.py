@@ -18,6 +18,7 @@ from aistudio.exceptions import (
     AuthError,
     ConnectFailedError,
     NetworkError,
+    ServerError,
     ValidationError,
     error_from_http,
     error_from_status,
@@ -88,8 +89,10 @@ class HttpTransport:
         except httpx.TransportError as exc:
             raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
 
-    async def call(self, method: str, body: Any, *, idempotent: bool = False) -> Any:
+    async def call(self, method: str, body: Any, *, idempotent: bool = False,
+                   attempts: int | None = None) -> Any:
         """Send one RPC (spec §9 retries, §4.4 step 1 auth reload)."""
+        max_attempts = attempts or self._max_attempts
         text = wire.encode(body)
         reloaded = False
         attempt = 0
@@ -98,12 +101,12 @@ class HttpTransport:
             try:
                 response = await self.post_raw(method_url(method), text)
             except ConnectFailedError:
-                if attempt >= self._max_attempts:
+                if attempt >= max_attempts:
                     raise
                 await self._sleep(self._delay(attempt))
                 continue
             except NetworkError:
-                if not idempotent or attempt >= self._max_attempts:
+                if not idempotent or attempt >= max_attempts:
                     raise
                 await self._sleep(self._delay(attempt))
                 continue
@@ -117,7 +120,7 @@ class HttpTransport:
                     # Another process (e.g. `aistudio login`) refreshed the cookies on disk.
                     self._session = fresh
                     continue
-            if idempotent and err.retriable and attempt < self._max_attempts:
+            if idempotent and err.retriable and attempt < max_attempts:
                 await self._sleep(self._delay(attempt))
                 continue
             raise err
@@ -141,8 +144,14 @@ class HttpTransport:
                     raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
                 await self._sleep(self._delay(attempt))
                 continue
-            if response.status_code < 400:
+            if 200 <= response.status_code < 300:
                 return response.content
+            if 300 <= response.status_code < 400:
+                target = urlparse(response.headers.get("location", "")).hostname or ""
+                if target.startswith("accounts."):
+                    raise AuthError("the session expired: the download was redirected to "
+                                    "Google sign-in", hint='run "aistudio login"')
+                raise ServerError(f"unexpected redirect to {target or 'an unknown host'}")
             err = error_from_http(response.status_code, response.text)
             if isinstance(err, AuthError) and not reloaded and self._reload_session is not None:
                 reloaded = True

@@ -308,7 +308,7 @@ accepts `--json`. Prompt IDs can be shortened to a unique prefix.
 | `login`, `auth check/refresh/logout` | §4 |
 | `browser start/status/stop` | §5.3 |
 | `profile list/create/switch/delete` | `delete` requires `-y` |
-| `use <prompt_id>`, `status` | `context.json` |
+| `status [--active]` | AI Studio and Gemini API incidents (revised: the prompt-context `use`/`status` pair was dropped together with `ask`, which needs an API key the user declined) |
 | `doctor [--wire]` | Checks setup. `--wire` runs read-only RPCs to detect schema drift. |
 
 ### 6.2 Model catalog

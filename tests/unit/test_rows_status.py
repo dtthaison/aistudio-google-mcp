@@ -46,3 +46,19 @@ def test_sparse_responses(response, count):
 def test_incident_without_id_is_schema_drift():
     with pytest.raises(SchemaDriftError):
         decode_incidents([[[[None, "t"]]]])
+
+
+async def test_listing_is_sorted_newest_first(make_client, captured):
+    import httpx
+    import respx
+
+    from aistudio._app.status import list_incidents
+    from aistudio._transport.http import method_url
+
+    with respx.mock:
+        respx.post(method_url("ListIncidentsHistory")).mock(return_value=httpx.Response(
+            200, text=captured("ListIncidentsHistory", 6).raw["response"]["body"]))
+        async with make_client() as client:
+            data = await list_incidents(client, limit=63)
+    times = [i["updated"] or "" for i in data["incidents"]]
+    assert times == sorted(times, reverse=True)

@@ -80,3 +80,44 @@ async def test_list_survives_a_preferences_failure(aistudio_home, make_client, c
     async with make_client() as client:
         data = await list_models(client, get_profile("default"), now=lambda: T0)
     assert data["count"] == 42 and data["models"][0]["starred"] is None
+
+
+@respx.mock
+async def test_starred_filter_reports_a_preferences_failure(aistudio_home, make_client, captured):
+    respx.post(method_url("ListModels")).mock(
+        return_value=httpx.Response(200, text=captured("ListModels").raw["response"]["body"]))
+    respx.post(method_url("GetUserPreferences")).mock(return_value=httpx.Response(404))
+    async with make_client() as client:
+        with pytest.raises(NotFoundError):
+            await list_models(client, get_profile("default"), starred_only=True, now=lambda: T0)
+
+
+@respx.mock
+async def test_reading_stars_for_a_listing_is_one_quick_attempt(aistudio_home, make_client,
+                                                                  captured):
+    respx.post(method_url("ListModels")).mock(
+        return_value=httpx.Response(200, text=captured("ListModels").raw["response"]["body"]))
+    prefs_route = respx.post(method_url("GetUserPreferences")).mock(
+        return_value=httpx.Response(503))
+    async with make_client() as client:
+        data = await list_models(client, get_profile("default"), now=lambda: T0)
+    assert data["models"][0]["starred"] is None and prefs_route.call_count == 1
+
+
+@respx.mock
+async def test_unknown_model_get_does_not_read_preferences(aistudio_home, make_client, captured):
+    respx.post(method_url("ListModels")).mock(
+        return_value=httpx.Response(200, text=captured("ListModels").raw["response"]["body"]))
+    async with make_client() as client:  # no GetUserPreferences route: a call would fail
+        with pytest.raises(NotFoundError):
+            await get_model(client, get_profile("default"), "no-such-model", now=lambda: T0)
+
+
+@respx.mock
+async def test_a_retired_model_can_still_be_unstarred(aistudio_home, make_client, captured):
+    update = serve(captured, [("retired-model", 1700000000), ("lyria-3.5", 1700000001)])
+    async with make_client() as client:
+        result = await star_model(client, get_profile("default"), "retired-model", starred=False)
+    assert result["changed"] is True
+    sent = wire.decode(update.calls.last.request.content.decode())
+    assert sent[0][6] == [["models/lyria-3.5", [1700000001, 0]]]

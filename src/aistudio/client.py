@@ -58,12 +58,13 @@ class AIStudioClient:
     async def __aexit__(self, *exc: object) -> None:
         await self._transport.aclose()
 
-    async def call(self, spec: RpcSpec, body: Any) -> Any:
+    async def call(self, spec: RpcSpec, body: Any, *, attempts: int | None = None) -> Any:
         if spec.transport is not Transport.HTTP:
             raise ValidationError(
                 f"{spec.method} needs the browser backend, which is not available yet"
             )
-        return await self._transport.call(spec.method, body, idempotent=spec.idempotent)
+        return await self._transport.call(spec.method, body, idempotent=spec.idempotent,
+                                          attempts=attempts)
 
     async def download(self, url: str) -> bytes:
         return await self._transport.download(url)
@@ -79,9 +80,10 @@ class _Models:
     async def list(self, *, tz: tzinfo | None = None) -> list[Model]:
         return decode_models(await self.fetch_raw(), tz=tz)
 
-    async def starred(self) -> list[tuple[str, tuple[int, int]]]:
+    async def starred(self, *, attempts: int | None = None
+                      ) -> list[tuple[str, tuple[int, int]]]:
         raw = await self._client.call(registry.GET_PREFERENCES,
-                                      preferences_params.get_preferences())
+                                      preferences_params.get_preferences(), attempts=attempts)
         return decode_starred(raw)
 
     async def set_starred(

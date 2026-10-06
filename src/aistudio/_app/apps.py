@@ -76,15 +76,48 @@ async def gallery_get(client: AIStudioClient, slug: str) -> dict[str, Any]:
 
 
 _PARALLEL_DOWNLOADS = 6
+_MAX_NAME_BYTES = 255
+_NOTHING_WRITTEN = "nothing was downloaded or written"
 
 
 def _safe_relative(path: str) -> PurePosixPath:
     rel = PurePosixPath(path)
-    if (not path or "\\" in path or rel.is_absolute() or any(p in ("..", "") for p in rel.parts)
-            or rel == PurePosixPath(".")):
+    if (not path or any(c in path for c in "\\\x00:") or rel.is_absolute()
+            or any(p in ("..", "") for p in rel.parts) or rel == PurePosixPath(".")
+            or any(len(p.encode()) > _MAX_NAME_BYTES for p in rel.parts)):
         raise ValidationError(f"unsafe file path in the app snapshot: {path!r}",
-                              hint="nothing was downloaded or written")
+                              hint=_NOTHING_WRITTEN)
     return rel
+
+
+def _preflight(targets: list[tuple[PurePosixPath, str]], dest: Path) -> None:
+    """Refuse anything that could write outside ``dest`` or fail half-way through writing."""
+    if dest.exists() and (dest.is_symlink() or not dest.is_dir()):
+        raise ValidationError(f"{dest} is not a folder", hint=_NOTHING_WRITTEN)
+    by_key: dict[str, str] = {}
+    folders: set[str] = set()
+    for rel, _ in targets:
+        key = str(rel).casefold()  # macOS and Windows file systems ignore case
+        if key in by_key:
+            raise ValidationError(f"the app snapshot has clashing paths {by_key[key]!r} and "
+                                  f"{str(rel)!r}", hint=_NOTHING_WRITTEN)
+        by_key[key] = str(rel)
+        folders.update(str(parent).casefold() for parent in rel.parents if parent.parts)
+    for key in by_key.keys() & folders:
+        raise ValidationError(f"{by_key[key]!r} is both a file and a folder in the app snapshot",
+                              hint=_NOTHING_WRITTEN)
+    root = dest.resolve()
+    for rel, _ in targets:
+        current = dest
+        for part in rel.parts[:-1]:
+            current = current / part
+            if current.is_symlink() or (current.exists() and not current.is_dir()):
+                raise ValidationError(f"{current} is a link or a file, not a folder",
+                                      hint=f"use an empty folder; {_NOTHING_WRITTEN}")
+        target = dest.joinpath(*rel.parts)
+        if target.is_symlink() or target.is_dir() or not target.resolve().is_relative_to(root):
+            raise ValidationError(f"refusing to write {target}",
+                                  hint=f"use an empty folder; {_NOTHING_WRITTEN}")
 
 
 async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
@@ -101,9 +134,10 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
         raise NotFoundError(f"app {app.id} has no saved code yet",
                             hint=f'build it first: aistudio app prompt {app.id[:8]} "…"')
     targets = [(_safe_relative(path), digest) for path, digest in files]
-    if dest.exists() and any(dest.iterdir()) and not force:
+    if dest.exists() and dest.is_dir() and any(dest.iterdir()) and not force:
         raise ValidationError(f"{dest} is not empty",
                               hint="choose an empty folder or pass --force to overwrite files")
+    _preflight(targets, dest)
     limit = asyncio.Semaphore(_PARALLEL_DOWNLOADS)
 
     async def fetch(rel: PurePosixPath, digest: str) -> bytes:
@@ -115,10 +149,14 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
         return data
 
     contents = await asyncio.gather(*(fetch(rel, digest) for rel, digest in targets))
-    for (rel, _), data in zip(targets, contents, strict=True):
-        target = dest.joinpath(*rel.parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+    try:
+        for (rel, _), data in zip(targets, contents, strict=True):
+            target = dest.joinpath(*rel.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    except OSError as exc:  # e.g. disk full; checks above rule out path problems
+        raise ValidationError(f"could not write the export: {exc}",
+                              hint=f"some files in {dest} may have been written") from exc
     return {
         "app_id": app.id,
         "title": app.title,

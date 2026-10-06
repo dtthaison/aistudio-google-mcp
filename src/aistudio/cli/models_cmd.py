@@ -11,7 +11,7 @@ from rich.table import Table
 from aistudio._app.models import get_model, list_models, star_model
 from aistudio._types.models import CATEGORY_ORDER
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import cells, emit, json_option, stdout
+from aistudio.cli.output import cells, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
@@ -67,7 +67,10 @@ def list_cmd(state: CliState, category: str | None, search: str | None, refresh:
             return await list_models(client, profile, category=category, search=search,
                                      refresh=refresh, starred_only=starred_only)
 
-    emit(asyncio.run(run()), json_output=json_output, render=_render_list)
+    data = asyncio.run(run())
+    if not json_output and data["models"] and data["models"][0].get("starred") is None:
+        stderr.print("note: could not read your starred models; ★ is not shown", markup=False)
+    emit(data, json_output=json_output, render=_render_list)
 
 
 @models.command("get")
@@ -109,5 +112,7 @@ def _star_command(name: str, starred: bool, help_text: str) -> None:
                  f"{verb} {d['model']}" + ("" if d["changed"] else " (no change)"), markup=False))
 
 
-_star_command("star", True, "Star a model, as in the AI Studio picker.")
-_star_command("unstar", False, "Remove a model's star.")
+_STAR_NOTE = ("Stars are saved to your account. An AI Studio tab that is open at the same "
+              "time can overwrite this change when you next toggle a star there.")
+_star_command("star", True, f"Star a model, as in the AI Studio picker. {_STAR_NOTE}")
+_star_command("unstar", False, f"Remove a model's star. {_STAR_NOTE}")

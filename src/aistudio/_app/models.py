@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from datetime import tzinfo
@@ -75,12 +76,20 @@ def filter_models(
     return out
 
 
+STARS_TIMEOUT_S = 5.0
+
+
 async def _starred_ids(client: AIStudioClient) -> set[str] | None:
-    """The starred model ids, or None when preferences cannot be read (lists still work)."""
+    """Starred ids for decorating a listing: one quick attempt, None if unreadable.
+
+    The catalog itself is cached; a slow or offline preferences read must not make a cached
+    `models list` slow, so this never retries.
+    """
     try:
-        return {model_id for model_id, _ in await client.models.starred()}
-    except AIStudioError:
+        starred = await asyncio.wait_for(client.models.starred(attempts=1), STARS_TIMEOUT_S)
+    except (AIStudioError, asyncio.TimeoutError):
         return None
+    return {model_id for model_id, _ in starred}
 
 
 def _with_star(model: Model, starred: set[str] | None) -> dict[str, Any]:
@@ -103,9 +112,11 @@ async def list_models(
         category=category,
         search=search,
     )
-    starred = await _starred_ids(client)
-    if starred_only:
-        models = [m for m in models if starred is not None and m.id in starred]
+    if starred_only:  # the filter's answer depends on the stars: report failures, never "none"
+        starred: set[str] | None = {m for m, _ in await client.models.starred()}
+        models = [m for m in models if m.id in starred]
+    else:
+        starred = await _starred_ids(client)
     return {"models": [_with_star(m, starred) for m in models], "count": len(models)}
 
 
@@ -120,14 +131,13 @@ async def get_model(
 ) -> dict[str, Any]:
     wanted = normalize_model_id(model_id)
     models = await load_catalog(client, profile, refresh=refresh, now=now, tz=tz)
-    starred = await _starred_ids(client)
     for model in models:
         if model.id == wanted:
-            return _with_star(model, starred)
+            return _with_star(model, await _starred_ids(client))
     # Spec §2.1: ids may be abbreviated to a unique prefix.
     matches = [m for m in models if m.id.startswith(wanted)]
     if len(matches) == 1:
-        return _with_star(matches[0], starred)
+        return _with_star(matches[0], await _starred_ids(client))
     if matches:
         names = ", ".join(sorted(m.id for m in matches)[:10])
         raise ValidationError(f"{wanted!r} matches several models: {names}",
@@ -143,13 +153,20 @@ async def star_model(
     starred: bool = True,
     now: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
-    """Star or unstar a picker model; the whole list is replaced (spec §6.2, findings H10)."""
+    """Star or unstar a picker model; the whole list is replaced (spec §6.2, findings H10).
+
+    The list is read, changed and written back: a change made at the same moment elsewhere
+    (e.g. an open AI Studio tab toggling a star) can overwrite this one.
+    """
     wanted = normalize_model_id(model_id)
-    if wanted not in {m.id for m in await load_catalog(client, profile)}:
-        raise NotFoundError(f"no model {wanted!r} in the catalog",
-                            hint='see "aistudio models list"')
     current = await client.models.starred()
     is_starred = any(m == wanted for m, _ in current)
+    # A starred model that left the catalog (retired) can still be unstarred.
+    if not (is_starred and not starred) and wanted not in {
+        m.id for m in await load_catalog(client, profile)
+    }:
+        raise NotFoundError(f"no model {wanted!r} in the catalog",
+                            hint='see "aistudio models list"')
     if is_starred == starred:
         return {"model": wanted, "starred": starred, "changed": False}
     if starred:

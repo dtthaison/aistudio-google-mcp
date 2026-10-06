@@ -147,8 +147,10 @@ def decode_snapshot_files(response: Any) -> list[tuple[str, str]]:
     """GetCodeAssistantSnapshot ``[["model", summary, _, ts, [[path, sha256], ...]]]``."""
     entries = opt_index(response, 0, 4)
     files: list[tuple[str, str]] = []
-    for entry in entries if isinstance(entries, list) else []:
+    for i, entry in enumerate(entries if isinstance(entries, list) else []):
         path, digest = opt_index(entry, 0), opt_index(entry, 1)
-        if isinstance(path, str) and isinstance(digest, str):
-            files.append((path, digest))
+        if not isinstance(path, str) or not isinstance(digest, str):
+            # Never let an export "succeed" with files silently missing.
+            raise SchemaDriftError("GetCodeAssistantSnapshot", (0, 4, i), "a [path, sha256] pair")
+        files.append((path, digest))
     return files

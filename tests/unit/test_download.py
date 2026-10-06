@@ -49,3 +49,13 @@ async def test_download_refuses_other_hosts():
     async with HttpTransport(session()) as transport:
         with pytest.raises(ValidationError):
             await transport.download("https://evil.example.com/x")
+
+
+@respx.mock
+async def test_a_redirect_to_sign_in_is_an_auth_error():
+    respx.get(URL).mock(return_value=httpx.Response(
+        302, headers={"location": "https://accounts.google.com/ServiceLogin"}))
+    async with HttpTransport(session(), sleep=no_sleep) as transport:
+        with pytest.raises(AuthError) as info:
+            await transport.download(URL)
+    assert info.value.hint == 'run "aistudio login"'

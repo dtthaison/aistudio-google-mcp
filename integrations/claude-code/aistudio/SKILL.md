@@ -35,8 +35,6 @@ apps.
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
 | Recently opened items | `aistudio app recent --json` |
 | Service incidents | `aistudio status --json [--active]` |
-| Star / unstar a model | `aistudio models star <id> --json`, `aistudio models unstar <id> --json`; `models list --starred` |
-| Download an app's code | `aistudio app export <app-id-or-prefix> <dir> --json` (refuses a non-empty dir unless `--force`) |
 | Build gallery / templates | `aistudio gallery list --json [--group showcase\|template] [--tag T] [--search T]`, `aistudio gallery get <slug-or-prefix> --json` |
 
 JSON notes:
@@ -44,6 +42,19 @@ JSON notes:
   holds free-text pricing.
 - `command` says which CLI command runs the model.
 - `models list` is cached for 1 hour; add `--refresh` for fresh data.
+
+## Commands that change things (only when the user asks)
+
+| Action | Command |
+|---|---|
+| Star / unstar a model (saved to the account) | `aistudio models star <id> --json`, `aistudio models unstar <id> --json` |
+| Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
+
+- `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
+  not be read. Say "unknown", not "not starred".
+- An AI Studio tab open at the same time can overwrite a star change.
+- `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
+  without the user's OK.
 
 ## Not available yet
 
@@ -72,5 +83,6 @@ aistudio app prompt <app-id-or-prefix> "<change>" --json
 Get the user's explicit OK before:
 - `aistudio auth logout` and `aistudio profile delete`, which delete credentials;
 - any `aistudio dev …` command, which opens a browser and records traffic.
+- `--force` on `aistudio app export`, which overwrites files in the target folder.
 
 `--profile NAME` selects another signed-in Google account (`aistudio profile list --json`).

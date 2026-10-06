@@ -30,8 +30,10 @@ async def test_live_status_star_roundtrip_and_export(profile, tmp_path):
         before = {m for m, _ in await client.models.starred()}
         target = next(m.id for m in await client.models.list() if m.id not in before)
         assert (await star_model(client, profile, target))["changed"]
-        assert target in {m for m, _ in await client.models.starred()}
-        assert (await star_model(client, profile, target, starred=False))["changed"]
+        try:
+            assert target in {m for m, _ in await client.models.starred()}
+        finally:  # always restore the user's stars
+            assert (await star_model(client, profile, target, starred=False))["changed"]
         assert {m for m, _ in await client.models.starred()} == before
         apps = [a for a in await client.apps.list() if a.storage == "applet"]
         for app in apps:
