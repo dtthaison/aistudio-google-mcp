@@ -268,6 +268,20 @@ The `transport` values start out as hypotheses and are fixed empirically by `dev
 
 ### 5.4 BotGuard
 
+> **Revised after M1 follow-up (docs/wire/findings.md):**
+>
+> - **The token is content-bound.** A swapped body with a fresh token gets 403; the original
+>   bytes get 200. So `RouteRewriteStrategy` is disproven.
+> - **Headless Chrome is refused.**
+> - **Generation therefore uses page driving (`PageDriver`).** A visible Chrome window, at a
+>   1600×1000 viewport, fills the page's own controls and triggers Run. The response is captured
+>   from the network, and the page mints the token for exactly that request.
+> - **Reading pages works headless.** For example, listing voices.
+> - **`SnapshotCallStrategy` remains unexplored.**
+>
+> The original text below is kept for history.
+
+
 The interface is `BotGuardStrategy.send(page, spec, body) -> raw response`. There are two
 implementations, and M1 decides which is the default:
 
@@ -394,7 +408,8 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 | Command | Behaviour | JSON |
 |---|---|---|
 | `generate image "…" [-m] [--count N] [--aspect R] [--image IN ...] -o DIR` | synchronous. Each `--image` (repeatable) supplies an input image to edit or compose. | `{files: [{path, mime_type}], model}` |
-| `generate speech "…" [-m] [--voice V \| --speakers "A=Kore,B=Puck"] -o FILE.wav` | synchronous | `{files: [...], model}` |
+| `generate speech "…" [--text-file F] [-m MODEL] [--voice V] [--style TEXT] [-o FILE.wav] [--force] [--headless]` | synchronous; page-driven in a visible window (§5.4). Expression tags such as `<laugh>` go inline in the text. `--speakers` (multi-speaker) comes later. | `{files: [{path, mime_type, seconds}], model, voice, style}` |
+| `voices list [--search TEXT]` | reads the speech page's voice panel (headless) | `{voices: [...], count}` |
 | `transcribe AUDIO [-m] [--diarize] [--timestamps] [-o FILE.txt]` | synchronous | `{text, segments?: [{start, end, speaker?, text}], model}` |
 | `generate music "…" [-m] [--lyrics F \| --instrumental] [--duration S] [--no-wait] [-o FILE]` | long-running **[verify]**, same wait and download rules as video | `--no-wait`: `{job_id, status}`. Otherwise `{job_id, status, files?}` |
 | `generate video "…" [-m] [--aspect R] [--duration S] [--image FILE] [--no-wait] [-o FILE]` | long-running. By default it waits, then downloads to `-o` if given. `--no-wait` returns immediately. | `--no-wait`: `{job_id, status}`. Otherwise `{job_id, status, files?}` |

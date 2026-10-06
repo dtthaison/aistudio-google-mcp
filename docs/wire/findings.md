@@ -150,3 +150,25 @@ is conservative on purpose.
   - Model: the button naming the current model opens the picker with a search box.
   - Run: "Run" (⌘↵).
   - Also present: "Get code", "Open voice settings", "Model settings".
+
+### TTS end-to-end drive (`scripts/spikes/tts_drive.py`, `tts_voices.py`)
+
+- **Headed Chrome works.** It drove model → voice → style → text and pressed Run (⌘↵ in
+  "Speech block text"). The outgoing request carried exactly those choices (`[0]` model,
+  `[3][15][0][0][0]` voice, part `[40][1]` style, text with `<laugh>`). Result: **200**, 4.64 s
+  of audio.
+- **Headless Chrome is refused for generation.** The identical request got **403**: BotGuard
+  rejects headless. Reading the page, including the voice panel, works headless.
+- **The viewport must be desktop-sized** (1600×1000). Below that the run-settings panel holding
+  the model button is hidden.
+- **Run by shortcut.** Clicking "Run" can be blocked by a leftover overlay. Pressing ⌘↵ (Ctrl+↵ off
+  macOS) in the text box is reliable.
+- **Voice panel behaviour:**
+  - After clicking a voice the panel stays open; Escape closes it.
+  - The speaker button then reads "Speaker 1 - <voice>".
+  - Voice names come from the "Favorite <name>" / "Remove from favorites <name>" buttons.
+  - 10 "View all N" groups each open a full list, with a back button.
+  - Examples: Tova, Bodi, Lumi, Sola, Koda, Nika, Tavi, Kira, Ludo, Mako, Fola, Zephyr,
+    Sulafat, Sadaltager, Varo.
+- **Model picker.** The run-settings button label contains the current model id. The picker has a
+  "Search" box. An option's label contains its model id.
