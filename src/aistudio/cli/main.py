@@ -7,7 +7,15 @@ import logging
 import click
 
 from aistudio import __version__
-from aistudio.cli import chat_cmd, dev_cmd, models_cmd, profile_cmd, prompt_cmd, session_cmd
+from aistudio.cli import (
+    app_cmd,
+    chat_cmd,
+    dev_cmd,
+    models_cmd,
+    profile_cmd,
+    prompt_cmd,
+    session_cmd,
+)
 from aistudio.cli.state import CliState
 
 
@@ -39,6 +47,8 @@ cli.add_command(dev_cmd.dev)
 cli.add_command(models_cmd.models)
 cli.add_command(prompt_cmd.prompt)
 cli.add_command(chat_cmd.count_tokens)
+cli.add_command(app_cmd.app)
+cli.add_command(app_cmd.gallery)
 
 
 def main() -> None:

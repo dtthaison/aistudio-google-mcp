@@ -7,14 +7,17 @@ from typing import Any
 
 from aistudio._auth.session import Session
 from aistudio._rpc import registry
+from aistudio._rpc.params import apps as apps_params
 from aistudio._rpc.params import generate as generate_params
 from aistudio._rpc.params import models as models_params
 from aistudio._rpc.params import prompts as prompts_params
 from aistudio._rpc.registry import RpcSpec, Transport
+from aistudio._rpc.rows.apps import decode_apps, decode_gallery, decode_recent, decode_runs
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
 from aistudio._rpc.rows.prompts import decode_prompt_list
 from aistudio._transport.http import HttpTransport
+from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem
 from aistudio._types.chat import TokenCount
 from aistudio._types.models import Model
 from aistudio._types.prompts import PromptSummary
@@ -28,6 +31,8 @@ class AIStudioClient:
         self.models = _Models(self)
         self.prompts = _Prompts(self)
         self.chat = _Chat(self)
+        self.apps = _Apps(self)
+        self.gallery = _Gallery(self)
 
     @classmethod
     def from_profile(cls, profile: Profile) -> AIStudioClient:
@@ -77,3 +82,31 @@ class _Chat:
             registry.COUNT_TOKENS, generate_params.count_tokens(model_id, text)
         )
         return decode_token_count(model_id, raw)
+
+
+class _Apps:
+    def __init__(self, client: AIStudioClient) -> None:
+        self._client = client
+
+    async def list(self, page_size: int = 1000) -> list[App]:
+        raw = await self._client.call(registry.LIST_APPLETS, apps_params.list_apps(page_size))
+        return decode_apps(raw)
+
+    async def recent(self) -> list[RecentItem]:
+        raw = await self._client.call(registry.LIST_RECENT_APPLETS,
+                                      apps_params.list_recent_apps())
+        return decode_recent(raw)
+
+    async def runs(self, app_id: str) -> list[AppRun]:
+        raw = await self._client.call(registry.LIST_APPLET_TRAJECTORIES,
+                                      apps_params.list_app_runs(app_id))
+        return decode_runs(raw)
+
+
+class _Gallery:
+    def __init__(self, client: AIStudioClient) -> None:
+        self._client = client
+
+    async def list(self) -> list[GalleryApp]:
+        raw = await self._client.call(registry.LIST_BUNDLED_APPLETS, apps_params.list_gallery())
+        return decode_gallery(raw)
