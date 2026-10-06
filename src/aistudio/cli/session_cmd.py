@@ -7,12 +7,13 @@ from typing import Any
 
 import click
 
-from aistudio._app.auth import auth_status
+from aistudio._app.auth import auth_status, http_probe
 from aistudio._auth.login import run_login
 from aistudio._auth.storage import delete_credentials
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import confirm_or_fail, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
+from aistudio.client import AIStudioClient
 
 
 @click.group()
@@ -33,12 +34,29 @@ def _render_check(data: dict[str, Any]) -> None:
 
 
 @auth.command("check")
+@click.option("--test", "probe", is_flag=True,
+              help="Also make one real ListModels call over plain HTTP.")
 @json_option
 @click.pass_obj
 @handle_errors
-def check(state: CliState, json_output: bool) -> None:
-    """Check the stored credentials of the active profile (no network)."""
-    data = auth_status(state.profile())
+def check(state: CliState, probe: bool, json_output: bool) -> None:
+    """Check the stored credentials of the active profile."""
+    profile = state.profile()
+    data = auth_status(profile)
+    if probe:
+        data["checks"]["http_probe"] = False
+        if data["status"] == "ok":
+
+            async def run() -> dict[str, Any]:
+                async with AIStudioClient.from_profile(profile) as client:
+                    return await http_probe(client)
+
+            data["probe"] = asyncio.run(run())
+            data["checks"]["http_probe"] = data["probe"]["ok"]
+            if not data["probe"]["ok"]:
+                data["status"] = "error"
+                if data["probe"]["code"] == "AUTH_ERROR":
+                    data["hint"] = 'run "aistudio login"'
     emit(data, json_output=json_output, render=_render_check)
     if data["status"] != "ok":
         raise SystemExit(1)

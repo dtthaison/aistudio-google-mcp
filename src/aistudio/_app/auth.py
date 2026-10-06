@@ -11,7 +11,8 @@ from aistudio._auth.storage import (
     load_state,
     missing_cookies,
 )
-from aistudio.exceptions import AuthError
+from aistudio.client import AIStudioClient
+from aistudio.exceptions import AIStudioError, AuthError
 from aistudio.paths import Profile
 
 _LOGIN_HINT = 'run "aistudio login"'
@@ -46,3 +47,12 @@ def auth_status(profile: Profile) -> dict[str, Any]:
     if missing:
         result["hint"] = _LOGIN_HINT
     return result
+
+
+async def http_probe(client: AIStudioClient) -> dict[str, Any]:
+    """One real ListModels call over plain HTTP: proves the cookies and signer work."""
+    try:
+        models = await client.models.list()
+    except AIStudioError as exc:
+        return {"ok": False, "code": exc.code, "message": exc.message}
+    return {"ok": True, "models": len(models)}
