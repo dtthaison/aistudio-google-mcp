@@ -1,0 +1,45 @@
+[project]
+name = "aistudio-py"
+version = "0.1.0"
+description = "Unofficial CLI and MCP server that automates the Google AI Studio web app"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.2",
+  "httpx>=0.27",
+  "rich>=13",
+  "filelock>=3.13",
+]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.45"]
+dev = [
+  "playwright>=1.45",
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "respx>=0.21",
+  "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aistudio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-m 'not live and not live_slow' --import-mode=importlib"
+markers = [
+  "live: hits the real AI Studio service (opt-in)",
+  "live_slow: slow live tests such as video and music (opt-in)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
