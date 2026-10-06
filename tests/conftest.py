@@ -108,6 +108,9 @@ class FakeUi:
     async def press_first(self, selector, key):
         self.ops.append(("press", selector, key))
 
+    async def wait_enabled(self, role, name, *, timeout_s=30.0):
+        self.ops.append(("wait_enabled", role, name))
+
     @contextlib.asynccontextmanager
     async def responses(self):
         yield self

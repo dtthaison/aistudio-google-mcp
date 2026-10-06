@@ -43,6 +43,8 @@ class Ui(Protocol):
 
     async def press_first(self, selector: str, key: str) -> None: ...
 
+    async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None: ...
+
     def responses(self) -> contextlib.AbstractAsyncContextManager[ResponseLog]: ...
 
 
@@ -89,6 +91,22 @@ class PlaywrightUi:
 
     async def press_first(self, selector: str, key: str) -> None:
         await (await self._first_visible(selector, 5.0)).press(key)
+
+    async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None:
+        """Wait until a visible control is enabled (AI Studio disables Send while loading)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while True:
+            for element in await self._page.get_by_role(role, name=name, exact=True).all():
+                if await element.is_visible() and await element.is_enabled():
+                    return
+            if loop.time() >= deadline:
+                raise BrowserError(
+                    f"AI Studio's {name!r} {role} did not become available "
+                    f"within {timeout_s:.0f}s",
+                    hint="re-run; if it persists, the AI Studio UI changed",
+                )
+            await asyncio.sleep(0.25)
 
     @contextlib.asynccontextmanager
     async def responses(self) -> AsyncIterator[ResponseLog]:

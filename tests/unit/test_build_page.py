@@ -85,3 +85,11 @@ async def test_an_undecodable_stream_is_skipped(fake_ui, captured):
     })
     outcome = await BuildPage(ui).prompt(APP, "x", timeout_s=60)
     assert outcome.progress.done
+
+
+async def test_prompt_waits_for_send_to_be_enabled_before_submitting(fake_ui, captured):
+    ui = fake_ui({"CodeAssistantOffline": started(captured, 3),
+                  "StreamCodeAssistantOfflineGeneration": [stream(captured, run_id=UPDATE_RUN)]})
+    await BuildPage(ui).prompt(APP, "make it blue", timeout_s=60)
+    assert ui.ops == [("goto", app_url(APP)), ("fill", PROMPT_BOX, "make it blue"),
+                      ("wait_enabled", "button", "Send"), ("press", PROMPT_BOX, RUN_SHORTCUT)]

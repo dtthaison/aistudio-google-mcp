@@ -150,3 +150,34 @@ async def test_open_browser_requires_a_browser_session(aistudio_home):
         async with open_browser(get_profile("default"), playwright_factory=lambda: None):
             pass
     assert info.value.hint == 'run "aistudio login" first'
+
+
+class Button:
+    def __init__(self, states):
+        self._states = list(states)
+
+    async def is_visible(self):
+        return True
+
+    async def is_enabled(self):
+        return self._states.pop(0) if len(self._states) > 1 else self._states[0]
+
+
+class RolePage(Page):
+    def __init__(self, button):
+        super().__init__()
+        self._button = button
+
+    def get_by_role(self, role, name=None, exact=False):
+        return Locator([self._button])
+
+
+async def test_wait_enabled_returns_once_the_button_enables():
+    await PlaywrightUi(RolePage(Button([False, False, True]))).wait_enabled(
+        "button", "Send", timeout_s=2)
+
+
+async def test_wait_enabled_times_out_with_a_browser_error():
+    with pytest.raises(BrowserError) as info:
+        await PlaywrightUi(RolePage(Button([False]))).wait_enabled("button", "Send", timeout_s=0.1)
+    assert "'Send'" in info.value.message

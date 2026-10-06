@@ -20,6 +20,7 @@ from aistudio.exceptions import BotGuardError, BrowserError
 
 APPS_URL = "https://aistudio.google.com/apps"
 PROMPT_BOX = "textarea"
+SEND_BUTTON = "Send"  # the app editor's submit control
 START_TIMEOUT_S = 60.0
 CREATE = "CreateApplet"
 START = "CodeAssistantOffline"
@@ -52,11 +53,15 @@ class BuildPage:
     async def prompt(self, app_id: str, text: str, *, timeout_s: float) -> BuildOutcome:
         async with self._ui.responses() as log:
             await self._ui.goto(app_url(app_id))
-            await self._submit(text)
+            # The editor disables Send for ~1s while it loads the app; ⌘↵ pressed earlier is
+            # silently ignored (docs/wire/findings.md). The /apps create page has no Send button.
+            await self._submit(text, wait_for=SEND_BUTTON)
             return await self._follow(log, timeout_s)
 
-    async def _submit(self, text: str) -> None:
+    async def _submit(self, text: str, *, wait_for: str | None = None) -> None:
         await self._ui.fill_first(PROMPT_BOX, text)
+        if wait_for:
+            await self._ui.wait_enabled("button", wait_for)
         await self._ui.press_first(PROMPT_BOX, RUN_SHORTCUT)
 
     async def _expect(self, log: ResponseLog, method: str) -> CapturedResponse:

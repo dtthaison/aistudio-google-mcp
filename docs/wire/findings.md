@@ -198,3 +198,11 @@ is conservative on purpose.
   - Cloud console calls carry project and billing details.
 
   The redactor also decodes base64 and redacts any credential found inside.
+- **Editor Send is disabled while loading.** On a freshly opened `/apps/<id>`:
+  - The chat box ("Make changes, add new features, ask for anything") appears about 6 s after
+    navigation, once `ProvisionAndInitializeApplet` and `LoadCodeAssistantInteractionHistory`
+    have run.
+  - Its **Send** button stays `aria-disabled=true` for about 1 s more.
+  - ⌘↵ pressed in that window is silently ignored; the text stays in the box and nothing is sent.
+  - `app prompt` therefore waits for Send to be enabled before submitting.
+  - The `/apps` create page has no Send button, and an immediate ⌘↵ works there.
