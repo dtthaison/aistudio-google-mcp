@@ -53,3 +53,12 @@ def test_build_reads_refuse_the_browser_backend(logged_in_profile):
     result = CliRunner().invoke(cli, ["--backend", "browser", "app", "list", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["code"] == "VALIDATION_ERROR"
+
+
+@respx.mock
+def test_gallery_get_human_output_keeps_bracketed_slug(logged_in_profile, captured):
+    logged_in_profile()
+    serve(captured, "ListBundledApplets", 3)
+    result = CliRunner().invoke(cli, ["gallery", "get", "store"])
+    assert result.exit_code == 0, result.output
+    assert "[store-locator]" in result.stdout

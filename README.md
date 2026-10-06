@@ -23,6 +23,9 @@ uv run aistudio models list --category music
 uv run aistudio models get lyria-3.5
 uv run aistudio prompt list --type chat
 uv run aistudio count-tokens "hello world" -m gemini-flash-latest
+uv run aistudio app list                    # your Build apps
+uv run aistudio app get <id-prefix>         # one app and its builder runs
+uv run aistudio gallery list --tag google-maps
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 

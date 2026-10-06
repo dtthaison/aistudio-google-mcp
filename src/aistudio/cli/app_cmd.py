@@ -68,9 +68,9 @@ def app_get(state: CliState, app_id: str, json_output: bool) -> None:
     data = _run(state, lambda c: get_app(c, app_id))
 
     def render(d: dict[str, Any]) -> None:
-        stdout.print(f"{d['title'] or '(untitled)'}  [{d['id']}]  ({d['storage']})")
+        stdout.print(f"{d['title'] or '(untitled)'}  [{d['id']}]  ({d['storage']})", markup=False)
         if d["description"]:
-            stdout.print(d["description"])
+            stdout.print(d["description"], markup=False)
         stdout.print(f"Prompt: {d['prompt'] or ''}", markup=False)
         stdout.print(f"Created: {d['created'] or '-'}  Updated: {d['updated'] or '-'}")
         for run in d["runs"]:
@@ -123,9 +123,10 @@ def gallery_get_cmd(state: CliState, slug: str, json_output: bool) -> None:
     data = _run(state, lambda c: gallery_get(c, slug))
 
     def render(d: dict[str, Any]) -> None:
-        stdout.print(f"{d['title'] or d['slug']}  [{d['slug']}]  ({d['group'] or '-'})")
+        stdout.print(f"{d['title'] or d['slug']}  [{d['slug']}]  ({d['group'] or '-'})",
+                     markup=False)
         if d["description"]:
-            stdout.print(d["description"])
+            stdout.print(d["description"], markup=False)
         if d["apis"]:
             stdout.print(f"APIs: {', '.join(d['apis'])}")
         for label, url in (("Video", d["video_url"]), ("Image", d["image_url"])):
