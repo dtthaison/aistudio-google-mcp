@@ -106,7 +106,9 @@ async def run_capture(
     factory = playwright_factory or default_playwright_factory()
     async with factory() as playwright:
         context = await launch_persistent(playwright, profile, browser=browser, headless=False)
-        closed = asyncio.Event()
+        done = asyncio.Event()
+        context_closed = False
+        open_pages: set[Any] = set()
         pending: set[asyncio.Task[Path | None]] = set()
 
         def on_finished(request: Any) -> None:
@@ -114,14 +116,35 @@ async def run_capture(
             pending.add(task)
             task.add_done_callback(pending.discard)
 
-        context.on("close", lambda _context: closed.set())
+        def on_context_close(_context: Any) -> None:
+            nonlocal context_closed
+            context_closed = True
+            done.set()
+
+        def track(page: Any) -> None:
+            def on_page_close(_page: Any) -> None:
+                open_pages.discard(page)
+                # On macOS Chrome keeps running after its last window closes, so the
+                # context never emits "close"; the last page closing means the user is done.
+                if not open_pages:
+                    done.set()
+
+            if page not in open_pages:
+                open_pages.add(page)
+                page.on("close", on_page_close)
+
+        context.on("close", on_context_close)
+        context.on("page", track)
         context.on("requestfinished", on_finished)
+        for existing in context.pages:
+            track(existing)
         page = context.pages[0] if context.pages else await context.new_page()
+        track(page)
         await page.goto(APP_URL, wait_until="commit")
         try:
-            await closed.wait()
+            await done.wait()
         finally:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-            if not closed.is_set():
+            if not context_closed:
                 await context.close()

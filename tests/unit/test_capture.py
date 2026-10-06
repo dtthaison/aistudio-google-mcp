@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -96,3 +97,62 @@ async def test_run_capture_requires_login(aistudio_home, tmp_path):
     with pytest.raises(BrowserError) as info:
         await run_capture(get_profile("default"), recorder, playwright_factory=lambda: None)
     assert info.value.hint == 'run "aistudio login" first'
+
+
+class FakeWindow:
+    """A page whose window the user closes right after the app loads."""
+
+    def __init__(self):
+        self.handlers = {}
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def goto(self, url, wait_until=None):
+        asyncio.get_running_loop().call_soon(self._user_closes_window)
+
+    def _user_closes_window(self):
+        for handler in self.handlers.get("close", []):
+            handler(self)
+
+
+class BrowserThatStaysRunning:
+    """macOS Chrome: closing the last window does not end the browser, so no context 'close'."""
+
+    def __init__(self):
+        self.pages = [FakeWindow()]
+        self.handlers = {}
+        self.closed = False
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
+
+    async def new_page(self):
+        return self.pages[0]
+
+    async def close(self):
+        self.closed = True
+
+
+async def test_capture_ends_when_last_window_closes_but_browser_keeps_running(aistudio_home,
+                                                                              tmp_path):
+    profile = get_profile("default").ensure()
+    profile.chrome_dir.mkdir()
+    context = BrowserThatStaysRunning()
+
+    class Chromium:
+        async def launch_persistent_context(self, user_data_dir, **kwargs):
+            return context
+
+    class Playwright:
+        chromium = Chromium()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    recorder = CaptureRecorder(FixtureWriter(tmp_path))
+    await asyncio.wait_for(run_capture(profile, recorder, playwright_factory=Playwright), 2)
+    assert context.closed
