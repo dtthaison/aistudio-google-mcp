@@ -1,0 +1,58 @@
+{
+  "method": "other_feedback_pa_clients6_google_com_static",
+  "url": "https://feedback-pa.clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.gh7qIZtzO5w.O%2Fd%3D1%2Frs%3DAHpOoo84YKT1RVy0T6hcXi5rH3LooB1WCw%2Fm%3D__features__",
+  "http_method": "GET",
+  "request": {
+    "headers": {
+      ":authority": "feedback-pa.clients6.google.com",
+      ":method": "GET",
+      ":path": "/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.gh7qIZtzO5w.O%2Fd%3D1%2Frs%3DAHpOoo84YKT1RVy0T6hcXi5rH3LooB1WCw%2Fm%3D__features__",
+      ":scheme": "https",
+      "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "accept-language": "en-US,en;q=0.9",
+      "priority": "u=0, i",
+      "referer": "https://aistudio.google.com/",
+      "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+      "sec-ch-ua-arch": "\"arm\"",
+      "sec-ch-ua-bitness": "\"64\"",
+      "sec-ch-ua-form-factors": "\"Desktop\"",
+      "sec-ch-ua-full-version": "\"154.0.8037.98\"",
+      "sec-ch-ua-full-version-list": "\"Chromium\";v=\"154.0.8037.98\", \"Google Chrome\";v=\"154.0.8037.98\", \"Not A(Brand\";v=\"99.0.0.0\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-model": "\"\"",
+      "sec-ch-ua-platform": "\"macOS\"",
+      "sec-ch-ua-platform-version": "\"26.6.2\"",
+      "sec-ch-ua-wow64": "?0",
+      "sec-fetch-dest": "iframe",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "same-site",
+      "sec-fetch-user": "?1",
+      "upgrade-insecure-requests": "1",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "x-browser-channel": "stable",
+      "x-browser-copyright": "Copyright 2026 Google LLC. All Rights Reserved.",
+      "x-browser-validation": "tpBllyXzCUJIItbiIO0h75y/ZDs=",
+      "x-browser-year": "2026"
+    },
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "content-encoding": "gzip",
+      "content-length": "286",
+      "content-security-policy": "object-src 'none';base-uri 'self';script-src 'nonce-dHzdwwCR8wIaYjwZ_uEciA' 'strict-dynamic' 'report-sample' 'unsafe-eval' 'unsafe-inline' https: http:;report-uri https://csp.withgoogle.com/csp/xd3cpp/2, require-trusted-types-for 'script'",
+      "content-type": "text/html; charset=UTF-8",
+      "cross-origin-embedder-policy": "require-corp; report-to=\"gapi\"",
+      "cross-origin-resource-policy": "cross-origin",
+      "date": "Tue, 06 Oct 2026 05:05:30 GMT",
+      "report-to": "{\"group\":\"gapi\",\"max_age\":2592000,\"endpoints\":[{\"url\":\"https://csp.withgoogle.com/csp/report-to/gapi\"}]}",
+      "server": "ESF",
+      "x-content-type-options": "nosniff",
+      "x-xss-protection": "0"
+    },
+    "body": "<!DOCTYPE html>\n<html>\n<head>\n<title></title>\n<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\" />\n<script type=\"text/javascript\" nonce=\"dHzdwwCR8wIaYjwZ_uEciA\">\n  window['startup'] = function() {\n    googleapis.server.init();\n  };\n</script>\n<script type=\"text/javascript\"\n  src=\"https://apis.google.com/js/googleapis.proxy.js?onload=startup\" async\n  defer nonce=\"dHzdwwCR8wIaYjwZ_uEciA\"></script>\n</head>\n<body>\n</body>\n</html>\n"
+  }
+}
