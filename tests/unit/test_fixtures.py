@@ -20,8 +20,11 @@ def record(method):
 def test_rpc_method_name():
     assert rpc_method_name(RPC + "ListPrompts") == "ListPrompts"
     assert rpc_method_name(RPC + "ListPrompts?alt=json") == "ListPrompts"
-    assert rpc_method_name("https://content-push.googleapis.com/upload/v1") == (
-        "other_content_push_googleapis_com_upload_v1"
+    assert rpc_method_name("https://content-push.googleapis.com/upload/v1/abc") == (
+        "other_content_push_googleapis_com_upload"
+    )
+    assert rpc_method_name("https://x.googleapis.com/upload?next=/$rpc/ListModels") == (
+        "other_x_googleapis_com_upload"
     )
 
 

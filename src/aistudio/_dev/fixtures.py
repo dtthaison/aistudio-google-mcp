@@ -15,7 +15,9 @@ def rpc_method_name(url: str) -> str:
     parsed = urlparse(url)
     if "/$rpc/" in parsed.path:
         return parsed.path.rsplit("/", 1)[-1]
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", f"{parsed.hostname}{parsed.path}").strip("_")
+    # Only host + first path segment: later segments can hold IDs or emails.
+    first = parsed.path.strip("/").split("/", 1)[0]
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", f"{parsed.hostname}_{first}").strip("_")
     return f"other_{slug}"[:120]
 
 

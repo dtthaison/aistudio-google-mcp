@@ -89,6 +89,8 @@ def error_from_status(status: int, message: str) -> AIStudioError:
     """Map a gRPC status from an error envelope to an exception (spec §9)."""
     quota = "quota" in message.lower()
     if status == 3:
+        if "api key" in message.lower():
+            return AuthError(message, hint=_LOGIN_HINT)
         return ValidationError(message)
     if status == 5:
         return NotFoundError(message)
@@ -105,7 +107,7 @@ def error_from_http(status: int, body_text: str) -> AIStudioError:
     """Fallback mapping for a non-2xx response without a decodable error envelope."""
     snippet = body_text.strip()[:200]
     message = f"HTTP {status}" + (f": {snippet}" if snippet else "")
-    if status in (401, 403):
+    if status in (401, 403) or (status == 400 and "api key" in snippet.lower()):
         return AuthError(message, hint=_LOGIN_HINT)
     if status == 404:
         return NotFoundError(message)

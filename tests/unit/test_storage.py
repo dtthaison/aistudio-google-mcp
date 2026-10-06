@@ -54,7 +54,17 @@ def test_load_missing_state_raises_auth_error_with_hint(aistudio_home):
     assert info.value.hint == 'run "aistudio login"'
 
 
-@pytest.mark.parametrize("content", ["{not json", "[]", '{"cookies": "nope"}', ""])
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json", "[]", '{"cookies": "nope"}', "",
+        '{"cookies": [null]}',
+        '{"cookies": [{"name": "SID", "value": "v", "domain": null}]}',
+        '{"cookies": [{"name": "SID", "domain": ".google.com"}]}',
+        '{"cookies": [], "aistudio": {"authuser": "x"}}',
+        '{"cookies": [], "aistudio": "x"}',
+    ],
+)
 def test_load_corrupt_state_raises_auth_error(aistudio_home, content):
     profile = get_profile("default").ensure()
     profile.storage_state.write_text(content)

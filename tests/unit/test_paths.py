@@ -69,3 +69,11 @@ def test_write_private_json_is_atomic_and_owner_only(tmp_path):
     assert not list(target.parent.glob("*.tmp"))
     write_private_json(target, {"a": 2})
     assert read_json(target) == {"a": 2}
+
+
+def test_corrupt_config_is_a_validation_error_naming_the_file(aistudio_home):
+    aistudio_home.mkdir(parents=True)
+    (aistudio_home / "config.json").write_text("{oops")
+    with pytest.raises(ValidationError) as info:
+        paths.resolve_profile_name()
+    assert "config.json" in info.value.message

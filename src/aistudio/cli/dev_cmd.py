@@ -65,10 +65,11 @@ def capture(state: CliState, out: Path, browser: str, host_pattern: str,
 
 
 def _render_replay(data: dict[str, Any]) -> None:
-    table = Table("fixture", "method", "verdict", "status", "code")
+    table = Table("fixture", "verdict", "status", "code", "message")
     for r in data["results"]:
-        table.add_row(r["fixture"], r["method"], r["verdict"], str(r["http_status"] or ""),
-                      r["error_code"] or "")
+        fixture = Path(r["fixture"])
+        table.add_row(f"{fixture.parent.name}/{fixture.name}", r["verdict"],
+                      str(r["http_status"] or ""), r["error_code"] or "", r["message"] or "")
     stdout.print(table)
 
 

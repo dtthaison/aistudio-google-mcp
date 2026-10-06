@@ -24,6 +24,25 @@ class AccountInfo:
     authuser: int = 0
 
 
+def _valid_cookie(cookie: Any) -> bool:
+    return (
+        isinstance(cookie, dict)
+        and all(isinstance(cookie.get(key), str) for key in ("name", "value", "domain"))
+        and isinstance(cookie.get("expires", -1), (int, float))
+    )
+
+
+def _valid_account(meta: Any) -> bool:
+    if meta is None:
+        return True
+    if not isinstance(meta, dict):
+        return False
+    authuser = meta.get("authuser")
+    email = meta.get("email")
+    authuser_ok = authuser is None or (isinstance(authuser, int) and not isinstance(authuser, bool))
+    return authuser_ok and (email is None or isinstance(email, str))
+
+
 def _domain_allowed(domain: str) -> bool:
     return bool(_ALLOWED_DOMAIN.search(domain.lstrip(".").lower()))
 
@@ -52,7 +71,12 @@ def load_state(profile: Profile) -> dict[str, Any]:
         data = read_json(path)
     except (ValueError, OSError) as exc:
         raise AuthError(f"cannot read {path}: {exc}", hint=_LOGIN_HINT) from exc
-    if not isinstance(data, dict) or not isinstance(data.get("cookies"), list):
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("cookies"), list)
+        or not all(_valid_cookie(c) for c in data["cookies"])
+        or not _valid_account(data.get("aistudio"))
+    ):
         raise AuthError(f"{path} is not a valid storage state", hint=_LOGIN_HINT)
     return data
 

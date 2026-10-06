@@ -26,6 +26,7 @@ from aistudio.exceptions import (
         (13, "Internal error encountered.", ServerError, True),
         (14, "unavailable", ServerError, True),
         (99, "weird", ServerError, False),
+        (3, "API key not valid. Please pass a valid API key.", AuthError, False),
     ],
 )
 def test_error_from_status(status, message, cls, retriable):
@@ -70,3 +71,7 @@ def test_schema_drift_names_method_and_path():
     assert "ListPrompts" in err.message
     assert "[0][2][1]" in err.message
     assert err.hint == 're-capture ListPrompts with "aistudio dev capture"'
+
+
+def test_http_fallback_treats_invalid_api_key_as_auth_error():
+    assert type(error_from_http(400, "API key not valid")) is AuthError

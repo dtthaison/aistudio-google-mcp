@@ -15,7 +15,8 @@ def session():
 def test_is_read_only():
     for method in ("ListPrompts", "GetPrompt", "CountTokens", "ListModels"):
         assert is_read_only(method)
-    for method in ("DeletePrompt", "GenerateContent", "UpdatePrompt", "CreatePrompt"):
+    for method in ("DeletePrompt", "GenerateContent", "UpdatePrompt", "CreatePrompt",
+                   "Listen", "GetOrCreatePrompt", "ListAndDeletePrompts", "Getaway"):
         assert not is_read_only(method)
 
 
@@ -34,6 +35,9 @@ def test_clean_url_drops_redacted_key():
         (400, '[,[3,"Invalid argument"]]', "http-reached", "VALIDATION_ERROR"),
         (403, '[,[7,"The caller does not have permission"]]', "http-rejected", "AUTH_ERROR"),
         (500, '[,[13,"Internal error encountered."]]', "error", "SERVER_ERROR"),
+        (400, '[,[3,"API key not valid. Please pass a valid API key."]]', "http-rejected",
+         "AUTH_ERROR"),
+        (302, "", "http-rejected", "REDIRECT"),
     ],
 )
 @respx.mock
@@ -96,3 +100,21 @@ async def test_replay_all_walks_directory(tmp_path, write_rpc_fixture):
     assert [(r.method, r.verdict) for r in results] == [
         ("DeletePrompt", "skipped"), ("ListModels", "http-ok"),
     ]
+
+
+@respx.mock(assert_all_called=False)
+async def test_mislabelled_fixture_is_not_sent(tmp_path, write_rpc_fixture):
+    route = respx.post(method_url("DeletePrompt"))
+    path = write_rpc_fixture(tmp_path, "ListModels", url=method_url("DeletePrompt"))
+    async with HttpTransport(session()) as transport:
+        result = await replay_fixture(path, transport)
+    assert result.verdict == "skipped"
+    assert "does not match" in result.message
+    assert not route.called
+
+
+async def test_rpc_marker_must_be_in_the_path(tmp_path, write_rpc_fixture):
+    path = write_rpc_fixture(tmp_path, "ListModels",
+                             url="https://x.googleapis.com/upload?next=/$rpc/ListModels")
+    async with HttpTransport(session()) as transport:
+        assert (await replay_fixture(path, transport)).verdict == "skipped"

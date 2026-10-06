@@ -33,7 +33,15 @@ def validate_profile_name(name: str) -> str:
 
 def load_config() -> dict[str, Any]:
     path = config_path()
-    return read_json(path) if path.exists() else {}
+    if not path.exists():
+        return {}
+    try:
+        data = read_json(path)
+    except (ValueError, OSError) as exc:
+        raise ValidationError(f"cannot read {path}: {exc}", hint=f"fix or delete {path}") from exc
+    if not isinstance(data, dict):
+        raise ValidationError(f"{path} must contain a JSON object", hint=f"fix or delete {path}")
+    return data
 
 
 def set_default_profile(name: str) -> None:
