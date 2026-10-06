@@ -10,8 +10,9 @@ import click
 from rich.table import Table
 
 from aistudio._app.apps import gallery_get, gallery_list, get_app, list_apps, recent_apps
+from aistudio._app.build import DEFAULT_TIMEOUT_S, create_app, prompt_app
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import cells, emit, json_option, stdout
+from aistudio.cli.output import cells, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
@@ -42,7 +43,7 @@ def _table(columns: list[str], rows: list[list[str]], *, id_column: bool = True)
 
 @click.group()
 def app() -> None:
-    """Your AI Studio Build apps (read-only)."""
+    """Your AI Studio Build apps: list, inspect, create and update."""
 
 
 @app.command("list")
@@ -134,3 +135,53 @@ def gallery_get_cmd(state: CliState, slug: str, json_output: bool) -> None:
                 stdout.print(f"{label}: {url}", markup=False)
 
     emit(data, json_output=json_output, render=render)
+
+
+def _render_build(d: dict[str, Any]) -> None:
+    state = "done" if d["status"] == "done" else "still building (timed out waiting)"
+    stdout.print(f"{d['title'] or '(untitled)'}  [{d['app_id']}]  {state} after {d['seconds']}s",
+                 markup=False)
+    stdout.print(d["url"], markup=False)
+    if d["files"]:
+        stdout.print(f"Files: {', '.join(d['files'])}", markup=False)
+
+
+def _build(state: CliState, run: Callable[..., Awaitable[dict[str, Any]]], *args: Any,
+           timeout: int, visible: bool, json_output: bool) -> None:
+    state.require_browser()
+    if not json_output:
+        stderr.print("Building in a minimized Chrome window; this usually takes a few minutes…")
+    result = asyncio.run(run(state.profile(), *args, timeout_s=timeout, visible=visible))
+    emit(result, json_output=json_output, render=_render_build)
+    if result["status"] != "done":
+        raise SystemExit(2)
+
+
+@app.command("create")
+@click.argument("idea")
+@click.option("--timeout", type=click.IntRange(30, 3600), default=DEFAULT_TIMEOUT_S,
+              show_default=True, help="Seconds to wait for the build to finish.")
+@click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
+@json_option
+@click.pass_obj
+@handle_errors
+def app_create(state: CliState, idea: str, timeout: int, visible: bool,
+               json_output: bool) -> None:
+    """Build a new app from IDEA (uses your AI Studio Build quota)."""
+    _build(state, create_app, idea, timeout=timeout, visible=visible, json_output=json_output)
+
+
+@app.command("prompt")
+@click.argument("app_id")
+@click.argument("text")
+@click.option("--timeout", type=click.IntRange(30, 3600), default=DEFAULT_TIMEOUT_S,
+              show_default=True, help="Seconds to wait for the update to finish.")
+@click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
+@json_option
+@click.pass_obj
+@handle_errors
+def app_prompt(state: CliState, app_id: str, text: str, timeout: int, visible: bool,
+               json_output: bool) -> None:
+    """Ask the builder to change an app (id or unique prefix) with TEXT."""
+    _build(state, prompt_app, app_id, text, timeout=timeout, visible=visible,
+           json_output=json_output)
