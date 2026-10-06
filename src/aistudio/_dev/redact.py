@@ -30,9 +30,18 @@ GAIA_ID_RE = re.compile(r"(?<![0-9])1[0-9]{20}(?![0-9])")
 # Google Cloud project identifiers (Dashboard calls on every page load).
 CLOUD_CLIENT_RE = re.compile(r"gen-lang-client-[0-9]+")
 PROJECT_NUMBER_RE = re.compile(r"(projects/)[0-9]{6,}")
+BILLING_ACCOUNT_RE = re.compile(r"(billingAccounts/)[0-9A-Fa-f]{6}-[0-9A-Fa-f]{6}-[0-9A-Fa-f]{6}")
+# Build app previews run on Cloud Run hosts named after the app and the project number.
+RUN_APP_HOST_RE = re.compile(r"[a-z0-9-]+-[0-9]{6,}\.([a-z0-9-]+)\.run\.app")
 PROJECT_ID_RE = re.compile(r"(projects/)[a-z][a-z0-9-]{4,28}[a-z0-9](?![a-z0-9-])")
 _FAKE_GAIA_PREFIX = "1" + "0" * 12
 REDACTED_NAME = "Redacted Name"
+REDACTED_BASE64 = "REDACTED_BASE64_SECRET"
+# Short base64 strings (e.g. secret values returned by ListAppletSecrets) that may hide a
+# credential. Long media runs are excluded by the upper bound.
+_BASE64_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{16,512}={0,2}(?![A-Za-z0-9+/_=-])"
+)
 # Long standard-base64 runs are media (images, audio). Identifier and personal-data
 # patterns skip them: a Drive id or name cannot be distinguished from random bytes there,
 # and rewriting them corrupts the payload.
@@ -63,6 +72,8 @@ _CREDENTIALS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 # Applied outside long base64 runs only.
 _PERSONAL: tuple[tuple[re.Pattern[str], str], ...] = (
+    (RUN_APP_HOST_RE, r"app-preview-redacted.\1.run.app"),
+    (BILLING_ACCOUNT_RE, r"\g<1>000000-000000-000000"),
     (CLOUD_CLIENT_RE, "gen-lang-client-0000000000"),
     (PROJECT_NUMBER_RE, r"\g<1>000000000000"),
     (PROJECT_ID_RE, r"\1redacted-project"),
@@ -74,6 +85,20 @@ _SENSITIVE = (
     EMBEDDED_HEADER_RE, SAPISIDHASH_RE, PHOTO_URL_RE, GAIA_ID_RE, ACCESS_TOKEN_RE,
     REFRESH_TOKEN_RE, JWT_RE, SECRET_PARAM_RE, API_KEY_RE, EMAIL_RE, DRIVE_ID_RE,
 )
+
+
+def _redact_encoded_secret(match: re.Match[str]) -> str:
+    """Replace a base64 string whose decoded text contains a credential."""
+    token = match.group(0)
+    padded = token + "=" * (-len(token) % 4)
+    for decode in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            decoded = decode(padded).decode("utf-8")
+        except ValueError:  # binascii.Error and UnicodeDecodeError are ValueErrors
+            continue
+        if any(pattern.search(decoded) for pattern, _ in _CREDENTIALS):
+            return REDACTED_BASE64
+    return token
 
 
 @dataclass
@@ -116,6 +141,7 @@ class Redactor:
         return self.ids[real]
 
     def text(self, value: str) -> str:
+        value = _BASE64_CANDIDATE_RE.sub(_redact_encoded_secret, value)
         for pattern, replacement in _CREDENTIALS:
             value = pattern.sub(replacement, value)
         parts: list[str] = []

@@ -172,3 +172,29 @@ is conservative on purpose.
     Sulafat, Sadaltager, Varo.
 - **Model picker.** The run-settings button label contains the current model id. The picker has a
   "Search" box. An option's label contains its model id.
+
+## Build create/update discovery (`scripts/spikes/build_drive.py`)
+
+- **A minimized window works.** Both create and update succeeded from a **minimized** Chrome window,
+  each returning 200 from `CodeAssistantOffline`. BotGuard accepts a backgrounded browser, so the
+  background-daemon design for generation is viable.
+- **Create, step by step:**
+  1. Fill the idea in the `/apps` prompt box and press ⌘↵.
+  2. `CreateApplet` runs; it carries no BotGuard token.
+  3. `CodeAssistantOffline` runs; it carries a BotGuard token.
+  4. The page streams progress through `StreamCodeAssistantOfflineGeneration`.
+  5. `ProvisionAndInitializeApplet` (Cloud Run preview host) and `SaveApplet` follow.
+  6. The URL becomes `/apps/<uuid>`.
+- **Update.** Type into the app editor's prompt box and press ⌘↵: a second `CodeAssistantOffline`.
+- **Editor controls.** The editor has per-file buttons ("Open index.html", "Open src/App.tsx",
+  "Open src/index.css", "Open metadata.json"), "View changes", "Restore code from this checkpoint",
+  "Copy app", and sharing and publish settings. It has no "Code" tab. How file contents are
+  fetched for export is still to be identified from these fixtures.
+- **The builder renamed the app.** After the update the agent renamed "TapCount" to
+  "Tally - Simple Big Button Counter".
+- **Never recorded:**
+  - `ListAppletSecrets` returns each Build app's secrets, including the provisioned
+    `GEMINI_API_KEY`, **base64-encoded**.
+  - Cloud console calls carry project and billing details.
+
+  The redactor also decodes base64 and redacts any credential found inside.

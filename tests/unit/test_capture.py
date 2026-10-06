@@ -156,3 +156,17 @@ async def test_capture_ends_when_last_window_closes_but_browser_keeps_running(ai
     recorder = CaptureRecorder(FixtureWriter(tmp_path))
     await asyncio.wait_for(run_capture(profile, recorder, playwright_factory=Playwright), 2)
     assert context.closed
+
+
+@pytest.mark.parametrize("method", ["ListCloudProjects", "ListCloudApiKeys", "ListImportedProjects",
+                                    "GetCloudProjectQuotaTier", "GetDefaultCloudProject"])
+async def test_cloud_console_calls_are_never_recorded(tmp_path, method):
+    recorder = CaptureRecorder(FixtureWriter(tmp_path))
+    assert await recorder.handle(FakeRequest(RPC + method)) is None
+    assert not list(tmp_path.iterdir())
+
+
+async def test_applet_secret_values_are_never_recorded(tmp_path):
+    recorder = CaptureRecorder(FixtureWriter(tmp_path))
+    assert await recorder.handle(FakeRequest(RPC + "ListAppletSecrets")) is None
+    assert not list(tmp_path.iterdir())

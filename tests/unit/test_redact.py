@@ -216,3 +216,29 @@ def test_redacts_cloud_project_numbers_and_ids():
     body = record["response"]["body"]
     assert "1234567890123" not in body and "0123456789" not in body and "my-app-42" not in body
     assert "projects/000000000000" in body and "gen-lang-client-0000000000" in body
+
+
+def test_redacts_billing_accounts_and_cloud_run_preview_hosts():
+    host = "ais-dev-es4v27qfwpltfcfglfjbvj-123456789012.asia-east1.run.app"
+    record = Redactor().exchange(exchange(
+        request_headers={"referer": f"https://{host}/"},
+        response_body=f'[["https://{host}"],["billingAccounts/01A2B3-4C5D6E-7F8A9B"]]'.encode(),
+    ))
+    dumped = json.dumps(record)
+    for secret in ("es4v27qfwpltfcfglfjbvj", "123456789012", "01A2B3-4C5D6E-7F8A9B"):
+        assert secret not in dumped
+    assert "app-preview-redacted.asia-east1.run.app" in record["response"]["body"]
+    assert "billingAccounts/000000-000000-000000" in record["response"]["body"]
+
+
+def test_redacts_base64_encoded_credentials():
+    hidden = base64.b64encode(KEY.encode()).decode()
+    url_hidden = base64.urlsafe_b64encode(f"token={ACCESS_TOKEN}".encode()).decode().rstrip("=")
+    harmless = base64.b64encode(b"just some ordinary text here").decode()
+    record = Redactor().exchange(exchange(
+        response_body=f'[["GEMINI_API_KEY","{hidden}"],["{url_hidden}"],["{harmless}"]]'.encode()
+    ))
+    body = record["response"]["body"]
+    assert hidden not in body and url_hidden not in body
+    assert body.count("REDACTED_BASE64_SECRET") == 2
+    assert harmless in body

@@ -1,0 +1,55 @@
+{
+  "method": "other_fonts_googleapis_com_css2",
+  "url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+  "http_method": "GET",
+  "request": {
+    "headers": {
+      ":authority": "fonts.googleapis.com",
+      ":method": "GET",
+      ":path": "/css2?family=Inter:wght@400;500;600&display=swap",
+      ":scheme": "https",
+      "accept": "text/css,*/*;q=0.1",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "accept-language": "en-US,en;q=0.9",
+      "priority": "u=0",
+      "referer": "https://app-preview-redacted.asia-east1.run.app/",
+      "sec-ch-ua": "\"Chromium\";v=\"154\", \"Google Chrome\";v=\"154\", \"Not A(Brand\";v=\"99\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"macOS\"",
+      "sec-fetch-dest": "style",
+      "sec-fetch-mode": "no-cors",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-storage-access": "active",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+      "x-browser-channel": "stable",
+      "x-browser-copyright": "Copyright 2026 Google LLC. All Rights Reserved.",
+      "x-browser-validation": "tpBllyXzCUJIItbiIO0h75y/ZDs=",
+      "x-browser-year": "2026"
+    },
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "cache-control": "private, max-age=86400, stale-while-revalidate=604800",
+      "content-encoding": "gzip",
+      "content-type": "text/css; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "cross-origin-resource-policy": "cross-origin",
+      "date": "Tue, 06 Oct 2026 09:36:18 GMT",
+      "expires": "Tue, 06 Oct 2026 09:36:18 GMT",
+      "last-modified": "Tue, 06 Oct 2026 08:44:57 GMT",
+      "link": "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
+      "server": "ESF",
+      "strict-transport-security": "max-age=31536000",
+      "timing-allow-origin": "*",
+      "vary": "Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
+      "x-xss-protection": "0"
+    },
+    "body": ""
+  }
+}

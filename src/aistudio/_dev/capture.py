@@ -20,6 +20,12 @@ from aistudio.paths import Profile
 log = logging.getLogger(__name__)
 
 DEFAULT_HOST_PATTERN = r"(^|\.)clients6\.google\.com$|(^|\.)googleapis\.com$"
+# Never recorded: Cloud console (Dashboard) calls carry project and billing details, and
+# ListAppletSecrets returns Build apps' secret values (e.g. their Gemini API key).
+SKIP_METHODS = frozenset({
+    "ListCloudProjects", "ListCloudApiKeys", "ListImportedProjects",
+    "GetCloudProjectQuotaTier", "GetDefaultCloudProject", "ListAppletSecrets",
+})
 
 CHECKLIST = (
     "Use throwaway content: prompt text is kept in the fixtures.",
@@ -54,7 +60,9 @@ class CaptureRecorder:
         self.counts: Counter[str] = Counter()
 
     def wants(self, url: str, http_method: str) -> bool:
-        return http_method != "OPTIONS" and bool(self._hosts.search(urlparse(url).hostname or ""))
+        if http_method == "OPTIONS" or rpc_method_name(url) in SKIP_METHODS:
+            return False
+        return bool(self._hosts.search(urlparse(url).hostname or ""))
 
     async def handle(self, request: Any) -> Path | None:
         if not self.wants(request.url, request.method):
