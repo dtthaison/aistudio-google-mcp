@@ -17,9 +17,13 @@ uv sync --extra dev
 ## Quick start
 
 ```bash
-uv run aistudio login          # sign in once in a browser window
-uv run aistudio auth check     # verify the stored session
-uv run aistudio dev capture    # record AI Studio traffic into tests/fixtures
+uv run aistudio login                       # sign in once in a browser window
+uv run aistudio auth check --test           # verify the stored session with one real call
+uv run aistudio models list --category music
+uv run aistudio models get lyria-3.5
+uv run aistudio prompt list --type chat
+uv run aistudio count-tokens "hello world" -m gemini-flash-latest
+uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 
 Design: `docs/superpowers/specs/2026-10-06-aistudio-cli-design.md`
