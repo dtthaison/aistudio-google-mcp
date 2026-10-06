@@ -10,7 +10,7 @@ from aistudio._app.apps import pick
 from aistudio._browser.build_page import BuildOutcome, BuildPage, app_url
 from aistudio._browser.ui import open_browser
 from aistudio.client import AIStudioClient
-from aistudio.exceptions import ValidationError
+from aistudio.exceptions import AIStudioError, ValidationError
 from aistudio.paths import Profile
 
 DEFAULT_TIMEOUT_S = 600
@@ -71,8 +71,13 @@ async def _result(
     now: Callable[[], float],
     client_factory: Callable[[Profile], AIStudioClient],
 ) -> dict[str, Any]:
-    async with client_factory(profile) as client:
-        title = next((a.title for a in await client.apps.list() if a.id == outcome.app_id), None)
+    title = None
+    try:  # cosmetic: never lose a finished (paid) build over the title lookup
+        async with client_factory(profile) as client:
+            title = next((a.title for a in await client.apps.list() if a.id == outcome.app_id),
+                         None)
+    except AIStudioError:
+        pass
     progress = outcome.progress
     return {
         "app_id": outcome.app_id,

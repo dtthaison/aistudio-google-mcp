@@ -60,8 +60,9 @@ aistudio app prompt <app-id-or-prefix> "<change>" --json
 
 - Both take a few minutes, use the user's Build quota, and open a minimized Chrome window.
   Run them in the background if your harness supports that.
-- Result: `{app_id, url, title, status, files, seconds}`. `status: "timeout"` (exit 2) means it
-  is still building: give the user the `url`.
+- Result: `{app_id, url, title, status, files, seconds}`. Read `status` from the JSON, not the
+  exit code. `"timeout"` means aistudio stopped waiting before the builder finished: give the user
+  the `url` to check.
 - Pass the user's own words as the idea/change; do not expand them.
 
 ## Ask first

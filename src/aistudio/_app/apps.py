@@ -15,6 +15,8 @@ def pick(items: Sequence[T], key: Callable[[T], str], wanted: str, *, noun: str,
          hint: str) -> T:
     """Exact match first, then a unique prefix (spec §2.1)."""
     wanted = wanted.strip()
+    if not wanted:
+        raise ValidationError(f"give a {noun} id or a unique prefix", hint=hint)
     for item in items:
         if key(item) == wanted:
             return item

@@ -58,3 +58,12 @@ def test_http_backend_cannot_build(logged_in_profile):
 def test_app_group_help_is_not_read_only():
     res = CliRunner().invoke(cli, ["--help"])
     assert "read-only" not in res.stdout
+
+
+def test_timeout_wording_does_not_claim_it_is_still_building(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    monkeypatch.setattr("aistudio.cli.app_cmd.create_app",
+                        fake({**RESULT, "status": "timeout", "steps": None, "files": []}, []))
+    res = CliRunner().invoke(cli, ["app", "create", "x"])
+    assert res.exit_code == 2
+    assert "stopped waiting" in res.stdout and "still building" not in res.stdout

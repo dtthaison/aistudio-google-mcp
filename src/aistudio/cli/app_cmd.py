@@ -138,7 +138,8 @@ def gallery_get_cmd(state: CliState, slug: str, json_output: bool) -> None:
 
 
 def _render_build(d: dict[str, Any]) -> None:
-    state = "done" if d["status"] == "done" else "still building (timed out waiting)"
+    state = ("done" if d["status"] == "done"
+             else "not finished when aistudio stopped waiting; open the link to check")
     stdout.print(f"{d['title'] or '(untitled)'}  [{d['app_id']}]  {state} after {d['seconds']}s",
                  markup=False)
     stdout.print(d["url"], markup=False)

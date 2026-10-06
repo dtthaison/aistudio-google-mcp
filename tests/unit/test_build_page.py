@@ -3,7 +3,13 @@ import pytest
 from aistudio._browser.build_page import APPS_URL, PROMPT_BOX, BuildPage, app_url
 from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse
 from aistudio._rpc import wire
-from aistudio.exceptions import BotGuardError, BrowserError
+from aistudio.exceptions import (
+    AuthError,
+    BotGuardError,
+    BrowserError,
+    QuotaExceededError,
+    ServerError,
+)
 
 APP = "912435b3-26c1-41b4-ba22-058d464afceb"
 RUN = "463f35e4-afb1-41fc-925f-8d550c1d0ffc"
@@ -93,3 +99,30 @@ async def test_prompt_waits_for_send_to_be_enabled_before_submitting(fake_ui, ca
     await BuildPage(ui).prompt(APP, "make it blue", timeout_s=60)
     assert ui.ops == [("goto", app_url(APP)), ("fill", PROMPT_BOX, "make it blue"),
                       ("wait_enabled", "button", "Send"), ("press", PROMPT_BOX, RUN_SHORTCUT)]
+
+
+async def test_a_failed_start_after_create_reports_the_empty_app(fake_ui, captured):
+    ui = fake_ui({"CreateApplet": [reply("CreateApplet", captured("CreateApplet", 2))]})
+    with pytest.raises(BrowserError) as info:
+        await BuildPage(ui).create("a counter", timeout_s=60)
+    assert app_url(APP) in info.value.hint
+
+
+async def test_only_a_refused_start_is_botguard_and_quota_stays_quota(fake_ui):
+    denied = '[,[7,"The caller does not have permission"]]'
+    create_403 = CapturedResponse("CreateApplet", 403, denied, "")
+    with pytest.raises(AuthError):
+        await BuildPage(fake_ui({"CreateApplet": [create_403]})).create("x", timeout_s=60)
+    quota = CapturedResponse("CodeAssistantOffline", 403, '[,[7,"Quota exceeded for Build"]]', "")
+    with pytest.raises(QuotaExceededError):
+        await BuildPage(fake_ui({"CodeAssistantOffline": [quota]})).prompt(APP, "x", timeout_s=60)
+
+
+async def test_a_failed_stream_for_this_run_fails_fast(fake_ui, captured):
+    failed = CapturedResponse("StreamCodeAssistantOfflineGeneration", 500,
+                              '[,[13,"Internal error encountered."]]',
+                              wire.encode([UPDATE_RUN, None, None, APP]))
+    ui = fake_ui({"CodeAssistantOffline": started(captured, 3),
+                  "StreamCodeAssistantOfflineGeneration": [failed, stream(captured, UPDATE_RUN)]})
+    with pytest.raises(ServerError):
+        await BuildPage(ui).prompt(APP, "x", timeout_s=60)

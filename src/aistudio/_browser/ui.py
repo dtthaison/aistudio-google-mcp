@@ -14,9 +14,10 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
-from aistudio.exceptions import BrowserError
+from aistudio.exceptions import AuthError, BrowserError
 from aistudio.paths import Profile
 
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
@@ -48,33 +49,72 @@ class Ui(Protocol):
     def responses(self) -> contextlib.AbstractAsyncContextManager[ResponseLog]: ...
 
 
+def _window_closed() -> BrowserError:
+    return BrowserError(
+        "the AI Studio window was closed before aistudio finished",
+        hint="re-run and leave the (minimized) Chrome window open until aistudio is done",
+    )
+
+
 class _QueueLog:
     def __init__(self) -> None:
         self._queues: defaultdict[str, asyncio.Queue[CapturedResponse]] = defaultdict(
             asyncio.Queue
         )
+        self._closed = asyncio.Event()
 
     def put(self, response: CapturedResponse) -> None:
         self._queues[response.method].put_nowait(response)
 
+    def close(self) -> None:
+        self._closed.set()
+
     async def next(self, method: str, *, timeout_s: float) -> CapturedResponse | None:
+        """The next response for ``method``; None on timeout; BrowserError if the page closed."""
+        queue = self._queues[method]
+        if not queue.empty():
+            return queue.get_nowait()
+        if self._closed.is_set():
+            raise _window_closed()
+        getter = asyncio.ensure_future(queue.get())
+        closer = asyncio.ensure_future(self._closed.wait())
         try:
-            return await asyncio.wait_for(self._queues[method].get(), max(timeout_s, 0))
-        except asyncio.TimeoutError:
-            return None
+            done, _ = await asyncio.wait({getter, closer}, timeout=max(timeout_s, 0),
+                                         return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (getter, closer):
+                if not task.done():
+                    task.cancel()
+        if getter in done:
+            return getter.result()
+        if closer in done:
+            raise _window_closed()
+        return None
 
 
 class PlaywrightUi:
     def __init__(self, page: Any) -> None:
         self._page = page
 
+    def _check_signed_in(self) -> None:
+        host = urlparse(getattr(self._page, "url", "") or "").hostname or ""
+        if host.startswith("accounts."):
+            raise AuthError("Chrome is signed out: AI Studio redirected to Google sign-in",
+                            hint='run "aistudio login"')
+
     async def goto(self, url: str) -> None:
-        await self._page.goto(url)
+        try:
+            await self._page.goto(url)
+        except Exception as exc:  # playwright errors: timeouts, network, closed target
+            raise BrowserError(f"could not open {url}: {exc}",
+                               hint="check your connection and re-run") from exc
+        self._check_signed_in()
 
     async def _first_visible(self, selector: str, timeout_s: float) -> Any:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_s
         while True:
+            self._check_signed_in()
             for element in await self._page.locator(selector).all():
                 if await element.is_visible():
                     return element
@@ -87,10 +127,18 @@ class PlaywrightUi:
             await asyncio.sleep(0.25)
 
     async def fill_first(self, selector: str, text: str, *, timeout_s: float = 30.0) -> None:
-        await (await self._first_visible(selector, timeout_s)).fill(text)
+        element = await self._first_visible(selector, timeout_s)
+        try:
+            await element.fill(text)
+        except Exception as exc:
+            raise BrowserError(f"could not type into {selector!r}: {exc}") from exc
 
     async def press_first(self, selector: str, key: str) -> None:
-        await (await self._first_visible(selector, 5.0)).press(key)
+        element = await self._first_visible(selector, 5.0)
+        try:
+            await element.press(key)
+        except Exception as exc:
+            raise BrowserError(f"could not press {key} in {selector!r}: {exc}") from exc
 
     async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None:
         """Wait until a visible control is enabled (AI Studio disables Send while loading)."""
@@ -128,11 +176,16 @@ class PlaywrightUi:
                 pending.add(task)
                 task.add_done_callback(pending.discard)
 
+        def on_close(_page: Any) -> None:
+            log.close()
+
         self._page.on("response", on_response)
+        self._page.on("close", on_close)
         try:
             yield log
         finally:
             self._page.remove_listener("response", on_response)
+            self._page.remove_listener("close", on_close)
             for task in pending:
                 task.cancel()
 

@@ -1,7 +1,7 @@
 import pytest
 
 from aistudio._browser.ui import VIEWPORT, PlaywrightUi, open_browser
-from aistudio.exceptions import BrowserError
+from aistudio.exceptions import AuthError, BrowserError
 from aistudio.paths import get_profile
 
 
@@ -37,18 +37,22 @@ class Response:
 
 
 class Page:
-    def __init__(self, elements=()):
+    def __init__(self, elements=(), url="https://aistudio.google.com/apps"):
         self._elements = list(elements)
-        self.handlers = []
+        self.handlers = {}
+        self.url = url
 
     def locator(self, selector):
         return Locator(self._elements)
 
     def on(self, event, handler):
-        self.handlers.append(handler)
+        self.handlers.setdefault(event, []).append(handler)
 
     def remove_listener(self, event, handler):
-        self.handlers.remove(handler)
+        self.handlers[event].remove(handler)
+
+    async def goto(self, url):
+        pass
 
 
 async def test_fill_first_uses_the_first_visible_element():
@@ -68,14 +72,14 @@ async def test_responses_are_logged_per_method_until_the_block_ends():
     ui = PlaywrightUi(page)
     async with ui.responses() as log:
         base = "https://x.clients6.google.com/$rpc/s.MakerSuiteService/"
-        for handler in page.handlers:
+        for handler in page.handlers["response"]:
             handler(Response(base + "CreateApplet", text='["app"]'))
             handler(Response("https://www.gstatic.com/x.js"))
         got = await log.next("CreateApplet", timeout_s=1)
         assert (got.method, got.status, got.text, got.request_body) == (
             "CreateApplet", 200, '["app"]', "[1]")
         assert await log.next("CodeAssistantOffline", timeout_s=0.05) is None
-    assert page.handlers == []
+    assert page.handlers == {"response": [], "close": []}
 
 
 class Cdp:
@@ -181,3 +185,30 @@ async def test_wait_enabled_times_out_with_a_browser_error():
     with pytest.raises(BrowserError) as info:
         await PlaywrightUi(RolePage(Button([False]))).wait_enabled("button", "Send", timeout_s=0.1)
     assert "'Send'" in info.value.message
+
+
+async def test_a_closed_window_ends_the_wait_with_a_browser_error():
+    page = Page()
+    async with PlaywrightUi(page).responses() as log:
+        for handler in page.handlers["close"]:
+            handler(page)
+        with pytest.raises(BrowserError) as info:
+            await log.next("StreamCodeAssistantOfflineGeneration", timeout_s=5)
+    assert "closed" in info.value.message
+
+
+async def test_a_signed_out_profile_is_an_auth_error_not_a_ui_change():
+    page = Page([Element(False)], url="https://accounts.google.com/v3/signin/identifier")
+    with pytest.raises(AuthError) as info:
+        await PlaywrightUi(page).fill_first("textarea", "hi", timeout_s=5)
+    assert info.value.hint == 'run "aistudio login"'
+
+
+async def test_navigation_failures_are_browser_errors():
+    class Broken(Page):
+        async def goto(self, url):
+            raise RuntimeError("net::ERR_INTERNET_DISCONNECTED")
+
+    with pytest.raises(BrowserError) as info:
+        await PlaywrightUi(Broken()).goto("https://aistudio.google.com/apps")
+    assert "ERR_INTERNET_DISCONNECTED" in info.value.message

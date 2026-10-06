@@ -13,10 +13,11 @@ from dataclasses import dataclass
 
 from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, ResponseLog, Ui
 from aistudio._rpc import wire
+from aistudio._rpc.rows import as_str
 from aistudio._rpc.rows.build import decode_build_stream, decode_created_app, decode_started_run
 from aistudio._transport.http import error_for_response
 from aistudio._types.apps import BuildProgress
-from aistudio.exceptions import BotGuardError, BrowserError
+from aistudio.exceptions import AIStudioError, AuthError, BotGuardError, BrowserError
 
 APPS_URL = "https://aistudio.google.com/apps"
 PROMPT_BOX = "textarea"
@@ -29,6 +30,14 @@ STREAM = "StreamCodeAssistantOfflineGeneration"
 
 def app_url(app_id: str) -> str:
     return f"{APPS_URL}/{app_id}"
+
+
+def _requested_run(request_body: str) -> str | None:
+    """The run id a StreamCodeAssistantOfflineGeneration request asked for (``[run_id, ...]``)."""
+    try:
+        return as_str(wire.opt_index(wire.decode(request_body), 0))
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -47,8 +56,14 @@ class BuildPage:
         async with self._ui.responses() as log:
             await self._ui.goto(APPS_URL)
             await self._submit(idea)
-            decode_created_app(wire.decode((await self._expect(log, CREATE)).text))
-            return await self._follow(log, timeout_s)
+            app_id = decode_created_app(wire.decode((await self._expect(log, CREATE)).text))
+            try:
+                return await self._follow(log, timeout_s)
+            except AIStudioError as exc:
+                # The app shell already exists; never leave the user with an unnamed orphan.
+                note = f"the app was already created at {app_url(app_id)}"
+                exc.hint = f"{note}; {exc.hint}" if exc.hint else note
+                raise
 
     async def prompt(self, app_id: str, text: str, *, timeout_s: float) -> BuildOutcome:
         async with self._ui.responses() as log:
@@ -73,7 +88,7 @@ class BuildPage:
             )
         if response.status >= 400:
             err = error_for_response(response.status, response.text)
-            if response.status == 403:
+            if method == START and response.status == 403 and isinstance(err, AuthError):
                 raise BotGuardError(f"Google refused the build request: {err.message}",
                                     hint="re-run; if it keeps failing, add --visible")
             raise err
@@ -87,6 +102,8 @@ class BuildPage:
             if response is None:
                 break
             if response.status >= 400:
+                if _requested_run(response.request_body) == run_id:
+                    raise error_for_response(response.status, response.text)
                 continue
             try:
                 progress = decode_build_stream(wire.decode(response.text))

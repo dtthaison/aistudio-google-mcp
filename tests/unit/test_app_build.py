@@ -136,3 +136,39 @@ async def test_prompt_rejects_drive_apps_unknown_ids_and_blank_text(logged_in_pr
     with pytest.raises(ValidationError):
         await prompt_app(profile, APP, "  ", **kwargs)
     assert opened == []
+
+
+@respx.mock
+async def test_title_lookup_failure_still_returns_the_finished_build(logged_in_profile, make_client,
+                                                                    build_page):
+    ok = serve_apps()
+    ok.side_effect = [ok.return_value, httpx.Response(404)]
+    build_page(BuildOutcome(APP, RUN, DONE))
+    result = await create_app(logged_in_profile(), "a counter",
+                              client_factory=lambda p: make_client(),
+                              browser=browser_recording([]), now=clock())
+    assert (result["app_id"], result["status"], result["title"]) == (APP, "done", None)
+
+
+@respx.mock
+async def test_prompt_rejects_blank_and_ambiguous_refs(logged_in_profile, make_client):
+    twin = [[None, [APP[:8] + "-twin", ["1", 0], ["1", 0], ["Twin", "", "p"]]]]
+    serve_apps(extra=twin)
+    opened = []
+    kwargs = {"client_factory": lambda p: make_client(), "browser": browser_recording(opened)}
+    with pytest.raises(ValidationError):
+        await prompt_app(logged_in_profile(), "   ", "x", **kwargs)
+    with pytest.raises(ValidationError) as info:
+        await prompt_app(logged_in_profile(), APP[:8], "x", **kwargs)
+    assert "Twin" not in info.value.message and APP in info.value.message
+    assert opened == []
+
+
+@respx.mock
+async def test_blank_ref_does_not_pick_the_only_app(logged_in_profile, make_client):
+    serve_apps()
+    opened = []
+    with pytest.raises(ValidationError):
+        await prompt_app(logged_in_profile(), "  ", "make it blue",
+                         client_factory=lambda p: make_client(), browser=browser_recording(opened))
+    assert opened == []
