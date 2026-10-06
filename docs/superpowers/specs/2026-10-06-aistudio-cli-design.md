@@ -467,7 +467,8 @@ AI Studio's "Build with Agents" section lists agents in the picker's `agents` ca
 - Lists come back as `{"<items>": [...], "count": N}`.
 - Errors come back on stdout as `{"error": true, "code", "message", "hint?"}`.
 - Error codes: `AUTH_ERROR`, `RATE_LIMITED`, `QUOTA_EXCEEDED`, `BOTGUARD_REJECTED`, `SCHEMA_DRIFT`,
-  `NOT_FOUND`, `VALIDATION_ERROR`, `NETWORK_ERROR`, `BROWSER_ERROR`, `TIMEOUT`.
+  `NOT_FOUND`, `VALIDATION_ERROR`, `NETWORK_ERROR`, `SERVER_ERROR`, `BROWSER_ERROR`, `TIMEOUT`.
+  Unhandled exceptions use `UNEXPECTED_ERROR` (exit 2) and Ctrl-C uses `INTERRUPTED` (exit 130).
 - Exit codes:
   - `0`: success
   - `1`: handled error
@@ -526,7 +527,7 @@ Re-sends a captured request, re-signed with the current credentials. If it succe
 ## 9. Error handling
 
 - `AIStudioError` is the base class. Subclasses: `AuthError`, `RateLimitError`, `QuotaExceededError`, `BotGuardError`,
-  `SchemaDriftError`, `NotFoundError`, `ValidationError`, `NetworkError`, `BrowserError`,
+  `SchemaDriftError`, `NotFoundError`, `ValidationError`, `NetworkError`, `ServerError`, `BrowserError`,
   `WaitTimeoutError`. The name avoids shadowing the builtin `TimeoutError`.
 - gRPC status mapping:
 
@@ -536,7 +537,8 @@ Re-sends a captured request, re-signed with the current credentials. If it succe
   | 5 | `NotFoundError` |
   | 8 | `RateLimitError`, or `QuotaExceededError` when the message mentions quota |
   | 7, 16 | `AuthError` (triggers §4.4) |
-  | 13, 14 | retriable |
+  | 13, 14 | `ServerError` (retriable) |
+  | any other | `ServerError` (not retriable) |
 
 - `SchemaDriftError` carries `{method, index_path, expected}` and the hint
   `re-capture <Method> with "aistudio dev capture"`.
