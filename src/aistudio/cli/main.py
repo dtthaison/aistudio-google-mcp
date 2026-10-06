@@ -15,6 +15,7 @@ from aistudio.cli import (
     profile_cmd,
     prompt_cmd,
     session_cmd,
+    status_cmd,
 )
 from aistudio.cli.state import CliState
 
@@ -49,6 +50,7 @@ cli.add_command(prompt_cmd.prompt)
 cli.add_command(chat_cmd.count_tokens)
 cli.add_command(app_cmd.app)
 cli.add_command(app_cmd.gallery)
+cli.add_command(status_cmd.status)
 
 
 def main() -> None:

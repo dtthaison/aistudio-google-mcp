@@ -11,16 +11,19 @@ from aistudio._rpc.params import apps as apps_params
 from aistudio._rpc.params import generate as generate_params
 from aistudio._rpc.params import models as models_params
 from aistudio._rpc.params import prompts as prompts_params
+from aistudio._rpc.params import status as status_params
 from aistudio._rpc.registry import RpcSpec, Transport
 from aistudio._rpc.rows.apps import decode_apps, decode_gallery, decode_recent, decode_runs
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
 from aistudio._rpc.rows.prompts import decode_prompt_list
+from aistudio._rpc.rows.status import decode_incidents
 from aistudio._transport.http import HttpTransport
 from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem
 from aistudio._types.chat import TokenCount
 from aistudio._types.models import Model
 from aistudio._types.prompts import PromptSummary
+from aistudio._types.status import Incident
 from aistudio.exceptions import ValidationError
 from aistudio.paths import Profile
 
@@ -33,6 +36,7 @@ class AIStudioClient:
         self.chat = _Chat(self)
         self.apps = _Apps(self)
         self.gallery = _Gallery(self)
+        self.status = _Status(self)
 
     @classmethod
     def from_profile(cls, profile: Profile) -> AIStudioClient:
@@ -110,3 +114,12 @@ class _Gallery:
     async def list(self) -> list[GalleryApp]:
         raw = await self._client.call(registry.LIST_BUNDLED_APPLETS, apps_params.list_gallery())
         return decode_gallery(raw)
+
+
+class _Status:
+    def __init__(self, client: AIStudioClient) -> None:
+        self._client = client
+
+    async def incidents(self) -> list[Incident]:
+        raw = await self._client.call(registry.LIST_INCIDENTS, status_params.list_incidents())
+        return decode_incidents(raw)
