@@ -147,3 +147,52 @@ def test_drops_upload_session_and_client_headers():
         "Content-Type": "application/json",
     }))
     assert record["response"]["headers"] == {"content-type": "application/json"}
+
+
+def test_redacts_auth_headers_embedded_in_batch_bodies():
+    body = (
+        b"--batch_x\r\nContent-Type: application/http\r\n\r\nGET /v2/people HTTP/1.1\r\n"
+        b"X-Goog-AuthUser: 0\r\nAuthorization: SAPISIDHASH 123_abc SAPISID1PHASH 123_def\r\n"
+        b"Cookie: SID=x\r\nX-Goog-Api-Key: k\r\n\r\n--batch_x--"
+    )
+    record = Redactor().exchange(exchange(request_body=body))
+    text = record["request"]["body"]
+    for secret in ("123_abc", "123_def", "SID=x", "X-Goog-Api-Key: k"):
+        assert secret not in text
+    assert "Authorization: REDACTED\r\n" in text
+    assert "GET /v2/people HTTP/1.1" in text
+
+
+def test_redacts_profile_photos_and_account_ids_stably():
+    photo = "https://lh3.googleusercontent.com/a/ACg8ocJVNKhWboK-lq_v3=s96-c"
+    gaia = "113629000000000000001"
+    record = Redactor().exchange(exchange(
+        response_body=f'[["{photo}","{gaia}"],["{gaia}","113629000000000000002"]]'.encode()
+    ))
+    body = record["response"]["body"]
+    assert "ACg8oc" not in body and gaia not in body
+    assert "https://lh3.googleusercontent.com/a/REDACTED" in body
+    assert body.count("100000000000000000001") == 2
+    assert "100000000000000000002" in body
+
+
+def test_redacts_extra_literal_strings_case_insensitively():
+    record = Redactor(extra=("Test Person",)).exchange(exchange(
+        response_body=b'[["Test Person",1],["TEST PERSON"]]'
+    ))
+    assert record["response"]["body"] == '[["Redacted Name",1],["Redacted Name"]]'
+
+
+def test_redact_record_rewrites_an_existing_fixture():
+    raw = exchange(
+        url=RPC + "GetPrompt",
+        request_body=b"Authorization: SAPISIDHASH 1_secret\r\n",
+        response_body=b'["Test Person","113629000000000000001"]',
+    )
+    first = Redactor().exchange(raw)
+    again = Redactor(extra=("Test Person",)).record(first)
+    dumped = json.dumps(again)
+    assert "1_secret" not in dumped
+    assert "Test Person" not in dumped
+    assert again["method"] == "GetPrompt"
+    assert Redactor(extra=("Test Person",)).record(again) == again

@@ -35,8 +35,12 @@ class FixtureWriter:
             self._next[method] = max(existing, default=0) + 1
         path = directory / f"{self._next[method]}.json"
         self._next[method] += 1
-        path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        path.write_text(dump_fixture(record), encoding="utf-8")
         return path
+
+
+def dump_fixture(record: dict[str, Any]) -> str:
+    return json.dumps(record, indent=2, ensure_ascii=False) + "\n"
 
 
 def load_fixture(path: Path) -> dict[str, Any]:

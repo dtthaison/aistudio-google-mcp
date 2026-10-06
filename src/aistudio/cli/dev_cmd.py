@@ -12,6 +12,7 @@ from rich.table import Table
 from aistudio._auth.session import Session
 from aistudio._dev.capture import CHECKLIST, DEFAULT_HOST_PATTERN, CaptureRecorder, run_capture
 from aistudio._dev.fixtures import FixtureWriter
+from aistudio._dev.redact import Redactor, redact_fixtures
 from aistudio._dev.replay import replay_all
 from aistudio._transport.http import HttpTransport
 from aistudio.cli.error_handler import handle_errors
@@ -37,11 +38,13 @@ def _render_capture(data: dict[str, Any]) -> None:
               show_default=True)
 @click.option("--host-pattern", default=DEFAULT_HOST_PATTERN, show_default=True,
               help="Regex of request hosts to record.")
+@click.option("--redact", "redact_texts", multiple=True,
+              help="Extra literal text to remove, e.g. your display name (repeatable).")
 @json_option
 @click.pass_obj
 @handle_errors
 def capture(state: CliState, out: Path, browser: str, host_pattern: str,
-            json_output: bool) -> None:
+            redact_texts: tuple[str, ...], json_output: bool) -> None:
     """Record AI Studio traffic, redacted, while you use the UI."""
     profile = state.profile()
     if not json_output:
@@ -51,6 +54,7 @@ def capture(state: CliState, out: Path, browser: str, host_pattern: str,
         FixtureWriter(out),
         host_pattern=host_pattern,
         on_write=None if json_output else lambda p, m: stderr.print(f"  recorded {m} -> {p}"),
+        redactor=Redactor(extra=redact_texts),
     )
     try:
         asyncio.run(run_capture(profile, recorder, browser=browser))
@@ -95,3 +99,16 @@ def replay(state: CliState, target: Path, allow_mutating: bool, delay: float,
     results = asyncio.run(run())
     data = {"results": [r.to_dict() for r in results], "count": len(results)}
     emit(data, json_output=json_output, render=_render_replay)
+
+
+@dev.command("redact")
+@click.argument("target", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--redact", "redact_texts", multiple=True,
+              help="Extra literal text to remove, e.g. your display name (repeatable).")
+@json_option
+@handle_errors
+def redact(target: Path, redact_texts: tuple[str, ...], json_output: bool) -> None:
+    """Re-run redaction over existing fixtures (after a new leak pattern is added)."""
+    files, changed = redact_fixtures(target, Redactor(extra=redact_texts))
+    emit({"files": files, "changed": changed}, json_output=json_output,
+         render=lambda d: stdout.print(f"{d['changed']} of {d['files']} fixtures rewritten"))

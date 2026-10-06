@@ -31,3 +31,34 @@ def test_capture_prints_checklist(aistudio_home, monkeypatch, tmp_path):
     assert "throwaway content" in result.stderr
     assert "model picker" in result.stderr
     assert "0 fixtures" in result.stdout
+
+
+def test_dev_redact_command(aistudio_home, tmp_path):
+    fixture = tmp_path / "GetPrompt" / "1.json"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(json.dumps({
+        "method": "GetPrompt", "url": "https://x.google.com/$rpc/S/GetPrompt",
+        "http_method": "POST",
+        "request": {"headers": {}, "body": "[]"},
+        "response": {"status": 200, "headers": {}, "body": '["Test Person"]'},
+    }))
+    result = CliRunner().invoke(
+        cli, ["dev", "redact", str(tmp_path), "--redact", "Test Person", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {"files": 1, "changed": 1}
+    assert "Test Person" not in fixture.read_text()
+
+
+def test_capture_passes_extra_redactions(aistudio_home, monkeypatch, tmp_path):
+    seen = {}
+
+    async def run_capture(profile, recorder, *, browser):
+        seen["text"] = recorder._redactor.text("hello Test Person")
+
+    monkeypatch.setattr("aistudio.cli.dev_cmd.run_capture", run_capture)
+    result = CliRunner().invoke(
+        cli, ["dev", "capture", "--out", str(tmp_path), "--redact", "Test Person", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["text"] == "hello Redacted Name"

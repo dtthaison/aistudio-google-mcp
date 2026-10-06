@@ -45,10 +45,11 @@ class CaptureRecorder:
         *,
         host_pattern: str = DEFAULT_HOST_PATTERN,
         on_write: Callable[[Path, str], None] | None = None,
+        redactor: Redactor | None = None,
     ) -> None:
         self._writer = writer
         self._hosts = re.compile(host_pattern)
-        self._redactor = Redactor()
+        self._redactor = redactor or Redactor()
         self._on_write = on_write
         self.counts: Counter[str] = Counter()
 
