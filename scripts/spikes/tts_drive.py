@@ -1,14 +1,15 @@
 """Throwaway spike: drive the speech page end to end (model, voice, style, text, Run).
 
-Usage: uv run python scripts/spikes/tts_drive.py [--headed]
+Usage: uv run python scripts/spikes/tts_drive.py --headed [--text T] [--voice V] [--style S]
+       [--model M] [-o FILE.wav]
 Verifies each UI choice reaches the outgoing GenerateContent request and writes the audio to
 /tmp/aistudio_tts_drive.wav.
 """
 
+import argparse
 import asyncio
 import base64
 import re
-import sys
 import wave
 
 from aistudio._auth.login import CHROME_ARGS, IGNORE_DEFAULT_ARGS, default_playwright_factory
@@ -27,7 +28,7 @@ async def label(locator) -> str:
     return " ".join(((await locator.inner_text()) or "").split())
 
 
-async def main(headed: bool) -> None:
+async def main(headed: bool, MODEL: str, VOICE: str, STYLE: str, TEXT: str, OUT: str) -> None:
     profile = get_profile(resolve_profile_name(None))
     async with default_playwright_factory()() as playwright:
         context = await playwright.chromium.launch_persistent_context(
@@ -108,4 +109,12 @@ async def main(headed: bool) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main("--headed" in sys.argv))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--text", default=TEXT)
+    parser.add_argument("--voice", default=VOICE)
+    parser.add_argument("--style", default=STYLE)
+    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("-o", "--out", default=OUT)
+    a = parser.parse_args()
+    asyncio.run(main(a.headed, a.model, a.voice, a.style, a.text, a.out))
