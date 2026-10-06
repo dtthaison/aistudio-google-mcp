@@ -16,7 +16,7 @@ from aistudio._dev.redact import Redactor, redact_fixtures
 from aistudio._dev.replay import replay_all
 from aistudio._transport.http import HttpTransport
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import emit, json_option, stderr, stdout
+from aistudio.cli.output import cells, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 
 
@@ -72,8 +72,9 @@ def _render_replay(data: dict[str, Any]) -> None:
     table = Table("fixture", "verdict", "status", "code", "message")
     for r in data["results"]:
         fixture = Path(r["fixture"])
-        table.add_row(f"{fixture.parent.name}/{fixture.name}", r["verdict"],
-                      str(r["http_status"] or ""), r["error_code"] or "", r["message"] or "")
+        table.add_row(*cells(f"{fixture.parent.name}/{fixture.name}", r["verdict"],
+                             str(r["http_status"] or ""), r["error_code"] or "",
+                             r["message"] or ""))
     stdout.print(table)
 
 

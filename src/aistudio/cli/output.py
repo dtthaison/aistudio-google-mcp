@@ -9,6 +9,7 @@ from typing import Any
 
 import click
 from rich.console import Console
+from rich.text import Text
 
 from aistudio.exceptions import ValidationError
 
@@ -18,6 +19,11 @@ stderr = Console(stderr=True)
 json_option = click.option(
     "--json", "json_output", is_flag=True, help="Print machine-readable JSON."
 )
+
+
+def cells(*values: str) -> list[Text]:
+    """Table cells rendered literally: titles and server messages may contain [brackets]."""
+    return [Text(value) for value in values]
 
 
 def emit(data: Any, *, json_output: bool, render: Callable[[Any], None]) -> None:

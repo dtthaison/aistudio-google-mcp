@@ -37,3 +37,16 @@ def test_replay_cli_table_shows_error_message(logged_in_profile, write_rpc_fixtu
     result = CliRunner().invoke(cli, ["dev", "replay", str(tmp_path), "--delay", "0"])
     assert result.exit_code == 0, result.output
     assert "denied" in result.stdout
+
+
+@respx.mock
+def test_replay_table_survives_markup_in_server_messages(logged_in_profile, write_rpc_fixture,
+                                                         tmp_path):
+    logged_in_profile()
+    write_rpc_fixture(tmp_path, "ListModels")
+    respx.post(method_url("ListModels")).mock(
+        return_value=httpx.Response(400, text='[,[3,"bad [/] value"]]')
+    )
+    result = CliRunner().invoke(cli, ["dev", "replay", str(tmp_path), "--delay", "0"])
+    assert result.exit_code == 0, result.output
+    assert "bad [/] value" in result.stdout

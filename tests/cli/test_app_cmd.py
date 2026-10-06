@@ -62,3 +62,19 @@ def test_gallery_get_human_output_keeps_bracketed_slug(logged_in_profile, captur
     result = CliRunner().invoke(cli, ["gallery", "get", "store"])
     assert result.exit_code == 0, result.output
     assert "[store-locator]" in result.stdout
+
+
+@respx.mock
+def test_app_list_survives_markup_in_titles(logged_in_profile):
+    from aistudio._rpc import wire
+
+    logged_in_profile()
+    apps = [[None, [f"id-{i}", ["1791263136", 0], ["1791263129", 0], [title, "", "p"]]]
+            for i, title in enumerate(["Fix [/] bug", "My [store-locator] app"])]
+    respx.post(method_url("ListApplets")).mock(
+        return_value=httpx.Response(200, text=wire.encode([apps]))
+    )
+    result = CliRunner().invoke(cli, ["app", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Fix [/] bug" in result.stdout
+    assert "My [store-locator] app" in result.stdout

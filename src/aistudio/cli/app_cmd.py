@@ -11,7 +11,7 @@ from rich.table import Table
 
 from aistudio._app.apps import gallery_get, gallery_list, get_app, list_apps, recent_apps
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import emit, json_option, stdout
+from aistudio.cli.output import cells, emit, json_option, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
@@ -36,7 +36,7 @@ def _table(columns: list[str], rows: list[list[str]], *, id_column: bool = True)
         else:
             table.add_column(name, overflow="fold")
     for row in rows:
-        table.add_row(*row)
+        table.add_row(*cells(*row))
     stdout.print(table)
 
 
@@ -128,7 +128,7 @@ def gallery_get_cmd(state: CliState, slug: str, json_output: bool) -> None:
         if d["description"]:
             stdout.print(d["description"], markup=False)
         if d["apis"]:
-            stdout.print(f"APIs: {', '.join(d['apis'])}")
+            stdout.print(f"APIs: {', '.join(d['apis'])}", markup=False)
         for label, url in (("Video", d["video_url"]), ("Image", d["image_url"])):
             if url:
                 stdout.print(f"{label}: {url}", markup=False)

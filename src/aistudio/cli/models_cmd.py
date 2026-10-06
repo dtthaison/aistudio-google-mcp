@@ -11,7 +11,7 @@ from rich.table import Table
 from aistudio._app.models import get_model, list_models
 from aistudio._types.models import CATEGORY_ORDER
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import emit, json_option, stdout
+from aistudio.cli.output import cells, emit, json_option, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
@@ -41,8 +41,8 @@ def _render_list(data: dict[str, Any]) -> None:
     table.add_column("command")
     table.add_column("price", max_width=36, overflow="fold")
     for m in data["models"]:
-        table.add_row(m["id"], ", ".join(m["categories"]), m["release_date"] or "",
-                      m["command"] or "", _price(m))
+        table.add_row(*cells(m["id"], ", ".join(m["categories"]), m["release_date"] or "",
+                             m["command"] or "", _price(m)))
     stdout.print(table)
 
 

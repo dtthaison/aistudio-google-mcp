@@ -32,3 +32,18 @@ def test_prompt_list_human_output(logged_in_profile, captured):
     result = CliRunner().invoke(cli, ["prompt", "list", "--type", "chat"])
     assert result.exit_code == 0, result.output
     assert "prompt_391" in result.stdout
+
+
+@respx.mock
+def test_prompt_list_survives_markup_in_titles(logged_in_profile):
+    from aistudio._rpc import wire
+
+    logged_in_profile()
+    rows = [["prompts/a", None, None, None, ["Fix [/] bug"]],
+            ["prompts/b", None, None, None, ["Plan [draft] v2"]]]
+    respx.post(method_url("ListPrompts")).mock(
+        return_value=httpx.Response(200, text=wire.encode([rows]))
+    )
+    result = CliRunner().invoke(cli, ["prompt", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Fix [/] bug" in result.stdout and "Plan [draft] v2" in result.stdout

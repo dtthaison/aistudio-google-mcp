@@ -10,7 +10,7 @@ from rich.table import Table
 
 from aistudio._app.prompts import list_prompts
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import emit, json_option, stdout
+from aistudio.cli.output import cells, emit, json_option, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
@@ -23,7 +23,7 @@ def prompt() -> None:
 def _render_list(data: dict[str, Any]) -> None:
     table = Table("id", "type", "modified", "title")
     for p in data["prompts"]:
-        table.add_row(p["id"], p["type"], p["modified"] or "", p["title"] or "")
+        table.add_row(*cells(p["id"], p["type"], p["modified"] or "", p["title"] or ""))
     stdout.print(table)
 
 
