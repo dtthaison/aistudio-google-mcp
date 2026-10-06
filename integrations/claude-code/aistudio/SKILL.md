@@ -34,6 +34,9 @@ apps.
 | Build apps | `aistudio app list --json` |
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
 | Recently opened items | `aistudio app recent --json` |
+| Service incidents | `aistudio status --json [--active]` |
+| Star / unstar a model | `aistudio models star <id> --json`, `aistudio models unstar <id> --json`; `models list --starred` |
+| Download an app's code | `aistudio app export <app-id-or-prefix> <dir> --json` (refuses a non-empty dir unless `--force`) |
 | Build gallery / templates | `aistudio gallery list --json [--group showcase\|template] [--tag T] [--search T]`, `aistudio gallery get <slug-or-prefix> --json` |
 
 JSON notes:
@@ -48,8 +51,7 @@ These are not in the CLI yet. Say so plainly; do not drive the browser or call G
 endpoints yourself.
 
 - Generating speech, images, video or music.
-- Chatting with a model (`ask`).
-- Exporting Build apps' code.
+- Chatting with a model: it requires a Gemini API key, which is not supported.
 
 ## Build or change an app (only when the user asks)
 
