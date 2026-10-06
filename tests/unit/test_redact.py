@@ -1,3 +1,4 @@
+import base64
 import json
 
 from aistudio._dev.redact import REDACTED_KEY, RawExchange, Redactor
@@ -98,7 +99,7 @@ def test_full_record_contains_no_secrets():
 
 
 ACCESS_TOKEN = "ya29.a0AfH6SMBx-y_z.123abc"
-REFRESH_TOKEN = "1//0gABCDEFGHIJKLMNOPQRSTUV-xyz"
+REFRESH_TOKEN = "1//0g" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 3 + "-xyz_123"
 JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnX3BhcnQtMQ"
 
 
@@ -196,3 +197,13 @@ def test_redact_record_rewrites_an_existing_fixture():
     assert "Test Person" not in dumped
     assert again["method"] == "GetPrompt"
     assert Redactor(extra=("Test Person",)).record(again) == again
+
+
+def test_base64_media_survives_redaction_byte_for_byte():
+    media = base64.b64encode(bytes(range(256)) * 40).decode()
+    # Slash-delimited runs inside standard base64 look like Drive ids and refresh tokens.
+    media = media[:400] + "/1" + "A" * 30 + "/1//0" + "B" * 60 + "+" + media[400:]
+    body = f'[["{DRIVE_A}","{media}"]]'
+    record = Redactor().exchange(exchange(request_body=body.encode()))
+    assert media in record["request"]["body"]
+    assert DRIVE_A not in record["request"]["body"]

@@ -18,7 +18,8 @@ SENSITIVE_HEADERS = frozenset(
         "x-goog-upload-url", "x-goog-upload-control-url", "x-guploader-uploadid",
     }
 )
-API_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{35}")
+# Credential patterns carry boundaries so they never fire inside base64 media.
+API_KEY_RE = re.compile(r"(?<![A-Za-z0-9+/_\-])AIza[0-9A-Za-z_\-]{35}(?![A-Za-z0-9_\-])")
 # Batch bodies (e.g. People API multipart) embed per-request HTTP headers.
 EMBEDDED_HEADER_RE = re.compile(
     r"(?im)^(authorization|proxy-authorization|cookie|x-goog-api-key)[ \t]*:[^\r\n]*"
@@ -28,8 +29,14 @@ PHOTO_URL_RE = re.compile(r"(https?://lh[0-9]\.googleusercontent\.com/a-?/)[A-Za
 GAIA_ID_RE = re.compile(r"(?<![0-9])1[0-9]{20}(?![0-9])")
 _FAKE_GAIA_PREFIX = "1" + "0" * 12
 REDACTED_NAME = "Redacted Name"
+# Long standard-base64 runs are media (images, audio). Identifier and personal-data
+# patterns skip them: a Drive id or name cannot be distinguished from random bytes there,
+# and rewriting them corrupts the payload.
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
 ACCESS_TOKEN_RE = re.compile(r"ya29\.[0-9A-Za-z_\-.]+")
-REFRESH_TOKEN_RE = re.compile(r"1//[0-9A-Za-z_\-]{20,}")
+REFRESH_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9+/])1//0[0-9A-Za-z_\-]{40,}(?![A-Za-z0-9+/=_\-])"
+)
 JWT_RE = re.compile(r"eyJ[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]+\.[0-9A-Za-z_\-]*")
 SECRET_PARAM_RE = re.compile(
     r"(?i)(?<![0-9A-Za-z_])(access_token|token|upload_id|sig|signature)=[^&\s\"'\\]+"
@@ -40,16 +47,19 @@ DRIVE_ID_RE = re.compile(r"(?<![A-Za-z0-9_-])1[A-Za-z0-9_-]{24,43}(?![A-Za-z0-9_
 REDACTED_KEY = "AIza_REDACTED"
 REDACTED_EMAIL = "user@example.com"
 
-# Applied in order; tokens first so later patterns never see partial secrets.
-_SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+# Applied to the whole text, in order; tokens first so later patterns never see partial secrets.
+_CREDENTIALS: tuple[tuple[re.Pattern[str], str], ...] = (
     (EMBEDDED_HEADER_RE, r"\1: REDACTED"),
     (SAPISIDHASH_RE, r"\1 REDACTED"),
-    (PHOTO_URL_RE, r"\1REDACTED"),
     (ACCESS_TOKEN_RE, "ya29.REDACTED"),
     (REFRESH_TOKEN_RE, "1//REDACTED"),
     (JWT_RE, "JWT_REDACTED"),
     (SECRET_PARAM_RE, r"\1=REDACTED"),
     (API_KEY_RE, REDACTED_KEY),
+)
+# Applied outside long base64 runs only.
+_PERSONAL: tuple[tuple[re.Pattern[str], str], ...] = (
+    (PHOTO_URL_RE, r"\1REDACTED"),
     (EMAIL_RE, REDACTED_EMAIL),
     (AUTHUSER_RE, r"\g<1>0"),
 )
@@ -99,9 +109,21 @@ class Redactor:
         return self.ids[real]
 
     def text(self, value: str) -> str:
+        for pattern, replacement in _CREDENTIALS:
+            value = pattern.sub(replacement, value)
+        parts: list[str] = []
+        last = 0
+        for run in _BASE64_RUN_RE.finditer(value):
+            parts.append(self._personal(value[last:run.start()]))
+            parts.append(run.group(0))
+            last = run.end()
+        parts.append(self._personal(value[last:]))
+        return "".join(parts)
+
+    def _personal(self, value: str) -> str:
         for pattern in self._extra:
             value = pattern.sub(REDACTED_NAME, value)
-        for pattern, replacement in _SUBSTITUTIONS:
+        for pattern, replacement in _PERSONAL:
             value = pattern.sub(replacement, value)
         value = GAIA_ID_RE.sub(self._fake_gaia, value)
         return DRIVE_ID_RE.sub(self._fake_id, value)
