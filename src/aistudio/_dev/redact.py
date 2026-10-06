@@ -27,6 +27,10 @@ EMBEDDED_HEADER_RE = re.compile(
 SAPISIDHASH_RE = re.compile(r"(SAPISID[0-9A-Z]*HASH)\s+[^\s\"\\]+")
 PHOTO_URL_RE = re.compile(r"(https?://lh[0-9]\.googleusercontent\.com/a-?/)[A-Za-z0-9_\-=]+")
 GAIA_ID_RE = re.compile(r"(?<![0-9])1[0-9]{20}(?![0-9])")
+# Google Cloud project identifiers (Dashboard calls on every page load).
+CLOUD_CLIENT_RE = re.compile(r"gen-lang-client-[0-9]+")
+PROJECT_NUMBER_RE = re.compile(r"(projects/)[0-9]{6,}")
+PROJECT_ID_RE = re.compile(r"(projects/)[a-z][a-z0-9-]{4,28}[a-z0-9](?![a-z0-9-])")
 _FAKE_GAIA_PREFIX = "1" + "0" * 12
 REDACTED_NAME = "Redacted Name"
 # Long standard-base64 runs are media (images, audio). Identifier and personal-data
@@ -59,6 +63,9 @@ _CREDENTIALS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 # Applied outside long base64 runs only.
 _PERSONAL: tuple[tuple[re.Pattern[str], str], ...] = (
+    (CLOUD_CLIENT_RE, "gen-lang-client-0000000000"),
+    (PROJECT_NUMBER_RE, r"\g<1>000000000000"),
+    (PROJECT_ID_RE, r"\1redacted-project"),
     (PHOTO_URL_RE, r"\1REDACTED"),
     (EMAIL_RE, REDACTED_EMAIL),
     (AUTHUSER_RE, r"\g<1>0"),

@@ -207,3 +207,12 @@ def test_base64_media_survives_redaction_byte_for_byte():
     record = Redactor().exchange(exchange(request_body=body.encode()))
     assert media in record["request"]["body"]
     assert DRIVE_A not in record["request"]["body"]
+
+
+def test_redacts_cloud_project_numbers_and_ids():
+    record = Redactor().exchange(exchange(response_body=(
+        b'[["projects/1234567890123","gen-lang-client-0123456789"],["projects/my-app-42"]]'
+    )))
+    body = record["response"]["body"]
+    assert "1234567890123" not in body and "0123456789" not in body and "my-app-42" not in body
+    assert "projects/000000000000" in body and "gen-lang-client-0000000000" in body
