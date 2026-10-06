@@ -179,3 +179,12 @@ async def test_fresh_deletes_cached_browser_profile(aistudio_home):
                     playwright_factory=factory(FakeChromium(FakeContext(LOGGED_IN))),
                     poll=0, key_wait=0)
     assert not (profile.chrome_dir / "Cookies").exists()
+
+
+async def test_profile_in_use_gets_a_close_the_other_window_hint(aistudio_home):
+    chromium = FakeChromium(error=Exception(
+        "Failed to create a ProcessSingleton for your profile directory"
+    ))
+    with pytest.raises(BrowserError) as info:
+        await run_login(get_profile("default"), playwright_factory=factory(chromium), poll=0)
+    assert "another aistudio browser window" in info.value.hint

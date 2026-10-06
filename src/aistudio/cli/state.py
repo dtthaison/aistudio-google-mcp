@@ -25,3 +25,11 @@ class CliState:
                 "--backend browser is not available for this command yet",
                 hint="drop --backend or use --backend http",
             )
+
+    def require_browser(self) -> None:
+        """Generation is page-driven (spec §5.4); plain HTTP cannot do it."""
+        if self.backend == "http":
+            raise ValidationError(
+                "this command needs the browser; --backend http cannot generate",
+                hint="drop --backend or use --backend browser",
+            )

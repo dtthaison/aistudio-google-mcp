@@ -51,20 +51,30 @@ def default_playwright_factory() -> Callable[[], Any]:
     return async_playwright
 
 
-async def launch_persistent(playwright: Any, profile: Profile, *, browser: str,
-                            headless: bool) -> Any:
+_PROFILE_IN_USE = re.compile(r"ProcessSingleton|SingletonLock|already in use", re.I)
+
+
+async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, headless: bool,
+                            viewport: dict[str, int] | None = None) -> Any:
     """Open the profile's persistent Chrome; translate launch failures into BrowserError."""
+    options: dict[str, Any] = {
+        "channel": None if browser == "chromium" else browser,
+        "headless": headless,
+        "args": CHROME_ARGS,
+        "ignore_default_args": IGNORE_DEFAULT_ARGS,
+    }
+    if viewport:
+        options["viewport"] = viewport
+    else:
+        options["no_viewport"] = True
     try:
         return await playwright.chromium.launch_persistent_context(
-            str(profile.chrome_dir),
-            channel=None if browser == "chromium" else browser,
-            headless=headless,
-            args=CHROME_ARGS,
-            ignore_default_args=IGNORE_DEFAULT_ARGS,
-            no_viewport=True,
+            str(profile.chrome_dir), **options
         )
     except Exception as exc:  # playwright.async_api.Error, missing executables
-        if browser == "chrome":
+        if _PROFILE_IN_USE.search(str(exc)):
+            hint = "another aistudio browser window is using this profile; close it and retry"
+        elif browser == "chrome":
             hint = (
                 'install Google Chrome, or use "--browser chromium" '
                 'after "playwright install chromium"'

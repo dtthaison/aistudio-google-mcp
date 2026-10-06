@@ -1,3 +1,4 @@
+import contextlib
 import json
 import pathlib
 from types import SimpleNamespace
@@ -85,3 +86,37 @@ def make_client():
         return AIStudioClient(HttpTransport(Session(cookies=list(TEST_COOKIES))))
 
     return make
+
+
+class FakeUi:
+    """Scripted stand-in for aistudio._browser.ui.Ui: records ops, replays responses per method.
+
+    ``next`` returns the next scripted response for a method, or None (a timeout) when none
+    are left.
+    """
+
+    def __init__(self, responses=None):
+        self.ops = []
+        self._responses = {k: list(v) for k, v in (responses or {}).items()}
+
+    async def goto(self, url):
+        self.ops.append(("goto", url))
+
+    async def fill_first(self, selector, text, *, timeout_s=30.0):
+        self.ops.append(("fill", selector, text))
+
+    async def press_first(self, selector, key):
+        self.ops.append(("press", selector, key))
+
+    @contextlib.asynccontextmanager
+    async def responses(self):
+        yield self
+
+    async def next(self, method, *, timeout_s):
+        queue = self._responses.get(method) or []
+        return queue.pop(0) if queue else None
+
+
+@pytest.fixture
+def fake_ui():
+    return FakeUi
