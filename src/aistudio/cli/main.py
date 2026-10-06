@@ -7,7 +7,7 @@ import logging
 import click
 
 from aistudio import __version__
-from aistudio.cli import profile_cmd, session_cmd
+from aistudio.cli import dev_cmd, profile_cmd, session_cmd
 from aistudio.cli.state import CliState
 
 
@@ -35,6 +35,7 @@ def cli(ctx: click.Context, profile_name: str | None, backend: str, verbose: int
 cli.add_command(session_cmd.auth)
 cli.add_command(session_cmd.login)
 cli.add_command(profile_cmd.profile)
+cli.add_command(dev_cmd.dev)
 
 
 def main() -> None:
