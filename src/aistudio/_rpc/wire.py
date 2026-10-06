@@ -97,3 +97,13 @@ def safe_index(value: Any, *path: int, method: str, expected: str) -> Any:
             raise SchemaDriftError(method, tuple(path[: depth + 1]), expected)
         current = current[index]
     return current
+
+
+def opt_index(value: Any, *path: int) -> Any:
+    """Like ``safe_index`` for optional fields: None when the path does not exist."""
+    current = value
+    for index in path:
+        if not isinstance(current, list) or not -len(current) <= index < len(current):
+            return None
+        current = current[index]
+    return current

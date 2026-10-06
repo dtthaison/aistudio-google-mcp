@@ -1,0 +1,26 @@
+"""Every MakerSuite RPC the client sends, with the transport proved in M1 (spec §5.1).
+
+Transports come from `aistudio dev replay` results recorded in docs/wire/findings.md.
+"""
+
+from __future__ import annotations
+
+import enum
+from dataclasses import dataclass
+
+
+class Transport(enum.Enum):
+    HTTP = "http"
+    BROWSER = "browser"
+
+
+@dataclass(frozen=True)
+class RpcSpec:
+    method: str
+    transport: Transport
+    idempotent: bool
+
+
+LIST_MODELS = RpcSpec("ListModels", Transport.HTTP, idempotent=True)
+LIST_PROMPTS = RpcSpec("ListPrompts", Transport.HTTP, idempotent=True)
+COUNT_TOKENS = RpcSpec("CountTokens", Transport.HTTP, idempotent=True)

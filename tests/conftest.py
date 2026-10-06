@@ -1,8 +1,11 @@
 import json
+import pathlib
+from types import SimpleNamespace
 
 import pytest
 
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
+from aistudio._rpc import wire
 from aistudio.paths import get_profile
 
 TEST_API_KEY = "AIza" + "k" * 35
@@ -52,3 +55,21 @@ def write_rpc_fixture():
         return path
 
     return write
+
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def captured():
+    """Load an M1 capture fixture: decoded request/response plus the raw record."""
+
+    def load(method, n=1):
+        record = json.loads((FIXTURES / method / f"{n}.json").read_text(encoding="utf-8"))
+        return SimpleNamespace(
+            request=wire.decode(record["request"]["body"]),
+            response=wire.decode(record["response"]["body"]),
+            raw=record,
+        )
+
+    return load
