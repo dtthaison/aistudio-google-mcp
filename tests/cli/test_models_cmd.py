@@ -9,6 +9,7 @@ from aistudio.cli.main import cli
 
 
 def serve_catalog(captured):
+    respx.post(method_url("GetUserPreferences")).mock(return_value=httpx.Response(200, text="[2]"))
     respx.post(method_url("ListModels")).mock(
         return_value=httpx.Response(200, text=captured("ListModels").raw["response"]["body"])
     )

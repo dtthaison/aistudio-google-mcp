@@ -10,12 +10,14 @@ from aistudio._rpc import registry
 from aistudio._rpc.params import apps as apps_params
 from aistudio._rpc.params import generate as generate_params
 from aistudio._rpc.params import models as models_params
+from aistudio._rpc.params import preferences as preferences_params
 from aistudio._rpc.params import prompts as prompts_params
 from aistudio._rpc.params import status as status_params
 from aistudio._rpc.registry import RpcSpec, Transport
 from aistudio._rpc.rows.apps import decode_apps, decode_gallery, decode_recent, decode_runs
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
+from aistudio._rpc.rows.preferences import decode_starred
 from aistudio._rpc.rows.prompts import decode_prompt_list
 from aistudio._rpc.rows.status import decode_incidents
 from aistudio._transport.http import HttpTransport
@@ -66,6 +68,18 @@ class _Models:
 
     async def list(self, *, tz: tzinfo | None = None) -> list[Model]:
         return decode_models(await self.fetch_raw(), tz=tz)
+
+    async def starred(self) -> list[tuple[str, tuple[int, int]]]:
+        raw = await self._client.call(registry.GET_PREFERENCES,
+                                      preferences_params.get_preferences())
+        return decode_starred(raw)
+
+    async def set_starred(
+        self, starred: list[tuple[str, tuple[int, int]]]
+    ) -> list[tuple[str, tuple[int, int]]]:
+        raw = await self._client.call(registry.UPDATE_PREFERENCES,
+                                      preferences_params.set_starred(starred))
+        return decode_starred(raw)
 
 
 class _Prompts:

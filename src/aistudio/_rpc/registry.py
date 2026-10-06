@@ -29,3 +29,5 @@ LIST_RECENT_APPLETS = RpcSpec("ListRecentApplets", Transport.HTTP, idempotent=Tr
 LIST_BUNDLED_APPLETS = RpcSpec("ListBundledApplets", Transport.HTTP, idempotent=True)
 LIST_APPLET_TRAJECTORIES = RpcSpec("ListAppletTrajectories", Transport.HTTP, idempotent=True)
 LIST_INCIDENTS = RpcSpec("ListIncidentsHistory", Transport.HTTP, idempotent=True)
+GET_PREFERENCES = RpcSpec("GetUserPreferences", Transport.HTTP, idempotent=True)
+UPDATE_PREFERENCES = RpcSpec("UpdateUserPreferences", Transport.HTTP, idempotent=False)
