@@ -49,7 +49,20 @@ endpoints yourself.
 
 - Generating speech, images, video or music.
 - Chatting with a model (`ask`).
-- Creating, updating or exporting Build apps.
+- Exporting Build apps' code.
+
+## Build or change an app (only when the user asks)
+
+```bash
+aistudio app create "<idea>" --json             # new app
+aistudio app prompt <app-id-or-prefix> "<change>" --json
+```
+
+- Both take a few minutes, use the user's Build quota, and open a minimized Chrome window.
+  Run them in the background if your harness supports that.
+- Result: `{app_id, url, title, status, files, seconds}`. `status: "timeout"` (exit 2) means it
+  is still building: give the user the `url`.
+- Pass the user's own words as the idea/change; do not expand them.
 
 ## Ask first
 
