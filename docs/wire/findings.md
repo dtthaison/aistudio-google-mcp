@@ -32,13 +32,14 @@ The session did **not** exercise:
 | H1 | X-Goog-Api-Key is a static web key | **true** | `aistudio login` captured it from the `x-goog-api-key` header of live MakerSuite requests (`api_key_captured: true`). 54 replays signed with it returned 200. |
 | H2 | Prompt-library RPCs do not need BotGuard | **likely true** | **Reads:** `ListPrompts` replayed over plain HTTP returned `http-ok` 4/4. **Writes:** `CreatePrompt` replayed returned `http-reached`, a 400 `VALIDATION_ERROR` about base64 decoding. The failure came from the fixture's media, which the pre-fix redactor corrupted. Auth and transport were accepted with no 403 or BotGuard rejection. Not observed: `UpdatePrompt` and `DeletePrompt`. |
 | H3 | Errors use `[,[code,"msg"]]` | **true** | The 403 and 400 replies decoded through `wire.parse_error`, with messages such as "The caller does not have permission" and "Invalid value at 'prompt.chunked_prompt…'". |
-| H4 | BotGuard token not bound to content | **inconclusive** | `scripts/spikes/route_rewrite.py` timed out after 15 min and intercepted no request carrying the marker. Needs a re-run with the user. |
+| H4 | BotGuard token not bound to content | **false** (follow-up session) | `scripts/spikes/tts_rewrite.py` on the speech page: the swapped text with a fresh page-minted token got 403 `[,[7,"The caller does not have permission"]]`. The control (same path, original bytes) got 200 with 2.08 s of audio. The token covers the request content. |
 | H5 | Video returns a pollable operation | not observed | No video was generated. |
 | H6 | Inline attachments accepted | partial | `CreatePrompt` carries images inline as `prompt.chunked_prompt.chunks[].inline_image.data`, which is base64 bytes. Upload paths for image editing and transcription were not observed. |
 | H7 | CountTokens and ListModels work over HTTP | **true** | Both returned `http-ok`: `CountTokens` 4/4 and `ListModels` 2/2. |
 | H8 | Catalog metadata comes from one RPC | **likely true** | One `ListModels` response (99 KB) lists 86 models across all picker categories: Gemini, Gemma, image (`nano-banana*`, `*-image`), Veo, TTS, transcribe, Live, Lyria (`lyria-3.5`, `lyria-3-*`), and agents (`antigravity-preview-*`, `deep-research-*`). It also contains price strings (`$`), paid markers and knowledge cutoffs. M2 must still map the field indices. |
 | H9 | Lyria song generation is request/job | not observed | `lyria-3.5` is present in the catalog, but no music was generated. |
-| H10 | Stars are server-side | not observed | `GetUserPreferences` and `UpdateUserPreferences` use a positional preferences message with a field mask (for example `["has_seen_ssgc_onboarding"]`). Star state was not seen. |
+| H10 | Stars are server-side | **true** (follow-up session) | `UpdateUserPreferences` with field `[6]` = `[["models/<id>", [seconds, nanos]]]` and field mask `["starred_models"]`. Unstar sends an empty list with the same mask. |
+| H10-old | (first-session note) | not observed | `GetUserPreferences` and `UpdateUserPreferences` use a positional preferences message with a field mask (for example `["has_seen_ssgc_onboarding"]`). Star state was not seen. |
 
 ## Transport per RPC (plain-HTTP replay, signed by `aistudio`)
 
@@ -105,3 +106,48 @@ is conservative on purpose.
   3. capturing prompt rename and delete.
 
   If neither BotGuard strategy works then, revisit spec §5.4 before M3.
+
+## Follow-up session (2026-10-06, afternoon)
+
+### H4 resolution: generation must be page-built
+
+- **Swap run.** Route interception plus a text swap, with a fresh token minted by the page:
+  **403**.
+- **Control run.** The same interception path, sending the original bytes: **200**, audio
+  returned.
+- **Consequence.** Neither `RouteRewriteStrategy` (spec §5.4 #2) nor any "mint once, reuse" scheme
+  can work. Generation requests must be built by the page itself, with the token minted for that
+  exact content.
+- **Proven route.** Drive the page UI (fill, select, Run) and capture the response from the
+  network.
+- **Remaining alternative.** `SnapshotCallStrategy`, calling the page's BotGuard function with our
+  own body. It stays unexplored.
+
+### TTS (speech page, `https://aistudio.google.com/generate-speech`)
+
+- **Request** (`GenerateContent`, fixtures 1 and 3):
+
+  | Field | Meaning |
+  |---|---|
+  | `[0]` | model |
+  | `[1][0][0][0][1]` | text; inline expression tags such as `<gasp>`/`<laugh>` live inside it |
+  | part `[40][1]` | style instruction |
+  | `[3][4..6]` | temperature, topP, topK |
+  | `[3][14]` | `[3]` (audio) |
+  | `[3][15][0][0][0]` | voice, e.g. `Fola` |
+  | `[4]` | BotGuard token |
+
+- **Response.** A streamed list of chunks, `resp[0][i]`. Each chunk carries
+  `[0][0][0][0][2] = ["audio/l16; rate=24000; channels=1", base64 PCM]` plus usage at `[2]`.
+  Concatenating the PCM and adding a WAV header gives valid audio: fixture 3 is 10.56 s.
+- **Page controls** (accessible names; `scripts/spikes/tts_controls.py`):
+  - Text: "Create new dialog" opens the textbox "Speech block text".
+  - Voice: "Speaker 1 - <voice>" opens the voice panel. The panel has a "Search voices" box;
+    the filters Language, Gender, Pitch, Style and Use case; voice buttons by name (Tova, Bodi,
+    Lumi, Sola, Koda, Nika, Tavi, …, with "View all N" groups); "New voice"; and sample playback.
+  - Style: "Style" opens the textbox "Describe the voice style".
+  - Expressions: "+ Expression".
+  - Multi-speaker: "Add speech block".
+  - Model: the button naming the current model opens the picker with a search box.
+  - Run: "Run" (⌘↵).
+  - Also present: "Get code", "Open voice settings", "Model settings".
