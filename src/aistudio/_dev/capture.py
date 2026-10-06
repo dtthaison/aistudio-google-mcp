@@ -20,11 +20,12 @@ from aistudio.paths import Profile
 log = logging.getLogger(__name__)
 
 DEFAULT_HOST_PATTERN = r"(^|\.)clients6\.google\.com$|(^|\.)googleapis\.com$"
-# Never recorded: Cloud console (Dashboard) calls carry project and billing details, and
-# ListAppletSecrets returns Build apps' secret values (e.g. their Gemini API key).
+# Never recorded: Cloud console (Dashboard) calls and EvaluateTargeting carry project and
+# billing details, and ListAppletSecrets returns Build apps' secret values (e.g. their API key).
 SKIP_METHODS = frozenset({
     "ListCloudProjects", "ListCloudApiKeys", "ListImportedProjects",
     "GetCloudProjectQuotaTier", "GetDefaultCloudProject", "ListAppletSecrets",
+    "EvaluateTargeting",
 })
 
 CHECKLIST = (

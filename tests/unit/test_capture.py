@@ -170,3 +170,8 @@ async def test_applet_secret_values_are_never_recorded(tmp_path):
     recorder = CaptureRecorder(FixtureWriter(tmp_path))
     assert await recorder.handle(FakeRequest(RPC + "ListAppletSecrets")) is None
     assert not list(tmp_path.iterdir())
+
+
+async def test_targeting_calls_with_billing_ids_are_never_recorded(tmp_path):
+    recorder = CaptureRecorder(FixtureWriter(tmp_path))
+    assert await recorder.handle(FakeRequest(RPC + "EvaluateTargeting")) is None

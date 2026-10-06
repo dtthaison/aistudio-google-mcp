@@ -242,3 +242,12 @@ def test_redacts_base64_encoded_credentials():
     assert hidden not in body and url_hidden not in body
     assert body.count("REDACTED_BASE64_SECRET") == 2
     assert harmless in body
+
+
+def test_redacts_bare_billing_account_ids():
+    record = Redactor().exchange(exchange(
+        request_body=b'[null,["016826-968A7E-40ADD8","017449-0B0F57-200385"],[2,[5]]]'
+    ))
+    body = record["request"]["body"]
+    assert "968A7E" not in body and "0B0F57" not in body
+    assert body.count("000000-000000-000000") == 2

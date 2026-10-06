@@ -206,3 +206,24 @@ is conservative on purpose.
   - ⌘↵ pressed in that window is silently ignored; the text stays in the box and nothing is sent.
   - `app prompt` therefore waits for Send to be enabled before submitting.
   - The `/apps` create page has no Send button, and an immediate ⌘↵ works there.
+
+## Export, chat gate, status, stars (`scripts/spikes/chat_export_discovery.py`)
+
+- **Export is plain HTTP.**
+  - `GetApplet([app_id])` returns the app; `[0][5]` is the latest snapshot time `[s, ns]`.
+  - `GetCodeAssistantSnapshot([app_id, null, ts])` returns `[["model", summary, _, ts, [[path, sha256], …]]]`.
+  - Each file is a plain `GET https://aistudio.google.com/_/upload/<app_id>/file/<sha256>` with
+    session cookies only. The body is the raw file, and its SHA-256 equals the listed hash.
+  - Both RPCs replayed `http-ok`.
+- **Playground chat is gated by an API key.** On a new chat (default model, with Code execution,
+  Search and URL context switches all on by default), pressing Run calls `BatchGetProjectUsageLimits`
+  and opens **"Link an API key"** ("Your project does not have an API key yet"; choose a project,
+  "Create key and link", "Set up billing", "Link API key"). No `GenerateContent` is sent. Speech
+  generation earlier did not hit this gate, so it is per model.
+- **`ListIncidentsHistory`** returns incidents: `[id, title, _, [[state, "YYYY-MM-DD HH:MM",
+  [epoch], message], …], severity?, [products]]`. Plain HTTP works.
+- **Account tier calls are opaque.** `GetAiStudioBenefitTier` returns `[1]`,
+  `GetGdpProfileAndBenefits` returns `[1]`, and `GetUserRestrictions` returns `[]`. They carry no
+  user-meaningful limits, so no `account` command for now.
+- **Never recorded:** `EvaluateTargeting` sends bare billing-account ids. The redactor now also
+  masks bare `XXXXXX-XXXXXX-XXXXXX` ids.

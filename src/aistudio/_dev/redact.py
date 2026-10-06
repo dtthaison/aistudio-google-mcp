@@ -31,6 +31,9 @@ GAIA_ID_RE = re.compile(r"(?<![0-9])1[0-9]{20}(?![0-9])")
 CLOUD_CLIENT_RE = re.compile(r"gen-lang-client-[0-9]+")
 PROJECT_NUMBER_RE = re.compile(r"(projects/)[0-9]{6,}")
 BILLING_ACCOUNT_RE = re.compile(r"(billingAccounts/)[0-9A-Fa-f]{6}-[0-9A-Fa-f]{6}-[0-9A-Fa-f]{6}")
+BARE_BILLING_ID_RE = re.compile(
+    r"(?<![0-9A-Za-z])[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}(?![0-9A-Za-z])"
+)
 # Build app previews run on Cloud Run hosts named after the app and the project number.
 RUN_APP_HOST_RE = re.compile(r"[a-z0-9-]+-[0-9]{6,}\.([a-z0-9-]+)\.run\.app")
 PROJECT_ID_RE = re.compile(r"(projects/)[a-z][a-z0-9-]{4,28}[a-z0-9](?![a-z0-9-])")
@@ -74,6 +77,7 @@ _CREDENTIALS: tuple[tuple[re.Pattern[str], str], ...] = (
 _PERSONAL: tuple[tuple[re.Pattern[str], str], ...] = (
     (RUN_APP_HOST_RE, r"app-preview-redacted.\1.run.app"),
     (BILLING_ACCOUNT_RE, r"\g<1>000000-000000-000000"),
+    (BARE_BILLING_ID_RE, "000000-000000-000000"),
     (CLOUD_CLIENT_RE, "gen-lang-client-0000000000"),
     (PROJECT_NUMBER_RE, r"\g<1>000000000000"),
     (PROJECT_ID_RE, r"\1redacted-project"),
