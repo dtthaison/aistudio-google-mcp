@@ -73,3 +73,15 @@ def captured():
         )
 
     return load
+
+
+@pytest.fixture
+def make_client():
+    from aistudio._auth.session import Session
+    from aistudio._transport.http import HttpTransport
+    from aistudio.client import AIStudioClient
+
+    def make():
+        return AIStudioClient(HttpTransport(Session(cookies=list(TEST_COOKIES))))
+
+    return make
