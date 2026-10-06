@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
@@ -31,3 +33,22 @@ def logged_in_profile(aistudio_home):
         return profile
 
     return make
+
+
+@pytest.fixture
+def write_rpc_fixture():
+    from aistudio._transport.http import method_url
+
+    def write(root, method, body="[]", url=None):
+        path = root / method / "1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "method": method,
+            "url": url or method_url(method),
+            "http_method": "POST",
+            "request": {"headers": {}, "body": body},
+            "response": {"status": 200, "headers": {}, "body": "[]"},
+        }))
+        return path
+
+    return write

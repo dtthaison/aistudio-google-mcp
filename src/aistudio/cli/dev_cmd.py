@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import click
+from rich.table import Table
 
+from aistudio._auth.session import Session
 from aistudio._dev.capture import CHECKLIST, DEFAULT_HOST_PATTERN, CaptureRecorder, run_capture
 from aistudio._dev.fixtures import FixtureWriter
+from aistudio._dev.replay import replay_all
+from aistudio._transport.http import HttpTransport
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
@@ -58,3 +62,35 @@ def capture(state: CliState, out: Path, browser: str, host_pattern: str,
         "by_method": dict(sorted(recorder.counts.items())),
     }
     emit(data, json_output=json_output, render=_render_capture)
+
+
+def _render_replay(data: dict[str, Any]) -> None:
+    table = Table("fixture", "method", "verdict", "status", "code")
+    for r in data["results"]:
+        table.add_row(r["fixture"], r["method"], r["verdict"], str(r["http_status"] or ""),
+                      r["error_code"] or "")
+    stdout.print(table)
+
+
+@dev.command("replay")
+@click.argument("target", type=click.Path(exists=True, path_type=Path))
+@click.option("--allow-mutating", is_flag=True,
+              help="Also send RPCs that create, change, delete or generate "
+                   "(may spend quota or money).")
+@click.option("--delay", type=click.FloatRange(min=0), default=0.5, show_default=True,
+              help="Seconds to wait between sent requests.")
+@json_option
+@click.pass_obj
+@handle_errors
+def replay(state: CliState, target: Path, allow_mutating: bool, delay: float,
+           json_output: bool) -> None:
+    """Re-send captured fixtures over plain HTTP and report which ones still work."""
+    session = Session.load(state.profile())
+
+    async def run() -> list[Any]:
+        async with HttpTransport(session) as transport:
+            return await replay_all(target, transport, allow_mutating=allow_mutating, delay=delay)
+
+    results = asyncio.run(run())
+    data = {"results": [r.to_dict() for r in results], "count": len(results)}
+    emit(data, json_output=json_output, render=_render_replay)
