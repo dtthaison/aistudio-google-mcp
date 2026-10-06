@@ -1,15 +1,17 @@
-"""Session commands: ``auth check`` and ``auth logout`` (login is added in Task 8)."""
+"""Session commands: ``login``, ``auth check`` and ``auth logout``."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import click
 
 from aistudio._app.auth import auth_status
+from aistudio._auth.login import run_login
 from aistudio._auth.storage import delete_credentials
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.output import confirm_or_fail, emit, json_option, stdout
+from aistudio.cli.output import confirm_or_fail, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 
 
@@ -56,3 +58,28 @@ def logout(state: CliState, yes: bool, json_output: bool) -> None:
     data = {"profile": profile.name, "removed": delete_credentials(profile)}
     emit(data, json_output=json_output,
          render=lambda d: stdout.print(f"Removed: {', '.join(d['removed']) or 'nothing'}"))
+
+
+@click.command()
+@click.option("--browser", type=click.Choice(["chrome", "chromium", "msedge"]), default="chrome",
+              show_default=True, help="Browser to sign in with.")
+@click.option("--fresh", is_flag=True, help="Delete the cached browser profile first.")
+@click.option("--timeout", type=click.IntRange(min=1), default=300, show_default=True,
+              help="Seconds to wait for sign-in.")
+@json_option
+@click.pass_obj
+@handle_errors
+def login(state: CliState, browser: str, fresh: bool, timeout: int, json_output: bool) -> None:
+    """Sign in to AI Studio in a browser window and save the session."""
+    profile = state.profile()
+    if not json_output:
+        stderr.print(f"Opening {browser}. Sign in to AI Studio in the window that appears.")
+    result = asyncio.run(run_login(profile, browser=browser, fresh=fresh, timeout=timeout))
+    data = {
+        "profile": result.profile,
+        "account": {"email": result.account.email, "authuser": result.account.authuser},
+        "api_key_captured": result.api_key_captured,
+    }
+    emit(data, json_output=json_output,
+         render=lambda d: stdout.print(
+             f"Logged in (profile {d['profile']}, API key captured: {d['api_key_captured']})"))

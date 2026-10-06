@@ -33,6 +33,7 @@ def cli(ctx: click.Context, profile_name: str | None, backend: str, verbose: int
 
 
 cli.add_command(session_cmd.auth)
+cli.add_command(session_cmd.login)
 cli.add_command(profile_cmd.profile)
 
 
