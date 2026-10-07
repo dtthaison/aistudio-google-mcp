@@ -6,6 +6,7 @@ from aistudio._browser.speech_page import (
     MODEL_BUTTON,
     SPEAKER,
     SPEECH_URL,
+    STYLE_SAVE_MS,
     TEXT_BOX,
     VIEW_ALL,
     VOICE_SEARCH,
@@ -55,20 +56,30 @@ async def test_unknown_model_is_a_validation_error_and_closes_the_picker(fake_ui
     assert "models list" in info.value.hint
 
 
-async def test_select_voice_normalizes_the_name_and_closes_the_panel(fake_ui):
+async def test_select_voice_normalizes_the_name_activates_the_card_and_closes_the_panel(fake_ui):
     ui = fake_ui(labels={("button", SPEAKER.pattern): [["Speaker 1 - Fola arrow_drop_down"],
+                                                       ["Speaker 1 - Fola arrow_drop_down"],
                                                        ["Speaker 1 - Tova arrow_drop_down"]]},
                  visible={("button", "Tova"): [True], ("textbox", VOICE_SEARCH): [True]})
     assert await SpeechPage(ui).select_voice("tova") == "Tova"
     assert ui.ops == [("click", "button", SPEAKER.pattern, 0),
                       ("fill", "textbox", VOICE_SEARCH, "Tova"),
-                      ("click", "button", "Tova", 0),
+                      ("activate", "button", "Tova", 0),
                       ("key", "Escape")]
 
 
 async def test_select_voice_is_a_no_op_when_already_current(fake_ui):
     ui = fake_ui(labels={("button", SPEAKER.pattern): [["Speaker 1 - Tova arrow_drop_down"]]})
     assert await SpeechPage(ui).select_voice("Tova") == "Tova"
+    assert ui.ops == []
+
+
+async def test_select_voice_waits_for_the_speaker_label_before_deciding(fake_ui):
+    # Live: right after the page opens the Speaker button has no label yet. Reading it then made
+    # the current voice look unset, and its card is named "Fola (Current)", so the search failed.
+    ui = fake_ui(labels={("button", SPEAKER.pattern): [[], [],
+                                                       ["Speaker 1 - Fola arrow_drop_down"]]})
+    assert await SpeechPage(ui).select_voice("fola") == "Fola"
     assert ui.ops == []
 
 
@@ -98,6 +109,16 @@ async def test_style_text_and_run(fake_ui):
                       ("fill", "textbox", "Describe the voice style", "warm"),
                       ("fill", "textbox", TEXT_BOX, "Hello <laugh>"),
                       ("press", "textbox", TEXT_BOX, RUN_SHORTCUT)]
+
+
+async def test_style_waits_for_ai_studio_to_save_it(fake_ui):
+    # Live probes: Run with no wait sent no style (0/3); after 1-1.5 s, 10/11; after 3 s, 6/6.
+    ui = fake_ui(record_pauses=True)
+    await SpeechPage(ui).set_style("warm")
+    assert ui.ops == [("click", "button", "Style", 0),
+                      ("fill", "textbox", "Describe the voice style", "warm"),
+                      ("pause", STYLE_SAVE_MS)]
+    assert STYLE_SAVE_MS >= 3000
 
 
 async def test_run_without_a_response_is_a_browser_error(fake_ui):
@@ -169,6 +190,7 @@ async def test_a_voice_panel_that_never_loads_is_an_error_not_zero_voices(fake_u
 
 async def test_voice_check_waits_for_the_speaker_button_to_rerender(fake_ui):
     ui = fake_ui(labels={("button", SPEAKER.pattern): [["Speaker 1 - Fola arrow_drop_down"],
+                                                       ["Speaker 1 - Fola arrow_drop_down"],
                                                        [], [],
                                                        ["Speaker 1 - Tova arrow_drop_down"]]},
                  visible={("button", "Tova"): [True], ("textbox", VOICE_SEARCH): [True]})

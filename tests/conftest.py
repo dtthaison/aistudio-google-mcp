@@ -96,8 +96,9 @@ class FakeUi:
     are left.
     """
 
-    def __init__(self, responses=None, labels=None, visible=None):
+    def __init__(self, responses=None, labels=None, visible=None, record_pauses=False):
         self.ops = []
+        self._record_pauses = record_pauses
         self._responses = {k: list(v) for k, v in (responses or {}).items()}
         self._labels = {k: list(v) for k, v in (labels or {}).items()}
         self._visible = {k: list(v) for k, v in (visible or {}).items()}
@@ -131,6 +132,9 @@ class FakeUi:
     async def fill(self, role, name, text):
         self.ops.append(("fill", role, self._key(name), text))
 
+    async def activate(self, role, name, *, exact=False, nth=0):
+        self.ops.append(("activate", role, self._key(name), nth))
+
     async def press(self, role, name, key):
         self.ops.append(("press", role, self._key(name), key))
 
@@ -144,7 +148,8 @@ class FakeUi:
         return self._answer(self._labels, (role, self._key(name)), [])
 
     async def pause(self, ms):
-        pass
+        if self._record_pauses:
+            self.ops.append(("pause", ms))
 
     @contextlib.asynccontextmanager
     async def responses(self):

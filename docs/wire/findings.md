@@ -173,6 +173,25 @@ is conservative on purpose.
 - **Model picker.** The run-settings button label contains the current model id. The picker has a
   "Search" box. An option's label contains its model id.
 
+### Speech style and voice-panel fixes (2026-10-07, free probes)
+
+Each probe blocked GenerateContent inside the page (patched XHR/fetch) and read the request
+body, so nothing was generated.
+
+- **The style box saves after a delay.** Filling "Describe the voice style" then pressing ⌘↵ at
+  once sent no style (0/3). After a 1–1.5 s wait: 10/11. After 3 s: 6/6. The box has its
+  `input`/`blur`/`keydown` listeners from the moment it appears, and no storage changes when it
+  saves, so there is no signal to wait on: `set_style` waits 3 s. When sent, the style is at
+  `[1][0][0][0][40][1]`.
+- **Voice cards can sit off-screen.** The voice panel is a sliding side panel with a blur
+  backdrop. In a minimized window its cards were measured at x=1631 in a 1600-wide viewport. A
+  pointer click there can land on the backdrop ("intercepts pointer events"). A favorited voice
+  appears twice (Favorites and its group). Focusing the card and pressing Enter selected the voice
+  every time (`Ui.activate`).
+- **The current voice's card is named "<Voice> (Current)".** Right after the page opens the
+  Speaker button has no label yet, so `select_voice` first waits for it.
+- **The voice resets to Fola** on each page load: choosing a voice does not change the account.
+
 ## Build create/update discovery (`scripts/spikes/build_drive.py`)
 
 - **A minimized window works.** Both create and update succeeded from a **minimized** Chrome window,

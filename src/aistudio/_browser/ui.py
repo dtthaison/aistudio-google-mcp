@@ -57,6 +57,9 @@ class Ui(Protocol):
 
     async def fill(self, role: str, name: Name, text: str) -> None: ...
 
+    async def activate(self, role: str, name: Name, *, exact: bool = False,
+                       nth: int = 0) -> None: ...
+
     async def press(self, role: str, name: Name, key: str) -> None: ...
 
     async def key(self, key: str) -> None: ...
@@ -203,6 +206,11 @@ class PlaywrightUi:
     async def press(self, role: str, name: Name, key: str) -> None:
         locator = self._role(role, name).first
         await self._act(role, name, lambda: locator.press(key, timeout=CONTROL_TIMEOUT_MS))
+
+    async def activate(self, role: str, name: Name, *, exact: bool = False, nth: int = 0) -> None:
+        """Focus a control and press Enter; unlike a click, a covering overlay cannot catch it."""
+        locator = self._role(role, name, exact).nth(nth)
+        await self._act(role, name, lambda: locator.press("Enter", timeout=CONTROL_TIMEOUT_MS))
 
     async def key(self, key: str) -> None:
         await self._page.keyboard.press(key)

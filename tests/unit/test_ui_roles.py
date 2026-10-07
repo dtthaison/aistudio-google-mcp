@@ -85,6 +85,16 @@ async def test_click_fill_press_and_key_reach_the_page():
     assert page.keyboard.pressed == ["Escape"]
 
 
+async def test_activate_presses_enter_on_the_chosen_control():
+    # Keyboard activation: an overlay covering the control cannot intercept it (voice cards).
+    first, second = El(), El()
+    page = Page({"button": [first, second]})
+    await PlaywrightUi(page).activate("button", "Tova", exact=True, nth=1)
+    assert second.actions == [("press", "Enter")]
+    assert first.actions == []
+    assert page.asked[-1] == ("button", "Tova", True)
+
+
 async def test_a_missing_control_is_a_browser_error_naming_it():
     page = Page({"textbox": [El(fail=TimeoutError("Timeout 30000ms exceeded"))]})
     with pytest.raises(BrowserError) as info:

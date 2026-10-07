@@ -27,6 +27,7 @@ BACK = re.compile(r"^Back to library$")  # the voice-group view's back button
 POLLS = 8  # x 250 ms: the panel's search filters asynchronously
 LOAD_POLLS = 20  # x 250 ms: voice names render ~1 s after the panel opens (live probe)
 FAVORITE = re.compile(r"^(?:Favorite|Remove from favorites) (\S+)$")
+STYLE_SAVE_MS = 3000  # AI Studio saves the style box after a delay; a Run pressed sooner sends none
 
 
 def voice_display_name(voice: str) -> str:
@@ -59,6 +60,9 @@ class SpeechPage:
 
     async def select_voice(self, voice: str) -> str:
         name = voice_display_name(voice)
+        # The Speaker label renders after the page opens. Read too early, the current voice looks
+        # unset, and its card ("Fola (Current)") then never matches the search.
+        await self._loaded("button", SPEAKER)
         if await self._speaker_is(name):
             return name
         await self._ui.click("button", SPEAKER)
@@ -66,7 +70,9 @@ class SpeechPage:
         if not await self._eventually_visible("button", name, exact=True):
             await self._ui.key("Escape")
             raise ValidationError(f"no voice named {name!r}", hint='see "aistudio voices list"')
-        await self._ui.click("button", name, exact=True)
+        # Keyboard, not a click: in a minimized window the sliding voice panel can still be
+        # off-screen, and a click on its card lands on the panel's backdrop (live probe).
+        await self._ui.activate("button", name, exact=True)
         await self._ui.pause(500)
         if await self._ui.visible("textbox", VOICE_SEARCH):
             await self._ui.key("Escape")  # the panel stays open after a choice
@@ -79,6 +85,7 @@ class SpeechPage:
     async def set_style(self, style: str) -> None:
         await self._ui.click("button", STYLE_BUTTON, exact=True)
         await self._ui.fill("textbox", STYLE_BOX, style)
+        await self._ui.pause(STYLE_SAVE_MS)
 
     async def set_text(self, text: str) -> None:
         await self._ui.fill("textbox", TEXT_BOX, text)
