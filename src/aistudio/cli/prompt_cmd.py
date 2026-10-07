@@ -29,7 +29,7 @@ def _render_list(data: dict[str, Any]) -> None:
 
 @prompt.command("list")
 @click.option("--limit", type=click.IntRange(1, 1000), default=100, show_default=True,
-              help="Page size requested from AI Studio.")
+              help="How many prompts to request from AI Studio; --type filters within them.")
 @click.option("--type", "prompt_type", type=click.Choice(["chat", "video"]),
               help="Only chat prompts or only Veo (video) prompts.")
 @json_option

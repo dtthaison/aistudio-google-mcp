@@ -38,8 +38,12 @@ def pick(items: Sequence[T], key: Callable[[T], str], wanted: str, *, noun: str,
 
 
 async def list_apps(client: AIStudioClient, *, limit: int = 1000) -> dict[str, Any]:
-    apps = await client.apps.list(limit)
-    return {"apps": [a.to_dict() for a in apps], "count": len(apps)}
+    apps, skipped = await client.apps.list_checked(limit)
+    apps = apps[:limit]
+    warnings = ([f"skipped {skipped} app entr{'y' if skipped == 1 else 'ies'} AI Studio sent "
+                 "in an unknown shape"] if skipped else [])
+    return {"apps": [a.to_dict() for a in apps], "count": len(apps),
+            **({"warnings": warnings} if warnings else {})}
 
 
 async def get_app(client: AIStudioClient, app_id: str) -> dict[str, Any]:

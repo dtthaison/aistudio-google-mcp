@@ -39,8 +39,19 @@ def _list_at(response: Any, *path: int, method: str, expected: str) -> list[Any]
 
 
 def decode_apps(response: Any) -> list[App]:
+    return decode_apps_checked(response)[0]
+
+
+def decode_apps_checked(response: Any) -> tuple[list[App], int]:
+    """The apps, plus how many entries were skipped because they had no recognisable id."""
     entries = _list_at(response, 0, method="ListApplets", expected="the app list")
-    return [_app(entry, i) for i, entry in enumerate(entries)]
+    apps: list[App] = []
+    for i, entry in enumerate(entries):
+        try:
+            apps.append(_app(entry, i))
+        except SchemaDriftError:  # one odd entry must not hide every other app
+            continue
+    return apps, len(entries) - len(apps)
 
 
 def _app(entry: Any, i: int) -> App:

@@ -89,3 +89,21 @@ def test_a_blank_id_is_rejected_not_matched_to_everything():
 
     with pytest.raises(ValidationError):
         pick(["a", "b"], str, "  ", noun="app", hint="h")
+
+
+@respx.mock
+async def test_app_list_honours_limit_and_reports_skipped_entries(make_client, captured):
+    import json
+
+    import httpx
+
+    from aistudio._transport.http import method_url
+
+    response = captured("ListApplets", 4).response
+    response[0] = [[None, [None, None, None, ["no id"]]], *response[0]]
+    respx.post(method_url("ListApplets")).mock(
+        return_value=httpx.Response(200, text=json.dumps(response)))
+    async with make_client() as client:
+        result = await list_apps(client, limit=1)
+    assert result["count"] == 1 and len(result["apps"]) == 1
+    assert result["warnings"] == ["skipped 1 app entry AI Studio sent in an unknown shape"]

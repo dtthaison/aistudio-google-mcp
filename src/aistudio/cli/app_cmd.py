@@ -62,9 +62,14 @@ def app() -> None:
 def app_list(state: CliState, limit: int, json_output: bool) -> None:
     """List your Build apps."""
     data = _run(state, lambda c: list_apps(c, limit=limit))
-    emit(data, json_output=json_output, render=lambda d: _table(
-        ["id", "title", "updated", "storage"],
-        [[a["id"], a["title"] or "", a["updated"] or "", a["storage"]] for a in d["apps"]]))
+
+    def render(d: dict[str, Any]) -> None:
+        _table(["id", "title", "updated", "storage"],
+               [[a["id"], a["title"] or "", a["updated"] or "", a["storage"]] for a in d["apps"]])
+        for warning in d.get("warnings", []):
+            stderr.print(f"Warning: {warning}", markup=False)
+
+    emit(data, json_output=json_output, render=render)
 
 
 @app.command("get")

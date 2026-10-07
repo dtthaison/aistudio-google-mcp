@@ -78,3 +78,15 @@ def test_app_list_survives_markup_in_titles(logged_in_profile):
     assert result.exit_code == 0, result.output
     assert "Fix [/] bug" in result.stdout
     assert "My [store-locator] app" in result.stdout
+
+
+@respx.mock
+def test_app_list_shows_skipped_entry_warnings(logged_in_profile, captured):
+    logged_in_profile()
+    response = captured("ListApplets", 4).response
+    response[0] = [[None, [None, None, None, ["no id"]]], *response[0]]
+    respx.post(method_url("ListApplets")).mock(
+        return_value=httpx.Response(200, text=json.dumps(response)))
+    res = CliRunner().invoke(cli, ["app", "list"])
+    assert res.exit_code == 0, res.output
+    assert "Warning: skipped 1 app entry" in res.stderr

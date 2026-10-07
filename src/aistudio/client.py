@@ -15,7 +15,7 @@ from aistudio._rpc.params import prompts as prompts_params
 from aistudio._rpc.params import status as status_params
 from aistudio._rpc.registry import RpcSpec, Transport
 from aistudio._rpc.rows.apps import (
-    decode_apps,
+    decode_apps_checked,
     decode_gallery,
     decode_recent,
     decode_runs,
@@ -119,8 +119,12 @@ class _Apps:
         self._client = client
 
     async def list(self, page_size: int = 1000) -> list[App]:
+        return (await self.list_checked(page_size))[0]
+
+    async def list_checked(self, page_size: int = 1000) -> tuple[list[App], int]:
+        """The apps plus the number of entries skipped for an unknown shape."""
         raw = await self._client.call(registry.LIST_APPLETS, apps_params.list_apps(page_size))
-        return decode_apps(raw)
+        return decode_apps_checked(raw)
 
     async def recent(self) -> list[RecentItem]:
         raw = await self._client.call(registry.LIST_RECENT_APPLETS,

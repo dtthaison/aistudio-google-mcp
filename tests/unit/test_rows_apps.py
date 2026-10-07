@@ -3,7 +3,13 @@ import pytest
 from aistudio._rpc import registry
 from aistudio._rpc.params.apps import list_app_runs, list_apps, list_gallery, list_recent_apps
 from aistudio._rpc.rows import as_timestamp
-from aistudio._rpc.rows.apps import decode_apps, decode_gallery, decode_recent, decode_runs
+from aistudio._rpc.rows.apps import (
+    decode_apps,
+    decode_apps_checked,
+    decode_gallery,
+    decode_recent,
+    decode_runs,
+)
 from aistudio._types.apps import App, AppRun, GalleryApp
 from aistudio.exceptions import SchemaDriftError
 
@@ -45,9 +51,14 @@ def test_empty_account_and_missing_ids():
     assert decode_apps([]) == []
     assert decode_apps(None) == []
     with pytest.raises(SchemaDriftError):
-        decode_apps([[[None, [None, None, None, ["no id"]]]]])
-    with pytest.raises(SchemaDriftError):
         decode_apps(["not a list"])
+
+
+def test_an_entry_without_an_id_is_skipped_and_counted(captured):
+    good = captured("ListApplets", 4).response[0][0]
+    apps, skipped = decode_apps_checked([[[None, [None, None, None, ["no id"]]], good]])
+    assert [a.id for a in apps] == [decode_apps([[good]])[0].id]
+    assert skipped == 1
 
 
 def test_recent_kind_comes_from_the_filled_slot(captured):

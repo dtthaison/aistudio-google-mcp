@@ -47,3 +47,12 @@ def test_prompt_list_survives_markup_in_titles(logged_in_profile):
     result = CliRunner().invoke(cli, ["prompt", "list"])
     assert result.exit_code == 0, result.output
     assert "Fix [/] bug" in result.stdout and "Plan [draft] v2" in result.stdout
+
+
+def test_prompt_list_limit_help_explains_paging():
+    from click.testing import CliRunner
+
+    from aistudio.cli.main import cli
+
+    res = CliRunner().invoke(cli, ["prompt", "list", "--help"])
+    assert "--type filters within them" in " ".join(res.output.split())
