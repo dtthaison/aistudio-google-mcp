@@ -122,3 +122,25 @@ async def test_get_model_resolves_a_unique_prefix(aistudio_home, make_client, ca
     assert exact["id"] == "gemini-3.1-flash-lite"
     assert "antigravity-preview-05-2026" in info.value.message
     assert "antigravity-preview-09-2026" in info.value.message
+
+
+def cache_without(profile, captured, model_id, fetched_at):
+    """A fresh catalog cache that predates ``model_id`` (released within the cache hour)."""
+    response = captured("ListModels").response
+    response[0] = [entry for entry in response[0] if entry[0] != f"models/{model_id}"]
+    profile.ensure()
+    profile.models.write_text(json.dumps({"fetched_at": fetched_at, "response": response}))
+
+
+@respx.mock
+async def test_a_model_missing_from_a_fresh_cache_is_fetched_once_more(aistudio_home, make_client,
+                                                                      captured):
+    route = serve_catalog(captured)
+    profile = get_profile("default")
+    cache_without(profile, captured, "lyria-3.5", T0)
+    async with make_client() as client:
+        model = await get_model(client, profile, "lyria-3.5", now=lambda: T0 + 5)
+        assert model["id"] == "lyria-3.5"
+        assert route.call_count == 1
+        await get_model(client, profile, "lyria-3.5", now=lambda: T0 + 6)
+        assert route.call_count == 1  # the refreshed cache now has it

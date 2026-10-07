@@ -8,11 +8,12 @@ from collections.abc import Callable
 from datetime import tzinfo
 from typing import Any
 
+from aistudio._app.apps import pick
 from aistudio._fs import read_json, write_private_json
 from aistudio._rpc.rows.models import decode_models
 from aistudio._types.models import Model
 from aistudio.client import AIStudioClient
-from aistudio.exceptions import AIStudioError, NotFoundError, SchemaDriftError, ValidationError
+from aistudio.exceptions import AIStudioError, NotFoundError, SchemaDriftError
 from aistudio.paths import Profile
 
 CACHE_TTL = 3600
@@ -130,19 +131,29 @@ async def get_model(
     tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     wanted = normalize_model_id(model_id)
-    models = await load_catalog(client, profile, refresh=refresh, now=now, tz=tz)
-    for model in models:
-        if model.id == wanted:
-            return _with_star(model, await _starred_ids(client))
+    models = await catalog_with(client, profile,
+                                lambda ms: any(m.id.startswith(wanted) for m in ms),
+                                refresh=refresh, now=now, tz=tz)
     # Spec §2.1: ids may be abbreviated to a unique prefix.
-    matches = [m for m in models if m.id.startswith(wanted)]
-    if len(matches) == 1:
-        return _with_star(matches[0], await _starred_ids(client))
-    if matches:
-        names = ", ".join(sorted(m.id for m in matches)[:10])
-        raise ValidationError(f"{wanted!r} matches several models: {names}",
-                              hint="type more of the id")
-    raise NotFoundError(f"no model {wanted!r} in the catalog", hint='see "aistudio models list"')
+    model = pick(models, lambda m: m.id, wanted, noun="model", hint='see "aistudio models list"')
+    return _with_star(model, await _starred_ids(client))
+
+
+async def catalog_with(
+    client: AIStudioClient,
+    profile: Profile,
+    found: Callable[[list[Model]], bool],
+    *,
+    refresh: bool = False,
+    now: Callable[[], float] = time.time,
+    tz: tzinfo | None = None,
+) -> list[Model]:
+    """The catalog, fetched once more when the cached copy lacks what ``found`` looks for
+    (e.g. a model released within the cache hour)."""
+    models = await load_catalog(client, profile, refresh=refresh, now=now, tz=tz)
+    if not refresh and not found(models):
+        models = await load_catalog(client, profile, refresh=True, now=now, tz=tz)
+    return models
 
 
 async def star_model(
@@ -163,7 +174,8 @@ async def star_model(
     is_starred = any(m == wanted for m, _ in current)
     # A starred model that left the catalog (retired) can still be unstarred.
     if not (is_starred and not starred) and wanted not in {
-        m.id for m in await load_catalog(client, profile)
+        m.id for m in await catalog_with(client, profile,
+                                         lambda ms: any(m.id == wanted for m in ms))
     }:
         raise NotFoundError(f"no model {wanted!r} in the catalog",
                             hint='see "aistudio models list"')

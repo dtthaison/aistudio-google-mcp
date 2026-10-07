@@ -121,3 +121,19 @@ async def test_a_retired_model_can_still_be_unstarred(aistudio_home, make_client
     assert result["changed"] is True
     sent = wire.decode(update.calls.last.request.content.decode())
     assert sent[0][6] == [["models/lyria-3.5", [1700000001, 0]]]
+
+
+@respx.mock
+async def test_starring_a_model_newer_than_the_cache_works(aistudio_home, make_client, captured):
+    import json
+    import time
+
+    update = serve(captured, [])
+    profile = get_profile("default").ensure()
+    response = captured("ListModels").response
+    response[0] = [e for e in response[0] if e[0] != "models/lyria-3.5"]
+    profile.models.write_text(json.dumps({"fetched_at": time.time(), "response": response}))
+    async with make_client() as client:
+        result = await star_model(client, profile, "lyria-3.5", now=lambda: T0)
+    assert result["changed"] is True
+    assert update.call_count == 1

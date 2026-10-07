@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from aistudio._app.models import load_catalog, normalize_model_id
+from aistudio._app.models import catalog_with, normalize_model_id
 from aistudio._browser.media_pages import ImagePage, MusicPage
 from aistudio._browser.speech_page import SpeechPage
 from aistudio._browser.ui import open_browser
@@ -48,7 +48,8 @@ async def check_model(client: AIStudioClient, profile: Profile, model: str, *, c
                       what: str, hint: str) -> str:
     """The catalog must map the model to ``command`` (spec §6.2 category validation)."""
     model_id = normalize_model_id(model)
-    found = {m.id: m for m in await load_catalog(client, profile)}.get(model_id)
+    models = await catalog_with(client, profile, lambda ms: any(m.id == model_id for m in ms))
+    found = {m.id: m for m in models}.get(model_id)
     if found is None:
         raise NotFoundError(f"no model {model_id!r} in the catalog", hint=hint)
     if found.command != command:

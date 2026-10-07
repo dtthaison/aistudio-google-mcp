@@ -72,3 +72,20 @@ async def test_gallery_filters_and_prefix_lookup(make_client, captured):
     assert {"lyria-studio", "lyria-rhythm", "lyria_camera"} <= {a["slug"] for a in lyria["apps"]}
     assert store["slug"] == "store-locator"
     assert "genai_sdk_chats" in info.value.message
+
+
+def test_pick_ignores_case_but_prefers_an_exact_match():
+    from aistudio._app.apps import pick
+
+    ids = ["abc1", "ABC", "Zeta-9"]
+    assert pick(ids, str, "ABC", noun="app", hint="h") == "ABC"
+    assert pick(ids, str, "ABC1", noun="app", hint="h") == "abc1"
+    assert pick(ids, str, "zeta", noun="app", hint="h") == "Zeta-9"
+
+
+def test_a_blank_id_is_rejected_not_matched_to_everything():
+    from aistudio._app.apps import pick
+    from aistudio.exceptions import ValidationError
+
+    with pytest.raises(ValidationError):
+        pick(["a", "b"], str, "  ", noun="app", hint="h")
