@@ -18,7 +18,10 @@ def lock_for(path: Path) -> FileLock:
 def private_dir(path: Path) -> Path:
     """Create ``path`` if needed and make it owner-only (0700), even if it already existed."""
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path, 0o700)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:  # e.g. a folder owned by another user: still usable, just not tightened
+        pass
     return path
 
 

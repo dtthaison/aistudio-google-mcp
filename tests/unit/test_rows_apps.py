@@ -113,3 +113,9 @@ def test_to_dict_lists_tuples(captured):
     data = decode_gallery(captured("ListBundledApplets", 3).response)[0].to_dict()
     assert data["apis"] == ["Google Maps API", "Places API"]
     assert data["tags"] == ["showcase", "google-maps"]
+
+
+def test_a_list_where_every_entry_is_unrecognised_is_schema_drift():
+    # Otherwise "app get X" would say NOT_FOUND when AI Studio changed shape (review #10).
+    with pytest.raises(SchemaDriftError):
+        decode_apps_checked([[[None, [None, None, None, ["no id"]]]]])

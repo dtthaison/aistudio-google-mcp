@@ -52,3 +52,4 @@ async def test_no_response_is_a_browser_error(fake_ui, page_class, kind):
         await page_class(fake_ui()).run(timeout_s=1)
     assert kind in info.value.message
     assert "--visible" in info.value.hint
+    assert "charged" in info.value.hint  # never invite a blind second paid run (review #6)

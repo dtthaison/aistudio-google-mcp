@@ -30,7 +30,8 @@ async def _await_generation(log: ResponseLog, kind: str, timeout_s: float) -> Ca
     response = await log.next(GENERATE_METHOD, timeout_s=timeout_s)
     if response is None:
         raise BrowserError(f"no {kind} was generated within {timeout_s:.0f}s",
-                           hint="re-run; if it persists, add --visible")
+                           hint="it may still finish and be charged: check AI Studio before "
+                                "re-running (add --visible to watch it)")
     return response
 
 

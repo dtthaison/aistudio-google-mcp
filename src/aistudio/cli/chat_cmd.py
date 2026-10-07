@@ -29,7 +29,8 @@ def count_tokens(state: CliState, text: str | None, model: str, prompt_file: Pat
                  json_output: bool) -> None:
     """Count the tokens TEXT uses with a model."""
     state.require_http()
-    content = read_text(text, prompt_file, arg="TEXT", option="--prompt-file")
+    # Counting large documents is the point here: no size cap.
+    content = read_text(text, prompt_file, arg="TEXT", option="--prompt-file", max_bytes=None)
     profile = state.profile()
 
     async def run() -> dict[str, Any]:

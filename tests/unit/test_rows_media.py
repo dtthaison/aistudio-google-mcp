@@ -53,9 +53,10 @@ def test_audio_parts_of_one_mime_are_joined():
     assert decode_media(response, "audio").parts[0].data == MP3 + b"more"
 
 
-def test_no_media_of_that_kind_is_schema_drift():
-    with pytest.raises(SchemaDriftError):
+def test_audio_where_an_image_was_expected_is_reported_with_its_text():
+    with pytest.raises(ServerError) as info:
         decode_media(music_response(), "image")
+    assert "<instrumental>" in info.value.message
 
 
 def test_bad_base64_is_schema_drift():
@@ -84,3 +85,25 @@ def test_finish_reason_reads_the_last_chunk():
                                       ("application/x-what", ".bin")])
 def test_extension_for(mime, ext):
     assert extension_for(mime) == ext
+
+
+def text_only(text, finish):
+    return [[chunk([[None, text]]), chunk([[None, ""]], finish)]]
+
+
+def test_a_blocked_generation_without_media_reports_the_finish_reason():
+    with pytest.raises(ServerError) as info:
+        decode_media(text_only("", 3), "image")
+    assert "stopped early" in info.value.message
+
+
+def test_a_text_only_reply_is_shown_to_the_person():
+    with pytest.raises(ServerError) as info:
+        decode_media(text_only("I can't create that image.", 1), "image")
+    assert "I can't create that image." in info.value.message
+    assert "rephrase" in info.value.hint
+
+
+def test_neither_media_nor_text_is_schema_drift():
+    with pytest.raises(SchemaDriftError):
+        decode_media(text_only("", 1), "audio")

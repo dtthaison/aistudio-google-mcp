@@ -51,6 +51,8 @@ def decode_apps_checked(response: Any) -> tuple[list[App], int]:
             apps.append(_app(entry, i))
         except SchemaDriftError:  # one odd entry must not hide every other app
             continue
+    if entries and not apps:  # nothing recognisable at all: the shape changed
+        raise SchemaDriftError("ListApplets", (0, 0), "an app id")
     return apps, len(entries) - len(apps)
 
 

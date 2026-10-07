@@ -173,8 +173,8 @@ async def test_a_corrupt_response_is_schema_drift(logged_in_profile, make_client
 
 
 @respx.mock
-async def test_a_file_created_meanwhile_is_not_overwritten(logged_in_profile, make_client,
-                                                           fake_ui, captured, tmp_path):
+async def test_a_file_created_meanwhile_is_kept_and_the_audio_saved_beside_it(
+        logged_in_profile, make_client, fake_ui, captured, tmp_path):
     profile = logged_in_profile()
     serve_catalog(captured)
     out = tmp_path / "late.wav"
@@ -185,10 +185,12 @@ async def test_a_file_created_meanwhile_is_not_overwritten(logged_in_profile, ma
         yield ui
         out.write_bytes(b"someone else's file")  # appears during the generation
 
-    with pytest.raises(ValidationError):
-        await generate_speech(profile, FIXTURE_TEXT, out=out,
-                              client_factory=lambda p: make_client(), browser=browser)
+    result = await generate_speech(profile, FIXTURE_TEXT, out=out,
+                                   client_factory=lambda p: make_client(), browser=browser)
     assert out.read_bytes() == b"someone else's file"
+    saved = tmp_path / "late-2.wav"
+    assert result["files"][0]["path"] == str(saved) and saved.stat().st_size > 1000
+    assert result["warnings"] == [f"{out} appeared while generating; saved to {saved} instead"]
 
 
 @respx.mock

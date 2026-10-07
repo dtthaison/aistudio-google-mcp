@@ -1,6 +1,7 @@
 import base64
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 import respx
@@ -166,3 +167,92 @@ async def test_existing_output_needs_force(logged_in_profile, fake_ui, tmp_path)
     assert "--force" in info.value.hint
     assert out.read_bytes() == b"old"
 
+
+
+@respx.mock
+async def test_a_folder_without_hard_links_still_gets_the_file(logged_in_profile, make_client,
+                                                               fake_ui, captured, tmp_path,
+                                                               monkeypatch):
+    # exFAT, SMB and cloud-synced folders refuse os.link (review #1).
+    def no_links(src, dst):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("os.link", no_links)
+    serve_catalog(captured)
+    out = tmp_path / "apple.jpg"
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo",
+                       media_ui(fake_ui, captured, 4), [], make_client, out=out)
+    assert out.read_bytes() == JPEG and result["files"][0]["path"] == str(out)
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+@respx.mock
+async def test_a_dangling_symlink_at_the_output_never_loses_the_result(
+        logged_in_profile, make_client, fake_ui, captured, tmp_path):
+    serve_catalog(captured)
+    out = tmp_path / "x.jpg"
+    out.symlink_to(tmp_path / "missing-target")  # exists() is False, but the name is taken
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo",
+                       media_ui(fake_ui, captured, 4), [], make_client, out=out)
+    saved = tmp_path / "x-2.jpg"
+    assert saved.read_bytes() == JPEG and result["files"][0]["path"] == str(saved)
+    assert f"saved to {saved} instead" in result["warnings"][0]
+
+
+@respx.mock
+async def test_an_unwritable_folder_rescues_the_paid_result(logged_in_profile, make_client,
+                                                            fake_ui, captured, tmp_path,
+                                                            monkeypatch):
+    import tempfile
+
+    rescue = tmp_path / "rescue"
+    rescue.mkdir()
+    folder = tmp_path / "out"
+    folder.mkdir()
+    real_mkstemp = tempfile.mkstemp
+
+    def mkstemp(*args, dir=None, **kw):
+        if dir is not None and Path(dir) == folder:
+            raise PermissionError(13, "Permission denied")
+        return real_mkstemp(*args, dir=dir, **kw)
+
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(rescue))
+    serve_catalog(captured)
+    with pytest.raises(ValidationError) as info:
+        await run(generate_image, logged_in_profile(), "A red apple on a white table, studio photo",
+                  media_ui(fake_ui, captured, 4), [], make_client, out=folder / "x.jpg")
+    (saved,) = rescue.iterdir()
+    assert saved.read_bytes() == JPEG
+    assert str(saved) in info.value.hint
+
+
+@respx.mock
+async def test_a_prompt_mismatch_after_a_paid_run_keeps_the_file_and_warns(
+        logged_in_profile, make_client, fake_ui, captured, tmp_path):
+    serve_catalog(captured)
+    raw = captured("GenerateContent", 4).raw
+    request = raw["request"]["body"].replace("A red apple on a white table, studio photo",
+                                             "A red apple on a white table")
+    ui = fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200,
+                                                       raw["response"]["body"], request)]})
+    out = tmp_path / "x.jpg"
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo", ui, [], make_client,
+                       out=out)
+    assert out.read_bytes() == JPEG
+    assert "did not match" in result["warnings"][0]
+
+
+@respx.mock
+async def test_a_trailing_newline_from_a_prompt_file_is_not_sent(logged_in_profile, make_client,
+                                                                 fake_ui, captured, tmp_path):
+    serve_catalog(captured)
+    ui = media_ui(fake_ui, captured, 4)
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo\n", ui, [], make_client,
+                       out=tmp_path / "x.jpg")
+    assert ("fill", "textbox", IMAGE_PROMPT, "A red apple on a white table, studio photo") in ui.ops
+    assert "warnings" not in result

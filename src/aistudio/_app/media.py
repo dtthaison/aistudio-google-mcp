@@ -116,10 +116,12 @@ async def generate_speech(
         audio = decode_speech(wire.decode(captured.text))
     except ValueError as exc:  # truncated or non-JSON body
         raise SchemaDriftError("GenerateContent", (), "a JSON speech response") from exc
-    _write(path, pcm_to_wav(audio.pcm, rate=audio.rate, channels=audio.channels),
-           overwrite=overwrite)
+    saved = _write(path, pcm_to_wav(audio.pcm, rate=audio.rate, channels=audio.channels),
+                   overwrite=overwrite)
+    if saved != path:
+        warnings.append(f"{path} appeared while generating; saved to {saved} instead")
     return {
-        "files": [{"path": str(path), "mime_type": "audio/wav",
+        "files": [{"path": str(saved), "mime_type": "audio/wav",
                    "seconds": round(audio.seconds, 2)}],
         "model": model_id,
         "voice": wire.opt_index(sent, 3, 15, 0, 0, 0) or chosen_voice,
@@ -160,7 +162,8 @@ async def _generate_media(
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], datetime] = datetime.now,
 ) -> dict[str, Any]:
-    if not prompt.strip():
+    prompt = prompt.strip()  # e.g. a --prompt-file's trailing newline
+    if not prompt:
         raise ValidationError(f"nothing to generate: the {name} prompt is empty")
     if out is not None and out.exists() and not overwrite:
         raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
@@ -175,14 +178,16 @@ async def _generate_media(
         captured = await page.run()
     if captured.status >= 400:
         raise _refused(captured.status, captured.text, name)
-    _confirm(_sent(captured.request_body), model_id=model_id, text=prompt, voice=None)
+    # The run is paid for by now: a mismatch is reported, never a reason to drop the result.
+    wrong = _mismatches(_sent(captured.request_body), model_id=model_id, text=prompt, voice=None)
+    warnings = ([f"the request AI Studio sent did not match ({'; '.join(wrong)}); the result was "
+                 "kept, check it"] if wrong else [])
     try:
         body = wire.decode(captured.text)
     except ValueError as exc:  # truncated or non-JSON body
         raise SchemaDriftError("GenerateContent", (), f"a JSON {name} response") from exc
     media = decode_media(body, part_kind)
     files: list[dict[str, Any]] = []
-    warnings: list[str] = []
     first: Path | None = None
     for part in media.parts:
         ext = extension_for(part.mime_type)
@@ -190,12 +195,13 @@ async def _generate_media(
             path = out or _free_name(Path(f"aistudio-{name}-{now():%Y%m%d-%H%M%S}{ext}"))
             if out is not None and _normal_suffix(out.suffix) != ext:
                 warnings.append(f"{out} holds {part.mime_type} data; its extension says otherwise")
-            _write(path, part.data, overwrite=overwrite)
-            first = path
+            saved = _write(path, part.data, overwrite=overwrite)
+            if saved != path:
+                warnings.append(f"{path} appeared while generating; saved to {saved} instead")
+            first = saved
         else:  # extra images never clobber anything, so nothing fails after a paid run
-            path = _free_name(first, start=2)
-            _write(path, part.data, overwrite=False)
-        files.append({"path": str(path), "mime_type": part.mime_type, "bytes": len(part.data)})
+            saved = _write(_free_name(first, start=2), part.data, overwrite=False)
+        files.append({"path": str(saved), "mime_type": part.mime_type, "bytes": len(part.data)})
     return {
         "files": files,
         "model": model_id,
@@ -258,37 +264,83 @@ def _short(value: Any) -> str:
     return text if len(text) <= 80 else text[:77] + "…"
 
 
-def _confirm(sent: Any, *, model_id: str, text: str, voice: str | None) -> None:
-    """The audio must be for what we asked: model, text and voice (a style miss only warns)."""
+def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None) -> list[str]:
     expected = {"model": f"models/{model_id}", "text": text, "voice": voice}
     actual = {
         "model": wire.opt_index(sent, 0),
         "text": wire.opt_index(sent, 1, 0, 0, 0, 1),
         "voice": wire.opt_index(sent, 3, 15, 0, 0, 0),
     }
-    wrong = [f"{k}: expected {_short(v)}, sent {_short(actual[k])}"
-             for k, v in expected.items() if v is not None and actual[k] != v]
+    return [f"{k}: expected {_short(v)}, sent {_short(actual[k])}"
+            for k, v in expected.items() if v is not None and actual[k] != v]
+
+
+def _confirm(sent: Any, *, model_id: str, text: str, voice: str | None) -> None:
+    """The audio must be for what we asked: model, text and voice (a style miss only warns)."""
+    wrong = _mismatches(sent, model_id=model_id, text=text, voice=voice)
     if wrong:
         raise BrowserError(f"the request AI Studio sent did not match ({'; '.join(wrong)})",
                            hint="re-run; nothing was written")
 
 
-def _write(path: Path, data: bytes, *, overwrite: bool) -> None:
-    """Write without ever clobbering a file that appeared meanwhile, unless --force."""
-    folder = path.parent if str(path.parent) else Path(".")
-    fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{path.name}.", suffix=".tmp")
+def _write(path: Path, data: bytes, *, overwrite: bool) -> Path:
+    """Save ``data`` and return where it landed: a paid result is never dropped.
+
+    Without --force nothing is clobbered. If a file appeared at ``path`` meanwhile (or a dangling
+    symlink holds the name), the data goes to ``stem-N`` instead. If the folder cannot take the
+    data at all, it is rescued into the system temp folder, which the error names.
+    """
+    try:
+        if overwrite:
+            _place(path, data, replace=True)
+            return path
+        return _save_new(path, data)
+    except OSError as exc:
+        rescued = _rescue(path.name, data)
+        raise ValidationError(
+            f"could not write {path}: {exc.strerror or exc}",
+            hint=f"the result was saved to {rescued}" if rescued
+            else "the result could not be saved anywhere",
+        ) from exc
+
+
+def _save_new(path: Path, data: bytes) -> Path:
+    for n in range(1, 1000):
+        target = path if n == 1 else path.with_name(f"{path.stem}-{n}{path.suffix}")
+        try:
+            _place(target, data, replace=False)
+            return target
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free file name next to {path}")
+
+
+def _place(target: Path, data: bytes, *, replace: bool) -> None:
+    """Write via a temp file; without ``replace`` a taken name raises FileExistsError."""
+    folder = target.parent if str(target.parent) else Path(".")
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{target.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-        if overwrite:
-            os.replace(tmp, path)
-        else:
-            os.link(tmp, path)  # atomic and fails if the file exists
-    except FileExistsError as exc:
-        raise ValidationError(f"{path} appeared while generating; not overwritten",
-                              hint="pass --force or choose another -o") from exc
+        if replace:
+            os.replace(tmp, target)
+            return
+        try:
+            os.link(tmp, target)  # atomic, and fails if the name is taken
+        except FileExistsError:
+            raise
+        except OSError:  # no hard links here (exFAT, SMB, cloud-synced folders)
+            with open(target, "xb") as fh:  # O_EXCL: still never clobbers
+                fh.write(data)
     finally:
         Path(tmp).unlink(missing_ok=True)
+
+
+def _rescue(name: str, data: bytes) -> Path | None:
+    try:
+        return _save_new(Path(tempfile.gettempdir()) / f"aistudio-rescued-{name}", data)
+    except OSError:
+        return None
 
 
 async def list_voices(

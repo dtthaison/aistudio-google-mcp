@@ -18,6 +18,9 @@ from aistudio.exceptions import SchemaDriftError, ServerError
 
 METHOD = "GenerateContent"
 _FINISHED = 1
+_NOUNS = {"image": "an image", "audio": "audio"}
+_REPHRASE = {"image": 'rephrase the prompt, e.g. start with "Generate an image of …"',
+             "audio": "rephrase the prompt, e.g. describe the style, mood and instruments"}
 _EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
                "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav",
                "audio/x-wav": ".wav", "audio/ogg": ".ogg"}
@@ -42,7 +45,14 @@ def decode_media(response: Any, kind: str) -> GeneratedMedia:
     """Collect every ``kind/*`` part in order; audio parts of one mime are joined."""
     found: list[tuple[str, str]] = []
     _collect(response, f"{kind}/", found)
-    if not found:
+    finish = finish_reason(response)
+    if not found:  # a refusal: say why rather than blame the response shape
+        if finish is not None and finish != _FINISHED:
+            raise _stopped(finish)
+        text = " ".join("".join(_texts(response)).split())
+        if text:
+            raise ServerError(f"the model replied with text instead of {_NOUNS[kind]}: "
+                              f"{text[:300]}", hint=_REPHRASE[kind])
         raise SchemaDriftError(METHOD, (), f"{kind} parts")
     parts: list[MediaPart] = []
     for mime, data in found:
@@ -56,13 +66,16 @@ def decode_media(response: Any, kind: str) -> GeneratedMedia:
             parts[-1] = MediaPart(mime, parts[-1].data + raw)
         else:
             parts.append(MediaPart(mime, raw))
-    finish = finish_reason(response)
     if finish is None:
         raise SchemaDriftError(METHOD, (0, -1, 0, 0, 1), "a finish reason")
     if finish != _FINISHED:
-        raise ServerError(f"generation stopped early (finish reason {finish})",
-                          hint="try a different prompt: safety filters can stop a generation")
+        raise _stopped(finish)
     return GeneratedMedia(parts=tuple(parts), text="".join(_texts(response)))
+
+
+def _stopped(finish: int) -> ServerError:
+    return ServerError(f"generation stopped early (finish reason {finish})",
+                       hint="try a different prompt: safety filters can stop a generation")
 
 
 def _collect(node: Any, prefix: str, out: list[tuple[str, str]]) -> None:

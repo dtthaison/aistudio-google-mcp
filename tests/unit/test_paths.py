@@ -99,3 +99,20 @@ def test_private_json_lands_in_a_private_folder(tmp_path):
 
     write_private_json(tmp_path / "sub" / "f.json", {"a": 1})
     assert _mode(tmp_path / "sub") == 0o700
+
+
+def test_private_folders_are_best_effort_when_chmod_is_refused(tmp_path, monkeypatch):
+    # e.g. AISTUDIO_HOME owned by another user: still write the file (review #11).
+    from aistudio._fs import write_private_json
+
+    def refuse(path, mode):
+        if mode == 0o700:
+            raise PermissionError(1, "Operation not permitted")
+        return real_chmod(path, mode)
+
+    import os
+
+    real_chmod = os.chmod
+    monkeypatch.setattr(os, "chmod", refuse)
+    write_private_json(tmp_path / "f.json", {"a": 1})
+    assert (tmp_path / "f.json").exists()

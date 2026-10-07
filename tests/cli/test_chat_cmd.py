@@ -62,3 +62,14 @@ def test_count_tokens_rejects_a_binary_prompt_file(logged_in_profile, tmp_path):
                                    "gemini-flash-latest", "--json"])
     assert res.exit_code == 1, res.output
     assert json.loads(res.stdout)["code"] == "VALIDATION_ERROR"
+
+
+@respx.mock
+def test_count_tokens_accepts_a_large_prompt_file(logged_in_profile, captured, tmp_path):
+    # Counting big documents is the point of count-tokens: no 1 MB cap here (review #4).
+    logged_in_profile()
+    serve_count(captured)
+    big = tmp_path / "big.txt"
+    big.write_text("word " * 300_000)  # 1.5 MB
+    res = CliRunner().invoke(cli, ["count-tokens", "--prompt-file", str(big), "--json"])
+    assert res.exit_code == 0, res.output
