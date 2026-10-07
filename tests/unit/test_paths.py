@@ -77,3 +77,25 @@ def test_corrupt_config_is_a_validation_error_naming_the_file(aistudio_home):
     with pytest.raises(ValidationError) as info:
         paths.resolve_profile_name()
     assert "config.json" in info.value.message
+
+
+def _mode(path):
+    import stat
+
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_aistudio_folders_are_private(aistudio_home):
+    from aistudio.paths import get_profile, home_dir
+
+    home_dir().mkdir(parents=True, exist_ok=True)
+    home_dir().chmod(0o755)  # e.g. created earlier by an older version
+    profile = get_profile("x").ensure()
+    assert [_mode(p) for p in (home_dir(), home_dir() / "profiles", profile.root)] == [0o700] * 3
+
+
+def test_private_json_lands_in_a_private_folder(tmp_path):
+    from aistudio._fs import write_private_json
+
+    write_private_json(tmp_path / "sub" / "f.json", {"a": 1})
+    assert _mode(tmp_path / "sub") == 0o700

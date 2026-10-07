@@ -50,3 +50,14 @@ def test_replay_table_survives_markup_in_server_messages(logged_in_profile, writ
     result = CliRunner().invoke(cli, ["dev", "replay", str(tmp_path), "--delay", "0"])
     assert result.exit_code == 0, result.output
     assert "bad [/] value" in result.stdout
+
+
+@respx.mock
+def test_replay_accepts_a_method_folder(logged_in_profile, write_rpc_fixture, tmp_path):
+    logged_in_profile()
+    write_rpc_fixture(tmp_path, "ListModels")
+    respx.post(method_url("ListModels")).mock(return_value=httpx.Response(200, text="[]"))
+    result = CliRunner().invoke(cli, ["dev", "replay", str(tmp_path / "ListModels"),
+                                      "--delay", "0", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["count"] == 1

@@ -15,9 +15,16 @@ def lock_for(path: Path) -> FileLock:
     return FileLock(str(path.with_name(f".{path.name}.lock")))
 
 
+def private_dir(path: Path) -> Path:
+    """Create ``path`` if needed and make it owner-only (0700), even if it already existed."""
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path, 0o700)
+    return path
+
+
 def write_private_json(path: Path, data: Any) -> None:
-    """Write ``data`` as JSON to ``path`` atomically with mode 0600."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Write ``data`` as JSON to ``path`` atomically with mode 0600, in an 0700 folder."""
+    private_dir(path.parent)
     with lock_for(path):
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
         try:

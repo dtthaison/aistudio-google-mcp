@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from aistudio._fs import read_json, write_private_json
+from aistudio._fs import private_dir, read_json, write_private_json
 from aistudio.exceptions import ValidationError
 
 DEFAULT_PROFILE = "default"
@@ -101,7 +101,12 @@ class Profile:
         return self.root / "chrome"
 
     def ensure(self) -> Profile:
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        """Create the profile folder; aistudio's own folders above it become 0700 too."""
+        home = home_dir()
+        for folder in (home, home / "profiles"):
+            if self.root.is_relative_to(folder):
+                private_dir(folder)
+        private_dir(self.root)
         return self
 
 

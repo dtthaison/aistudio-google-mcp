@@ -54,4 +54,5 @@ def iter_fixtures(root: Path) -> list[Path]:
     def key(p: Path) -> tuple[str, int]:
         return p.parent.name, int(p.stem) if p.stem.isdigit() else 0
 
-    return sorted(root.glob("*/*.json"), key=key)
+    direct = list(root.glob("*.json"))  # ``root`` is one method's folder
+    return sorted(direct or root.glob("*/*.json"), key=key)
