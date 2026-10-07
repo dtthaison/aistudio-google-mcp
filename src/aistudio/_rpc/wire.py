@@ -64,7 +64,11 @@ def decode(text: str) -> Any:
     body = body.strip()
     if not body:
         return None
-    return json.loads(normalize_elisions(body))
+    return json.loads(normalize_elisions(body), parse_constant=_reject_constant)
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not valid JSON")
 
 
 def parse_error(decoded: Any) -> tuple[int, str] | None:

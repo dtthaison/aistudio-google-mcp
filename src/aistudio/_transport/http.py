@@ -91,7 +91,11 @@ class HttpTransport:
 
     async def call(self, method: str, body: Any, *, idempotent: bool = False,
                    attempts: int | None = None) -> Any:
-        """Send one RPC (spec §9 retries, §4.4 step 1 auth reload)."""
+        """Send one RPC (spec §9 retries, §4.4 step 1 auth reload).
+
+        At most ``attempts`` sends, plus one more after reloading a session another process
+        refreshed on disk (``aistudio login``).
+        """
         max_attempts = attempts or self._max_attempts
         text = wire.encode(body)
         reloaded = False
@@ -111,7 +115,14 @@ class HttpTransport:
                 await self._sleep(self._delay(attempt))
                 continue
             if response.status_code < 400:
-                return wire.decode(response.text)
+                try:
+                    return wire.decode(response.text)
+                except ValueError as exc:  # e.g. an HTML page from a proxy or captive portal
+                    raise ServerError(
+                        "AI Studio answered with a body that is not JSON "
+                        f"(HTTP {response.status_code})",
+                        hint="re-run; if it persists, AI Studio may be down",
+                    ) from exc
             err = error_for_response(response.status_code, response.text)
             if isinstance(err, AuthError) and not reloaded and self._reload_session is not None:
                 reloaded = True

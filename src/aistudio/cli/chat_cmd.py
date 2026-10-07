@@ -11,10 +11,10 @@ import click
 from aistudio._app.chat import DEFAULT_MODEL
 from aistudio._app.chat import count_tokens as count_tokens_use_case
 from aistudio.cli.error_handler import handle_errors
+from aistudio.cli.inputs import read_text
 from aistudio.cli.output import emit, json_option, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
-from aistudio.exceptions import ValidationError
 
 
 @click.command("count-tokens")
@@ -29,9 +29,7 @@ def count_tokens(state: CliState, text: str | None, model: str, prompt_file: Pat
                  json_output: bool) -> None:
     """Count the tokens TEXT uses with a model."""
     state.require_http()
-    if (text is None) == (prompt_file is None):
-        raise ValidationError("give either TEXT or --prompt-file", hint="not both, not neither")
-    content = text if prompt_file is None else prompt_file.read_text(encoding="utf-8")
+    content = read_text(text, prompt_file, arg="TEXT", option="--prompt-file")
     profile = state.profile()
 
     async def run() -> dict[str, Any]:

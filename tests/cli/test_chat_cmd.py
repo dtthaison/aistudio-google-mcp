@@ -52,3 +52,13 @@ def test_count_tokens_rejects_empty_or_double_input(logged_in_profile, tmp_path)
         result = CliRunner().invoke(cli, [*args, "--json"])
         assert result.exit_code == 1, args
         assert json.loads(result.stdout)["code"] == "VALIDATION_ERROR"
+
+
+def test_count_tokens_rejects_a_binary_prompt_file(logged_in_profile, tmp_path):
+    logged_in_profile()
+    binary = tmp_path / "b.bin"
+    binary.write_bytes(b"\xff\xfe\x00\x81")
+    res = CliRunner().invoke(cli, ["count-tokens", "--prompt-file", str(binary), "-m",
+                                   "gemini-flash-latest", "--json"])
+    assert res.exit_code == 1, res.output
+    assert json.loads(res.stdout)["code"] == "VALIDATION_ERROR"

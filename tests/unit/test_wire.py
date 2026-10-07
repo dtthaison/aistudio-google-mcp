@@ -78,3 +78,9 @@ def test_safe_index_raises_schema_drift_with_path():
 def test_safe_index_through_non_list_raises():
     with pytest.raises(SchemaDriftError):
         wire.safe_index([None, "str"], 1, 0, method="M", expected="list")
+
+
+@pytest.mark.parametrize("body", ["[NaN]", "[1,Infinity]", "[-Infinity]"])
+def test_decode_rejects_nan_and_infinity(body):
+    with pytest.raises(ValueError):
+        wire.decode(body)

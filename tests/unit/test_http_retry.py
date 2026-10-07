@@ -124,3 +124,33 @@ async def test_auth_reload_happens_only_once_per_call():
         with pytest.raises(AuthError):
             await t.call("ListModels", [])
     assert route.call_count == 2
+
+
+@respx.mock
+async def test_a_session_reload_after_retries_is_bounded():
+    # 503, 503, then 401 with fresh cookies on disk: one more send (idempotent), never a 5th.
+    ok = respx.post(URL).mock(side_effect=[httpx.Response(503), httpx.Response(503),
+                                           httpx.Response(401), httpx.Response(200, text="[1]")])
+    t, _ = transport(reload_session=lambda: session("fresh"))
+    async with t:
+        assert await t.call("ListModels", [], idempotent=True) == [1]
+    assert ok.call_count == 4
+    respx.reset()
+    failing = respx.post(URL).mock(side_effect=[httpx.Response(503), httpx.Response(503),
+                                                httpx.Response(401), httpx.Response(503),
+                                                httpx.Response(200, text="[1]")])
+    t, _ = transport(reload_session=lambda: session("fresher"))
+    async with t:
+        with pytest.raises(ServerError):
+            await t.call("ListModels", [], idempotent=True)
+    assert failing.call_count == 4
+
+
+@respx.mock
+async def test_a_success_body_that_is_not_json_is_a_server_error():
+    respx.post(URL).mock(return_value=httpx.Response(200, text="<html>sign in</html>"))
+    t, _ = transport()
+    async with t:
+        with pytest.raises(ServerError) as info:
+            await t.call("ListModels", [])
+    assert "not JSON" in info.value.message
