@@ -12,8 +12,7 @@ import base64
 import re
 from typing import Any
 
-from aistudio._rpc.rows import as_int
-from aistudio._rpc.wire import opt_index
+from aistudio._rpc.rows.media import finish_reason
 from aistudio._types.media import SpeechAudio
 from aistudio.exceptions import SchemaDriftError, ServerError
 
@@ -38,7 +37,7 @@ def decode_speech(response: Any) -> SpeechAudio:
     channels = int(params.get("channels", 1))
     if not pcm or len(pcm) % (2 * channels):
         raise SchemaDriftError(METHOD, (), "non-empty 16-bit audio")
-    finish = _finish_reason(response)
+    finish = finish_reason(response)
     if finish is None:
         raise SchemaDriftError(METHOD, (0, -1, 0, 0, 1), "a finish reason")
     if finish != _FINISHED:
@@ -46,17 +45,6 @@ def decode_speech(response: Any) -> SpeechAudio:
                           hint="try different text: safety filters can stop a generation")
     return SpeechAudio(mime_type=mime, rate=int(params.get("rate", 24000)), channels=channels,
                        pcm=pcm)
-
-
-def _finish_reason(response: Any) -> int | None:
-    """The last chunk carrying ``chunk[0][0][1]`` (fixture 3: 1 = STOP)."""
-    chunks = opt_index(response, 0)
-    reason = None
-    for chunk in chunks if isinstance(chunks, list) else []:
-        value = as_int(opt_index(chunk, 0, 0, 1))
-        if value is not None:
-            reason = value
-    return reason
 
 
 def _collect(node: Any, out: list[tuple[str, str]]) -> None:

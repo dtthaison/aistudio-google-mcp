@@ -15,3 +15,15 @@ class SpeechAudio:
     @property
     def seconds(self) -> float:
         return len(self.pcm) / (self.rate * self.channels * 2)
+
+
+@dataclass(frozen=True)
+class MediaPart:
+    mime_type: str  # e.g. "image/jpeg", "audio/mpeg"
+    data: bytes
+
+
+@dataclass(frozen=True)
+class GeneratedMedia:
+    parts: tuple[MediaPart, ...]
+    text: str  # model text alongside the media: lyrics for music, a caption for images
