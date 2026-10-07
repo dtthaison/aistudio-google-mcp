@@ -1,6 +1,6 @@
 ---
 name: aistudio
-description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, or TTS voices — or mentions the aistudio CLI.
+description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, or generating speech, images or music with AI Studio — or mentions the aistudio CLI.
 ---
 
 # aistudio CLI
@@ -46,8 +46,8 @@ JSON notes:
 ## Commands that change things (only when the user asks)
 
 **Never put the user's text inside double quotes in a shell command**: `` ` ``, `$(…)` and `$VAR`
-would run or expand. For speech, write the text to a file with your file tool and pass
-`--text-file`. For other text arguments (`app create`, `app prompt`, `--style`), use single
+would run or expand. For speech, images and music, write the text to a file with your file tool and pass
+`--text-file` / `--prompt-file`. For other text arguments (`app create`, `app prompt`, `--style`), use single
 quotes and write each `'` as `'\''`.
 
 | Action | Command |
@@ -56,13 +56,19 @@ quotes and write each `'` as `'\''`.
 | Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
 | TTS voices (opens a hidden Chrome; no quota) | `aistudio voices list --json [--search T]` |
 | Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
+| Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
+| Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".
 - An AI Studio tab open at the same time can overwrite a star change.
-- Speech: expression tags such as `<laugh>` go inside the text. An existing output file is never
-  overwritten without `--force`, which needs the user's OK.
-- Browser commands (`app create/prompt`, `generate speech`, `voices list`) share one Chrome
+- Speech: expression tags such as `<laugh>` go inside the text.
+- Generation spends the user's quota or money: run one request per user ask and never retry in a
+  loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
+- Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
+  lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
+  type).
+- Browser commands (`app create/prompt`, `generate …`, `voices list`) share one Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;
   wait for it rather than retrying in a loop.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
@@ -73,7 +79,8 @@ quotes and write each `'` as `'\''`.
 These are not in the CLI yet. Say so plainly; do not drive the browser or call Google's internal
 endpoints yourself.
 
-- Generating images, video or music.
+- Video (Veo): AI Studio asks for a paid upgrade.
+- Imagen: AI Studio's Imagen page refuses this kind of session. Use a Gemini image model.
 - Chatting with a model: it requires a Gemini API key, which is not supported.
 
 ## Build or change an app (only when the user asks)

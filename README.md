@@ -33,8 +33,17 @@ uv run aistudio models star lyria-3.5       # stars sync with the AI Studio pick
 uv run aistudio app export <id-prefix> ./my-app   # download an app's code (verified)
 uv run aistudio voices list
 uv run aistudio generate speech "Hello! <laugh> Nice to meet you." --voice Tova --style "warm, slow" -o hello.wav
+uv run aistudio generate image "a red apple on a white table" -o apple.jpg
+uv run aistudio generate music "calm solo piano, slow tempo" -o piano.mp3
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
+
+Generation (`generate speech|image|music`) runs AI Studio's own page in a minimized Chrome window
+and uses your account's quota. No API key is needed. Catalog prices on 2026-10-07 were about
+$0.034 per image (`gemini-3.1-flash-lite-image`, the default), $0.04 per clip
+(`lyria-3-clip-preview`, the default) and $0.08 per full song (`-m lyria-3.5`). Video (Veo) needs
+a paid upgrade and Imagen refuses this kind of session, so neither is offered. Chatting with a
+model needs a Gemini API key, so it is not offered either.
 
 Design: `docs/superpowers/specs/2026-10-06-aistudio-cli-design.md`
 

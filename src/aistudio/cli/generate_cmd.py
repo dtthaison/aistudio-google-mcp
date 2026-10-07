@@ -1,4 +1,4 @@
-"""``aistudio generate speech`` and ``aistudio voices list`` (spec §6.4)."""
+"""``aistudio generate speech|image|music`` and ``aistudio voices list`` (spec §6.4)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,19 @@ from typing import Any
 
 import click
 
-from aistudio._app.media import DEFAULT_SPEECH_MODEL, generate_speech, list_voices
+from aistudio._app.media import (
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_MUSIC_MODEL,
+    DEFAULT_SPEECH_MODEL,
+    generate_image,
+    generate_music,
+    generate_speech,
+    list_voices,
+)
 from aistudio.cli.error_handler import handle_errors
+from aistudio.cli.inputs import read_text
 from aistudio.cli.output import emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
-from aistudio.exceptions import ValidationError
 
 
 @click.group()
@@ -46,16 +54,66 @@ def speech(state: CliState, text: str | None, text_file: Path | None, model: str
            visible: bool, json_output: bool) -> None:
     """Turn TEXT into speech. Put expression tags such as <laugh> inside the text."""
     state.require_browser()
-    if (text is None) == (text_file is None):
-        raise ValidationError("give either TEXT or --text-file", hint="not both, not neither")
-    content = text if text_file is None else text_file.read_text(encoding="utf-8")
-    if not json_output:
-        stderr.print("Generating speech in a minimized Chrome window…", markup=False)
+    content = read_text(text, text_file, arg="TEXT", option="--text-file")
+    _notice("speech", visible, json_output)
     result = asyncio.run(generate_speech(
         state.profile(), content, model=model, voice=voice, style=style, out=out,
         overwrite=force, visible=visible,
     ))
     emit(result, json_output=json_output, render=_render_speech)
+
+
+def _notice(what: str, visible: bool, json_output: bool) -> None:
+    if not json_output:
+        window = "visible" if visible else "minimized"
+        stderr.print(f"Generating {what} in a {window} Chrome window…", markup=False)
+
+
+def _render_media(data: dict[str, Any]) -> None:
+    for file in data["files"]:
+        stdout.print(f"Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
+    if data.get("text"):
+        stdout.print(f"Text: {data['text']}", markup=False)
+    for warning in data.get("warnings", []):
+        stderr.print(f"Warning: {warning}", markup=False)
+
+
+def _media_command(name: str, category: str, default_model: str, help_text: str,
+                   out_help: str) -> click.Command:
+    @generate.command(name, help=help_text)
+    @click.argument("prompt", required=False)
+    @click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                  help="Read the prompt from a file instead.")
+    @click.option("-m", "--model", default=default_model, show_default=True,
+                  help=f'A model id (see "aistudio models list --category {category}").')
+    @click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path), help=out_help)
+    @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+    @click.option("--visible", is_flag=True,
+                  help="Show the browser window instead of minimizing it.")
+    @json_option
+    @click.pass_obj
+    @handle_errors
+    def command(state: CliState, prompt: str | None, prompt_file: Path | None, model: str,
+                out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
+        state.require_browser()
+        content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
+        _notice(name, visible, json_output)
+        run = generate_image if name == "image" else generate_music
+        result = asyncio.run(run(state.profile(), content, model=model, out=out,
+                                 overwrite=force, visible=visible))
+        emit(result, json_output=json_output, render=_render_media)
+
+    return command
+
+
+image = _media_command(
+    "image", "images", DEFAULT_IMAGE_MODEL,
+    "Generate an image from PROMPT with a Gemini image model (uses quota).",
+    "Output file (default: aistudio-image-<time>.<type>, e.g. .jpg).")
+music = _media_command(
+    "music", "music", DEFAULT_MUSIC_MODEL,
+    "Generate music from PROMPT with Lyria (uses quota; lyria-3.5 makes full songs).",
+    "Output file (default: aistudio-music-<time>.mp3).")
 
 
 @click.group()

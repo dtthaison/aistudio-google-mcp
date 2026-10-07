@@ -192,6 +192,34 @@ body, so nothing was generated.
   Speaker button has no label yet, so `select_voice` first waits for it.
 - **The voice resets to Fola** on each page load: choosing a voice does not change the account.
 
+### Image and music generation (2026-10-07)
+
+Free probes blocked every request after Run inside the page. Then one approved real run of each
+was made: one image ($0.034) and one clip ($0.04).
+
+- **Pages.** `/generate-image` and `/generate-video` redirect to `/prompts/new_image` (Imagen) and
+  `/prompts/new_video` (Veo 3.1). `/prompts/new_chat?model=<lyria id>` redirects to
+  `/new_music?model=<id>`. `/prompts/new_chat?model=<gemini image model>` stays a chat page
+  titled "Generate images with Nano Banana …".
+- **Imagen** sends `GenerateImage = [null, prompt, <BotGuard token>, [count, null, "1:1"]]`. For
+  this account it fails with HTTP 400 `[3,"Request contains an invalid argument."]` and the page
+  shows "Failed to generate image". It is not offered.
+- **Veo**: the page says "Upgrade to unlock Veo 3.1" / "Continue to upgrade", and Run sends
+  nothing. It is not offered.
+- **Gemini image models**: ⌘↵ in "Enter a prompt" sends `GenerateContent` with
+  `["models/<id>", [[[[null, prompt]], "user"]], null, <config: [14] = [2, 1], [29] =
+  [null, "1K"]>, <token>, …]`.
+  - The response streams `[mime, base64]` at `chunk[0][0][0][0][0][2]` (`image/jpeg`, about
+    450 KB), plus a large opaque signature at part `[14]`.
+  - The finish reason (1) is in the last chunk. It took 15.3 s minimized.
+  - No API-key prompt appeared.
+- **Lyria**: the prompt sits behind a "Describe the music you want to generate…" button, which
+  reveals the "Prompt input" box. "Generate" runs it (⌘↵ does nothing there).
+  - The request is `["models/<id>", [[[[null, prompt]], "user"]], null, <config [14] = [3]>,
+    <token>]`.
+  - The response is a text part (`"<instrumental>"`, or the lyrics), then
+    `["audio/mpeg", base64]` (MP3), then finish 1. It took 18.7 s.
+
 ## Build create/update discovery (`scripts/spikes/build_drive.py`)
 
 - **A minimized window works.** Both create and update succeeded from a **minimized** Chrome window,
