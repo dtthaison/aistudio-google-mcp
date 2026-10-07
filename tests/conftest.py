@@ -1,6 +1,7 @@
 import contextlib
 import json
 import pathlib
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -95,9 +96,11 @@ class FakeUi:
     are left.
     """
 
-    def __init__(self, responses=None):
+    def __init__(self, responses=None, labels=None, visible=None):
         self.ops = []
         self._responses = {k: list(v) for k, v in (responses or {}).items()}
+        self._labels = {k: list(v) for k, v in (labels or {}).items()}
+        self._visible = {k: list(v) for k, v in (visible or {}).items()}
 
     async def goto(self, url):
         self.ops.append(("goto", url))
@@ -110,6 +113,38 @@ class FakeUi:
 
     async def wait_enabled(self, role, name, *, timeout_s=30.0):
         self.ops.append(("wait_enabled", role, name))
+
+    @staticmethod
+    def _key(name):
+        return name.pattern if isinstance(name, re.Pattern) else name
+
+    @staticmethod
+    def _answer(table, key, default):
+        answers = table.get(key)
+        if not answers:
+            return default
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    async def click(self, role, name, *, exact=False, nth=0):
+        self.ops.append(("click", role, self._key(name), nth))
+
+    async def fill(self, role, name, text):
+        self.ops.append(("fill", role, self._key(name), text))
+
+    async def press(self, role, name, key):
+        self.ops.append(("press", role, self._key(name), key))
+
+    async def key(self, key):
+        self.ops.append(("key", key))
+
+    async def visible(self, role, name, *, exact=False):
+        return self._answer(self._visible, (role, self._key(name)), False)
+
+    async def labels(self, role, name):
+        return self._answer(self._labels, (role, self._key(name)), [])
+
+    async def pause(self, ms):
+        pass
 
     @contextlib.asynccontextmanager
     async def responses(self):

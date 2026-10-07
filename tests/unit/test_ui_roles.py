@@ -1,0 +1,109 @@
+import re
+
+import pytest
+
+from aistudio._browser.ui import PlaywrightUi
+from aistudio.exceptions import AuthError, BrowserError
+
+
+class El:
+    def __init__(self, visible=True, label=None, text="", fail=None):
+        self._visible, self._label, self._text, self._fail = visible, label, text, fail
+        self.actions = []
+
+    async def is_visible(self):
+        return self._visible
+
+    async def get_attribute(self, name):
+        return self._label if name == "aria-label" else None
+
+    async def inner_text(self):
+        return self._text
+
+    async def click(self, timeout=None):
+        if self._fail:
+            raise self._fail
+        self.actions.append("click")
+
+    async def fill(self, text, timeout=None):
+        if self._fail:
+            raise self._fail
+        self.actions.append(("fill", text))
+
+    async def press(self, key, timeout=None):
+        self.actions.append(("press", key))
+
+
+class Loc:
+    def __init__(self, elements):
+        self._elements = elements
+
+    def nth(self, i):
+        return self._elements[i]
+
+    @property
+    def first(self):
+        return self._elements[0]
+
+    async def count(self):
+        return len(self._elements)
+
+    async def all(self):
+        return self._elements
+
+
+class Keyboard:
+    def __init__(self):
+        self.pressed = []
+
+    async def press(self, key):
+        self.pressed.append(key)
+
+
+class Page:
+    def __init__(self, by_role, url="https://aistudio.google.com/generate-speech"):
+        self._by_role = by_role
+        self.url = url
+        self.keyboard = Keyboard()
+        self.asked = []
+
+    def get_by_role(self, role, name=None, exact=False):
+        self.asked.append((role, name, exact))
+        return Loc(self._by_role.get(role, []))
+
+
+async def test_click_fill_press_and_key_reach_the_page():
+    box, button = El(), El()
+    page = Page({"textbox": [box], "button": [El(), button]})
+    ui = PlaywrightUi(page)
+    await ui.click("button", re.compile("^Speaker"), nth=1)
+    await ui.fill("textbox", "Speech block text", "hi")
+    await ui.press("textbox", "Speech block text", "Meta+Enter")
+    await ui.key("Escape")
+    assert button.actions == ["click"]
+    assert box.actions == [("fill", "hi"), ("press", "Meta+Enter")]
+    assert page.keyboard.pressed == ["Escape"]
+
+
+async def test_a_missing_control_is_a_browser_error_naming_it():
+    page = Page({"textbox": [El(fail=TimeoutError("Timeout 30000ms exceeded"))]})
+    with pytest.raises(BrowserError) as info:
+        await PlaywrightUi(page).fill("textbox", "Speech block text", "hi")
+    assert "Speech block text" in info.value.message
+    assert "AI Studio page changed" in info.value.message
+
+
+async def test_role_actions_on_a_signed_out_page_are_auth_errors():
+    page = Page({"button": [El()]}, url="https://accounts.google.com/signin")
+    with pytest.raises(AuthError):
+        await PlaywrightUi(page).click("button", "Style")
+
+
+async def test_visible_and_labels_read_only_visible_elements():
+    page = Page({"button": [El(label="Favorite Tova"), El(visible=False, label="Favorite Hidden"),
+                            El(text="  Remove from \n favorites Fola ")]})
+    ui = PlaywrightUi(page)
+    assert await ui.visible("button", "Favorite Tova", exact=True) is True
+    assert await ui.labels("button", re.compile("Favorite")) == [
+        "Favorite Tova", "Remove from favorites Fola"]
+    assert await PlaywrightUi(Page({})).visible("button", "nope") is False

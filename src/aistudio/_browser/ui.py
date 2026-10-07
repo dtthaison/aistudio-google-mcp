@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import sys
 from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
@@ -23,6 +24,12 @@ from aistudio.paths import Profile
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
 RUN_SHORTCUT = "Meta+Enter" if sys.platform == "darwin" else "Control+Enter"
 RPC_MARKER = "MakerSuiteService/"
+CONTROL_TIMEOUT_MS = 30_000
+Name = str | re.Pattern[str]
+
+
+def _describe(role: str, name: Name) -> str:
+    return f"{role} {name.pattern if isinstance(name, re.Pattern) else repr(name)}"
 
 
 @dataclass(frozen=True)
@@ -45,6 +52,20 @@ class Ui(Protocol):
     async def press_first(self, selector: str, key: str) -> None: ...
 
     async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None: ...
+
+    async def click(self, role: str, name: Name, *, exact: bool = False, nth: int = 0) -> None: ...
+
+    async def fill(self, role: str, name: Name, text: str) -> None: ...
+
+    async def press(self, role: str, name: Name, key: str) -> None: ...
+
+    async def key(self, key: str) -> None: ...
+
+    async def visible(self, role: str, name: Name, *, exact: bool = False) -> bool: ...
+
+    async def labels(self, role: str, name: Name) -> list[str]: ...
+
+    async def pause(self, ms: int) -> None: ...
 
     def responses(self) -> contextlib.AbstractAsyncContextManager[ResponseLog]: ...
 
@@ -155,6 +176,51 @@ class PlaywrightUi:
                     hint="re-run; if it persists, the AI Studio UI changed",
                 )
             await asyncio.sleep(0.25)
+
+    def _role(self, role: str, name: Name, exact: bool = False) -> Any:
+        return self._page.get_by_role(role, name=name, exact=exact)
+
+    async def _act(self, role: str, name: Name, run: Callable[[], Any]) -> None:
+        self._check_signed_in()
+        try:
+            await run()
+        except Exception as exc:  # playwright timeouts: the control is missing or hidden
+            raise BrowserError(
+                f"AI Studio page changed or did not load: {_describe(role, name)} not found "
+                f"({type(exc).__name__})",
+                hint="re-run; if it persists, the AI Studio UI changed and aistudio needs an "
+                     "update",
+            ) from exc
+
+    async def click(self, role: str, name: Name, *, exact: bool = False, nth: int = 0) -> None:
+        locator = self._role(role, name, exact).nth(nth)
+        await self._act(role, name, lambda: locator.click(timeout=CONTROL_TIMEOUT_MS))
+
+    async def fill(self, role: str, name: Name, text: str) -> None:
+        locator = self._role(role, name).first
+        await self._act(role, name, lambda: locator.fill(text, timeout=CONTROL_TIMEOUT_MS))
+
+    async def press(self, role: str, name: Name, key: str) -> None:
+        locator = self._role(role, name).first
+        await self._act(role, name, lambda: locator.press(key, timeout=CONTROL_TIMEOUT_MS))
+
+    async def key(self, key: str) -> None:
+        await self._page.keyboard.press(key)
+
+    async def visible(self, role: str, name: Name, *, exact: bool = False) -> bool:
+        locator = self._role(role, name, exact)
+        return await locator.count() > 0 and await locator.first.is_visible()
+
+    async def labels(self, role: str, name: Name) -> list[str]:
+        out: list[str] = []
+        for element in await self._role(role, name).all():
+            if await element.is_visible():
+                text = await element.get_attribute("aria-label") or await element.inner_text()
+                out.append(" ".join((text or "").split()))
+        return out
+
+    async def pause(self, ms: int) -> None:
+        await self._page.wait_for_timeout(ms)
 
     @contextlib.asynccontextmanager
     async def responses(self) -> AsyncIterator[ResponseLog]:
