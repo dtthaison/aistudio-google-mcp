@@ -1,4 +1,4 @@
-"""Media generation use cases. Text-to-speech is page-driven (spec §5.4, §6.4)."""
+"""Media generation use cases: speech, images and music are page-driven (spec §5.4, §6.4)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,17 @@ from pathlib import Path
 from typing import Any
 
 from aistudio._app.models import load_catalog, normalize_model_id
+from aistudio._browser.media_pages import ImagePage, MusicPage
 from aistudio._browser.speech_page import SpeechPage
 from aistudio._browser.ui import open_browser
 from aistudio._media.wav import pcm_to_wav
 from aistudio._rpc import wire
+from aistudio._rpc.rows.media import decode_media, extension_for
 from aistudio._rpc.rows.speech import decode_speech
 from aistudio._transport.http import error_for_response
 from aistudio.client import AIStudioClient
 from aistudio.exceptions import (
+    AIStudioError,
     BotGuardError,
     BrowserError,
     NotFoundError,
@@ -27,26 +30,37 @@ from aistudio.exceptions import (
 from aistudio.paths import Profile
 
 DEFAULT_SPEECH_MODEL = "gemini-3.8-flash-tts"
+DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-lite-image"  # cheapest image model, verified live
+DEFAULT_MUSIC_MODEL = "lyria-3-clip-preview"  # cheapest Lyria model, verified live
 _AUDIO_HINT = 'see "aistudio models list --category audio"'
+_IMAGE_HINT = 'see "aistudio models list --category images"'
+_MUSIC_HINT = 'see "aistudio models list --category music"'
+_TIER_HINT = "this model may need a paid tier or may be unavailable to your account"
 # Catalog commands this CLI actually offers; hints never name anything else.
-_OFFERED_COMMANDS = {"generate speech"}
+_OFFERED_COMMANDS = {"generate speech", "generate image", "generate music"}
 
 
 def default_output(now: datetime) -> Path:
     return Path(f"aistudio-speech-{now:%Y%m%d-%H%M%S}.wav")
 
 
-async def check_speech_model(client: AIStudioClient, profile: Profile, model: str) -> str:
-    """The catalog must list the model as text-to-speech (spec §6.2 category validation)."""
+async def check_model(client: AIStudioClient, profile: Profile, model: str, *, command: str,
+                      what: str, hint: str) -> str:
+    """The catalog must map the model to ``command`` (spec §6.2 category validation)."""
     model_id = normalize_model_id(model)
     found = {m.id: m for m in await load_catalog(client, profile)}.get(model_id)
     if found is None:
-        raise NotFoundError(f"no model {model_id!r} in the catalog", hint=_AUDIO_HINT)
-    if found.command != "generate speech":
+        raise NotFoundError(f"no model {model_id!r} in the catalog", hint=hint)
+    if found.command != command:
         usable = found.command in _OFFERED_COMMANDS
-        hint = f'use "aistudio {found.command}"' if usable else _AUDIO_HINT
-        raise ValidationError(f"{model_id} is not a text-to-speech model", hint=hint)
+        raise ValidationError(f"{model_id} is not {what}",
+                              hint=f'use "aistudio {found.command}"' if usable else hint)
     return model_id
+
+
+async def check_speech_model(client: AIStudioClient, profile: Profile, model: str) -> str:
+    return await check_model(client, profile, model, command="generate speech",
+                             what="a text-to-speech model", hint=_AUDIO_HINT)
 
 
 async def generate_speech(
@@ -68,10 +82,7 @@ async def generate_speech(
     path = out or default_output(now())
     if path.exists() and not overwrite:
         raise ValidationError(f"{path} already exists", hint="pass --force or choose another -o")
-    folder = path.parent if str(path.parent) else Path(".")
-    if not folder.is_dir() or not os.access(folder, os.W_OK):
-        raise ValidationError(f"{folder} does not exist or is not writable",
-                              hint="create the folder first; nothing was generated")
+    _check_folder(path.parent if str(path.parent) else Path("."))
     async with client_factory(profile) as client:
         model_id = await check_speech_model(client, profile, model)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
@@ -114,6 +125,116 @@ async def generate_speech(
         "style": sent_style,
         **({"warnings": warnings} if warnings else {}),
     }
+
+
+async def generate_image(profile: Profile, prompt: str, *, model: str = DEFAULT_IMAGE_MODEL,
+                         **options: Any) -> dict[str, Any]:
+    return await _generate_media(profile, prompt, model=model, page_class=ImagePage,
+                                 part_kind="image", name="image", command="generate image",
+                                 what="an image model", hint=_IMAGE_HINT, **options)
+
+
+async def generate_music(profile: Profile, prompt: str, *, model: str = DEFAULT_MUSIC_MODEL,
+                         **options: Any) -> dict[str, Any]:
+    return await _generate_media(profile, prompt, model=model, page_class=MusicPage,
+                                 part_kind="audio", name="music", command="generate music",
+                                 what="a music model", hint=_MUSIC_HINT, **options)
+
+
+async def _generate_media(
+    profile: Profile,
+    prompt: str,
+    *,
+    model: str,
+    page_class: Callable[[Any], Any],
+    part_kind: str,
+    name: str,
+    command: str,
+    what: str,
+    hint: str,
+    out: Path | None = None,
+    overwrite: bool = False,
+    visible: bool = False,
+    client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
+    browser: Callable[..., Any] = open_browser,
+    now: Callable[[], datetime] = datetime.now,
+) -> dict[str, Any]:
+    if not prompt.strip():
+        raise ValidationError(f"nothing to generate: the {name} prompt is empty")
+    if out is not None and out.exists() and not overwrite:
+        raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
+    _check_folder(out.parent if out is not None and str(out.parent) else Path("."))
+    async with client_factory(profile) as client:
+        model_id = await check_model(client, profile, model, command=command, what=what,
+                                     hint=hint)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_class(ui)
+        await page.open(model_id)
+        await page.set_prompt(prompt)
+        captured = await page.run()
+    if captured.status >= 400:
+        raise _refused(captured.status, captured.text, name)
+    _confirm(_sent(captured.request_body), model_id=model_id, text=prompt, voice=None)
+    try:
+        body = wire.decode(captured.text)
+    except ValueError as exc:  # truncated or non-JSON body
+        raise SchemaDriftError("GenerateContent", (), f"a JSON {name} response") from exc
+    media = decode_media(body, part_kind)
+    files: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    first: Path | None = None
+    for part in media.parts:
+        ext = extension_for(part.mime_type)
+        if first is None:
+            path = out or _free_name(Path(f"aistudio-{name}-{now():%Y%m%d-%H%M%S}{ext}"))
+            if out is not None and _normal_suffix(out.suffix) != ext:
+                warnings.append(f"{out} holds {part.mime_type} data; its extension says otherwise")
+            _write(path, part.data, overwrite=overwrite)
+            first = path
+        else:  # extra images never clobber anything, so nothing fails after a paid run
+            path = _free_name(first, start=2)
+            _write(path, part.data, overwrite=False)
+        files.append({"path": str(path), "mime_type": part.mime_type, "bytes": len(part.data)})
+    return {
+        "files": files,
+        "model": model_id,
+        **({"text": media.text} if media.text else {}),
+        **({"warnings": warnings} if warnings else {}),
+    }
+
+
+def _check_folder(folder: Path) -> None:
+    if not folder.is_dir() or not os.access(folder, os.W_OK):
+        raise ValidationError(f"{folder} does not exist or is not writable",
+                              hint="create the folder first; nothing was generated")
+
+
+def _refused(status: int, text: str, name: str) -> AIStudioError:
+    err = error_for_response(status, text)
+    if status == 403:
+        return BotGuardError(f"Google refused the {name} request: {err.message}",
+                             hint="re-run with --visible; a paid model may also need a "
+                                  "paid tier")
+    if err.hint is None:
+        err.hint = _TIER_HINT
+    return err
+
+
+def _normal_suffix(suffix: str) -> str:
+    lowered = suffix.lower()
+    return ".jpg" if lowered == ".jpeg" else lowered
+
+
+def _free_name(path: Path, *, start: int | None = None) -> Path:
+    """``path`` itself (unless ``start`` is given), else ``stem-N`` with the first free N."""
+    if start is None and not path.exists():
+        return path
+    n = start or 2
+    while True:
+        candidate = path.with_name(f"{path.stem}-{n}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 def _sent(request_body: str) -> Any:

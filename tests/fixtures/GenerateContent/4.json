@@ -1,0 +1,19 @@
+{
+  "method": "GenerateContent",
+  "url": "https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/GenerateContent",
+  "http_method": "POST",
+  "_note": "synthetic: shapes from the 2026-10-07 live run (docs/wire/findings.md); tiny payload, placeholder BotGuard token",
+  "request": {
+    "headers": {
+      "content-type": "application/json+protobuf"
+    },
+    "body": "[\"models/gemini-3.1-flash-lite-image\",[[[[null,\"A red apple on a white table, studio photo\"]],\"user\"]],null,[null,null,null,65536,1,0.95,64,null,null,null,null,null,null,null,[2,1],null,[1,null,null,4],null,null,null,null,null,null,null,null,null,[null,\"1K\"]],\"!TOKEN\",null,null,null,null,null,1]"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json+protobuf"
+    },
+    "body": "[[[[[[[[null,null,[\"image/jpeg\",\"/9j/4CBzeW50aGV0aWMganBlZyBmb3IgdGVzdHMg/9k=\"],null,null,null,null,null,null,null,null,null,null,null,\"OPAQUESIGNATUREOPAQUESIGNATUREOPAQUESIGNATUREOPAQUESIGNATURE\"]],\"model\"]]],null,[11,1514,1525,null,[[1,11]]],null,null,null,null,\"v1_synthetic\"],[[[[[[null,\"\"]],\"model\"],1]],null,[11,1514,1525,null,[[1,11]]],null,null,null,null,\"v1_synthetic\"]]]"
+  }
+}

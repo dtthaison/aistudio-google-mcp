@@ -89,7 +89,7 @@ async def test_refused_generation_writes_nothing(logged_in_profile, make_client,
 
 @pytest.mark.parametrize("model,hint", [
     ("gemini-3.5-flash", 'see "aistudio models list --category audio"'),
-    ("lyria-3.5", 'see "aistudio models list --category audio"'),
+    ("lyria-3.5", 'use "aistudio generate music"'),
 ])
 @respx.mock
 async def test_non_tts_models_fail_before_any_browser_opens(logged_in_profile, make_client,
