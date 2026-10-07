@@ -173,3 +173,13 @@ def test_malformed_snapshot_entries_are_schema_drift():
 
     with pytest.raises(SchemaDriftError):
         decode_snapshot_files([["model", "s", None, None, [["a", "h"], ["b"]]]])
+
+
+@respx.mock
+async def test_export_reports_progress_per_verified_file(make_client, tmp_path):
+    serve(FILES)
+    seen = []
+    async with make_client() as client:
+        await export_app(client, "d6d4", tmp_path / "out",
+                         progress=lambda done, total: seen.append((done, total)))
+    assert sorted(seen) == [(1, 2), (2, 2)]

@@ -12,13 +12,13 @@ import contextlib
 import re
 import sys
 from collections import defaultdict
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
-from aistudio.exceptions import AuthError, BrowserError
+from aistudio.exceptions import AIStudioError, AuthError, BrowserError
 from aistudio.paths import Profile
 
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
@@ -27,6 +27,8 @@ RPC_MARKER = "MakerSuiteService/"
 CONTROL_TIMEOUT_MS = 30_000
 Name = str | re.Pattern[str]
 
+
+T = TypeVar("T")
 
 def _describe(role: str, name: Name) -> str:
     return f"{role} {name.pattern if isinstance(name, re.Pattern) else repr(name)}"
@@ -213,19 +215,35 @@ class PlaywrightUi:
         await self._act(role, name, lambda: locator.press("Enter", timeout=CONTROL_TIMEOUT_MS))
 
     async def key(self, key: str) -> None:
-        await self._page.keyboard.press(key)
+        await self._read(lambda: self._page.keyboard.press(key))
 
     async def visible(self, role: str, name: Name, *, exact: bool = False) -> bool:
         locator = self._role(role, name, exact)
-        return await locator.count() > 0 and await locator.first.is_visible()
+
+        async def read() -> bool:
+            return await locator.count() > 0 and await locator.first.is_visible()
+
+        return await self._read(read)
 
     async def labels(self, role: str, name: Name) -> list[str]:
-        out: list[str] = []
-        for element in await self._role(role, name).all():
-            if await element.is_visible():
-                text = await element.get_attribute("aria-label") or await element.inner_text()
-                out.append(" ".join((text or "").split()))
-        return out
+        async def read() -> list[str]:
+            out: list[str] = []
+            for element in await self._role(role, name).all():
+                if await element.is_visible():
+                    text = await element.get_attribute("aria-label") or await element.inner_text()
+                    out.append(" ".join((text or "").split()))
+            return out
+
+        return await self._read(read)
+
+    async def _read(self, run: Callable[[], Awaitable[T]]) -> T:
+        """Run a page read; a window closed mid-read becomes a BrowserError, not a raw error."""
+        try:
+            return await run()
+        except AIStudioError:
+            raise
+        except Exception as exc:  # playwright errors once the page or window is gone
+            raise _window_closed() from exc
 
     async def pause(self, ms: int) -> None:
         await self._page.wait_for_timeout(ms)

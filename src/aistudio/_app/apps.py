@@ -129,8 +129,12 @@ def _preflight(targets: list[tuple[PurePosixPath, str]], dest: Path) -> None:
 
 
 async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
-                     force: bool = False) -> dict[str, Any]:
-    """Download a Build app's latest code into ``dest``, verified by SHA-256 (findings)."""
+                     force: bool = False,
+                     progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
+    """Download a Build app's latest code into ``dest``, verified by SHA-256 (findings).
+
+    ``progress(done, total)`` is called after each file downloads and verifies.
+    """
     app = pick(await client.apps.list(), lambda a: a.id, app_ref, noun="app",
                hint='see "aistudio app list"')
     if app.storage != "applet":
@@ -147,6 +151,7 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
                               hint="choose an empty folder or pass --force to overwrite files")
     _preflight(targets, dest)
     limit = asyncio.Semaphore(_PARALLEL_DOWNLOADS)
+    done: list[PurePosixPath] = []
 
     async def fetch(rel: PurePosixPath, digest: str) -> bytes:
         async with limit:
@@ -154,6 +159,9 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
         if hashlib.sha256(data).hexdigest() != digest:
             raise ServerError(f"{rel}: downloaded content does not match its SHA-256",
                               retriable=True, hint="re-run the export; nothing was written")
+        done.append(rel)
+        if progress is not None:
+            progress(len(done), len(targets))
         return data
 
     contents = await asyncio.gather(*(fetch(rel, digest) for rel, digest in targets))

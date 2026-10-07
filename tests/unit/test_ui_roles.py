@@ -117,3 +117,28 @@ async def test_visible_and_labels_read_only_visible_elements():
     assert await ui.labels("button", re.compile("Favorite")) == [
         "Favorite Tova", "Remove from favorites Fola"]
     assert await PlaywrightUi(Page({})).visible("button", "nope") is False
+
+
+class BrokenLoc(Loc):
+    async def count(self):
+        raise Exception("Target page, context or browser has been closed")
+
+    async def all(self):
+        raise Exception("Target page, context or browser has been closed")
+
+
+class BrokenKeyboard:
+    async def press(self, key):
+        raise Exception("Target page, context or browser has been closed")
+
+
+async def test_reads_on_a_closed_window_are_browser_errors():
+    page = Page({})
+    page.get_by_role = lambda role, name=None, exact=False: BrokenLoc([])
+    page.keyboard = BrokenKeyboard()
+    ui = PlaywrightUi(page)
+    for read in (lambda: ui.visible("button", "Tova"), lambda: ui.labels("button", "Tova"),
+                 lambda: ui.key("Escape")):
+        with pytest.raises(BrowserError) as info:
+            await read()
+        assert "closed" in info.value.message

@@ -212,7 +212,12 @@ def app_prompt(state: CliState, app_id: str, text: str, timeout: int, visible: b
 @handle_errors
 def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_output: bool) -> None:
     """Download an app's latest code into DEST (verified; no browser)."""
-    data = _run(state, lambda c: export_app(c, app_id, dest, force=force))
+    def progress(done: int, total: int) -> None:
+        if done == total or done % 10 == 0:
+            stderr.print(f"Downloaded {done}/{total} files", markup=False)
+
+    data = _run(state, lambda c: export_app(c, app_id, dest, force=force,
+                                            progress=None if json_output else progress))
     emit(data, json_output=json_output, render=lambda d: stdout.print(
         f"Exported {d['count']} files ({d['bytes']} bytes) of {d['title'] or d['app_id']} "
         f"to {d['dir']}", markup=False))
