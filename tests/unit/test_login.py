@@ -189,3 +189,34 @@ async def test_profile_in_use_gets_a_close_the_other_window_hint(aistudio_home):
         await run_login(get_profile("default"), playwright_factory=factory(chromium), poll=0)
     assert "wait for it" in info.value.hint and "close" not in info.value.hint
     assert "\n" not in info.value.message
+
+
+class ClosingContext(FakeContext):
+    """The person closes the login window before signing in."""
+
+    async def cookies(self):
+        raise Exception("Target page, context or browser has been closed")
+
+
+async def test_closing_the_login_window_is_a_browser_error(aistudio_home):
+    context = ClosingContext([])
+    with pytest.raises(BrowserError) as info:
+        await run_login(get_profile("default"), playwright_factory=factory(FakeChromium(context)),
+                        poll=0)
+    assert "closed" in info.value.message
+    assert "aistudio login" in info.value.hint
+    assert context.closed
+
+
+async def test_only_a_missing_browser_gets_the_install_hint(aistudio_home):
+    chromium = FakeChromium(error=Exception("Target closed"))
+    with pytest.raises(BrowserError) as info:
+        await run_login(get_profile("default"), playwright_factory=factory(chromium), poll=0)
+    assert "install" not in info.value.hint
+
+
+async def test_opening_in_an_existing_session_means_the_profile_is_in_use(aistudio_home):
+    chromium = FakeChromium(error=Exception("Opening in existing browser session."))
+    with pytest.raises(BrowserError) as info:
+        await run_login(get_profile("default"), playwright_factory=factory(chromium), poll=0)
+    assert "one at a time" in info.value.hint

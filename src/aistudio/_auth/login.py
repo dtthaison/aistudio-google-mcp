@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.signer import API_HOST
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
-from aistudio.exceptions import BrowserError, WaitTimeoutError
+from aistudio.exceptions import AIStudioError, BrowserError, WaitTimeoutError
 from aistudio.paths import Profile
 
 APP_URL = "https://aistudio.google.com/"
@@ -51,7 +51,10 @@ def default_playwright_factory() -> Callable[[], Any]:
     return async_playwright
 
 
-_PROFILE_IN_USE = re.compile(r"ProcessSingleton|SingletonLock|already in use", re.I)
+_PROFILE_IN_USE = re.compile(
+    r"ProcessSingleton|SingletonLock|already in use|Opening in existing browser session", re.I)
+_BROWSER_MISSING = re.compile(
+    r"Executable doesn't exist|distribution '[^']*' is not found|ENOENT|not found at", re.I)
 
 
 async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, headless: bool,
@@ -77,6 +80,8 @@ async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, 
                 "another aistudio command is using this profile's browser",
                 hint="wait for it to finish, then retry; browser commands run one at a time",
             ) from exc
+        elif not _BROWSER_MISSING.search(str(exc)):
+            hint = "re-run; if it persists, check that Chrome opens normally on this machine"
         elif browser == "chrome":
             hint = (
                 'install Google Chrome, or use "--browser chromium" '
@@ -138,6 +143,14 @@ async def run_login(
             save_state(profile, await context.storage_state(), account)
             save_session_info(profile, api_key)
             return LoginResult(profile.name, account, api_key is not None)
+        except AIStudioError:
+            raise
+        except Exception as exc:  # playwright errors once the window is gone
+            if "closed" in str(exc).lower():
+                raise BrowserError("the login window was closed before sign-in finished",
+                                   hint='run "aistudio login" again') from exc
+            raise BrowserError(f"the login browser failed: {exc}",
+                               hint='run "aistudio login" again') from exc
         finally:
             await context.close()
 
