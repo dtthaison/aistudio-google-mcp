@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import json
 from datetime import datetime
 
@@ -9,6 +10,7 @@ from aistudio._flow.page import AgentTurn, Defaults, FlowOutcome
 from aistudio._flow.rows import FlowMedia, Quote
 from aistudio.exceptions import (
     AgentReplyError,
+    AIStudioError,
     BrowserError,
     NetworkError,
     NotFoundError,
@@ -21,20 +23,23 @@ PID = "72df29b1-e119-4741-ad44-ba18bc1ad34a"
 NOW = datetime(2026, 10, 7, 12, 0, 0)
 TEXT = ("I'm going to generate an 8-second video using Veo 3.1 - Lite. Would you like me to kick "
         "off this 1 video generation, costing 10 credits?")
-DONE = FlowMedia("m1", PID, "an apple", "veo_3_1_t2v_lite", 3, 8, 3, "https://flow-content.google"
-                 "/video/m1?Signature=s", "https://flow-content.google/image/m1?Signature=s")
+DONE = FlowMedia(media_id="m1", project_id=PID, prompt="an apple", model_key="veo_3_1_t2v_lite",
+                 status=3, created=1791366665, seconds=8, size=3,
+                 video_url="https://flow-content.google/video/m1?Signature=s",
+                 image_url="https://flow-content.google/image/m1?Signature=s")
 
 
 TURN = AgentTurn(TEXT, Quote(1, "video", 10))
-OMNI = Defaults("Omni 1.1 Flash", "16:9", 1)
+OMNI = Defaults("Omni 1.1 Flash", "16:9", 1, asks=True)
 
 
 class FakePage:
     """Scripted FlowPage: records calls; behaviour set per test."""
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
-                 restore_error=None):
+                 restore_error=None, follow_error=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
+        self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
         self.missing, self.restore_error = set(missing), restore_error
 
@@ -58,17 +63,18 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
-    async def submit(self, text):
+    async def submit_for_quote(self, text, *, timeout_s=90.0):
         self.calls.append(("submit", text))
-
-    async def wait_for_quote(self, *, timeout_s=90.0):
         return self.turn
 
     async def reject(self):
         self.calls.append(("reject",))
 
-    async def approve_and_follow(self, *, count, timeout_s):
+    async def approve_and_follow(self, *, count, timeout_s, kind):
         self.calls.append(("approve", count))
+        if self.follow_error:
+            self.paid_media = ["m9"]
+            raise self.follow_error
         return self.outcome
 
     async def credits(self):
@@ -190,7 +196,8 @@ async def test_a_failed_download_names_the_media(logged_in_profile, tmp_path):
 
 
 async def test_a_timeout_reports_the_media_and_spent_credits(logged_in_profile, tmp_path):
-    late = FlowMedia("m1", PID, None, None, 2, None, None, None, None)
+    late = FlowMedia(media_id="m1", project_id=PID, prompt=None, model_key=None, status=2,
+                     created=None, seconds=None, size=None, video_url=None, image_url=None)
     kw, _, _ = harness(outcome=FlowOutcome([late], None, True))
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
@@ -225,8 +232,7 @@ async def test_credits(logged_in_profile):
 
 async def test_a_different_length_after_the_job_is_a_warning(logged_in_profile, tmp_path):
     # Flow sends the length only after Approve (live: ask_for_permission has counts and cost).
-    six = FlowMedia("m1", PID, "an apple", "veo_3_1_t2v_lite", 3, 6, 3, DONE.video_url,
-                    DONE.image_url)
+    six = dataclasses.replace(DONE, seconds=6)
     kw, _, _ = harness(turn=AgentTurn("kick off this 1 video generation, costing 10 credits?",
                                       Quote(1, "video", 10)),
                        outcome=FlowOutcome([six], 1040, False))
@@ -234,3 +240,53 @@ async def test_a_different_length_after_the_job_is_a_warning(logged_in_profile, 
                                  duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert result["status"] == "done"
     assert result["warnings"] == ["Flow made a 6-second video, not the 8 seconds asked for"]
+
+
+async def test_flow_set_to_spend_without_asking_is_refused_before_anything_is_sent(
+        logged_in_profile, tmp_path):
+    # Review C1: with "Confirm before generating: Never", even a quote-only run would spend.
+    kw, pages, _ = harness(defaults=Defaults("Omni 1.1 Flash", "16:9", 1, asks=False))
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", out=tmp_path / "a.mp4",
+                            **kw)
+    assert "Confirm before generating" in info.value.hint
+    assert not any(c[0] in ("submit", "apply", "approve") for c in pages[0].calls)
+
+
+async def test_several_outputs_from_the_defaults_also_need_a_folder(logged_in_profile, tmp_path):
+    # Review I4: the image default is x2 (live), so --count can come from Flow.
+    kw, pages, _ = harness(defaults=Defaults("Nano Banana 2.1", "16:9", 2, asks=True))
+    with pytest.raises(ValidationError):
+        await flow_generate(logged_in_profile(), "image", "an apple", max_credits=4,
+                            out=tmp_path / "a.png", **kw)
+    assert not any(c[0] in ("submit", "approve") for c in pages[0].calls)
+
+
+async def test_any_failure_after_approve_says_credits_were_spent(logged_in_profile, tmp_path):
+    # Review I2: never invite a blind paid re-run.
+    kw, _, _ = harness(follow_error=RuntimeError("Target page, context or browser has been closed"))
+    with pytest.raises(AIStudioError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "credits were spent" in info.value.hint and "m9" in info.value.hint
+    assert "do not re-run" in info.value.hint
+
+
+async def test_a_non_flow_error_while_restoring_is_only_a_warning(logged_in_profile, tmp_path):
+    kw, _, _ = harness(restore_error=RuntimeError("raw playwright error"))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert (tmp_path / "a.mp4").exists() and "could not restore" in result["warnings"][0]
+
+
+async def test_an_unexpected_download_error_still_names_the_media(logged_in_profile, tmp_path):
+    kw, _, _ = harness()
+
+    async def odd(url):
+        raise RuntimeError("decoding failed")
+
+    kw["downloader"] = odd
+    with pytest.raises(AIStudioError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "m1" in info.value.hint

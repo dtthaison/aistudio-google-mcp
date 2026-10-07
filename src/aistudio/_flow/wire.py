@@ -10,8 +10,9 @@ import json
 from typing import Any
 
 
-def decode_batch(text: str) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+def payloads(text: str) -> list[tuple[str | None, Any]]:
+    """Every ``wrb.fr`` entry as ``(rpcid, payload)``, in order (StreamChat's rpcid is None)."""
+    out: list[tuple[str | None, Any]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith("[["):
@@ -24,7 +25,13 @@ def decode_batch(text: str) -> dict[str, Any]:
             if (isinstance(entry, list) and len(entry) > 2 and entry[0] == "wrb.fr"
                     and isinstance(entry[2], str)):
                 try:
-                    out[str(entry[1])] = json.loads(entry[2])
+                    payload = json.loads(entry[2])
                 except ValueError:
                     continue
+                out.append((entry[1] if isinstance(entry[1], str) else None, payload))
     return out
+
+
+def decode_batch(text: str) -> dict[str, Any]:
+    """rpcid -> payload for batchexecute responses (one entry per rpcid)."""
+    return {rpc: payload for rpc, payload in payloads(text) if rpc is not None}

@@ -75,6 +75,10 @@ quotes and write each `'` as `'\''`.
 
   `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected and nothing was spent.
   `"status": "timeout"` means credits were spent: give the user `project_url`.
+  After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
+  names the media): never re-run it without the user's OK.
+  A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
+  generating" is set to Never. Tell the user; aistudio will not change it.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).

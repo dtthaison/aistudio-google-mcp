@@ -19,7 +19,7 @@ async def download_signed(url: str, *, client: httpx.AsyncClient | None = None) 
     http = client or httpx.AsyncClient(timeout=120.0, follow_redirects=False)
     try:
         response = await http.get(url)
-    except httpx.TransportError as exc:
+    except httpx.HTTPError as exc:  # transport, decoding, too many redirects, …
         raise NetworkError(f"{type(exc).__name__}: {exc}") from exc
     finally:
         if owned:

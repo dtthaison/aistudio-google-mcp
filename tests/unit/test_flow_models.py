@@ -68,3 +68,10 @@ def test_decide_names_each_mismatch_and_ignores_unrequested_fields():
                      "'Veo 3.1 - Fast'", "length: expected 8 s, planned 6 s"]
     loose = Expect(kind="video", count=1, model=None, seconds=None)
     assert decide(QUOTE, Plan(None, None), loose, 10)[0] is Decision.APPROVE
+
+
+def test_instruction_has_no_newlines_since_enter_submits():
+    text = instruction("video", "para one\n\npara two\r\nthree", count=1, model_label=None,
+                       seconds=None, aspect=None)
+    assert "\n" not in text and "\r" not in text
+    assert text.endswith("Prompt: para one para two three")

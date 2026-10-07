@@ -29,3 +29,12 @@ async def test_expired_links_and_redirects_are_errors():
     respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": "https://x.y/"}))
     with pytest.raises(ServerError):
         await download_signed(URL)
+
+
+@respx.mock
+async def test_any_httpx_failure_is_a_network_error():
+    from aistudio.exceptions import NetworkError
+
+    respx.get(URL).mock(side_effect=httpx.DecodingError("bad gzip"))
+    with pytest.raises(NetworkError):
+        await download_signed(URL)

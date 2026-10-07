@@ -10,8 +10,6 @@ from aistudio._rpc.wire import opt_index
 
 _VIDEO = "https://flow-content.google/video/"
 _IMAGE = "https://flow-content.google/image/"
-_QUOTE = re.compile(r"kick off (?:this|these) ([\d,]+) (video|image) generations?, costing "
-                    r"([\d,]+) credits?", re.I)
 _SECONDS = re.compile(r"(\d+)-second", re.I)
 _MODEL = re.compile(r"\busing ((?:Veo|Omni|Nano Banana)[\w .\-]*?)"
                     r"(?=[.,;!?](?:\s|$)|\s+(?:with|in|at|and)\b|$)", re.I)
@@ -24,6 +22,7 @@ class FlowMedia:
     prompt: str | None
     model_key: str | None
     status: int | None  # 2 running, 3 done
+    created: int | None  # epoch seconds, from Flow's job record
     seconds: int | None
     size: int | None
     video_url: str | None
@@ -33,7 +32,7 @@ class FlowMedia:
 @dataclass(frozen=True)
 class Quote:
     count: int
-    kind: str  # "video" | "image"
+    kind: str  # "video" | "image" | "mixed"
     credits: int
 
 
@@ -65,12 +64,25 @@ def credits_left(payload: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def parse_quote(text: str) -> Quote | None:
-    match = _QUOTE.search(text)
-    if match is None:
-        return None
-    return Quote(count=int(match.group(1).replace(",", "")), kind=match.group(2).lower(),
-                 credits=int(match.group(3).replace(",", "")))
+def parse_permission(payload: Any) -> Quote | None:
+    """Flow's ``ask_for_permission`` call in a StreamChat payload (findings): only counts and cost.
+
+    ``["ask_for_permission", "ask_for_permission", [[["num_videos", [None, n]], …]]]``
+    """
+    for node in _lists(payload):
+        if len(node) >= 3 and node[0] == "ask_for_permission" and isinstance(node[2], list):
+            params = {pair[0]: pair[1][1] for pair in _lists(node[2])
+                      if len(pair) == 2 and isinstance(pair[0], str)
+                      and isinstance(pair[1], list) and len(pair[1]) == 2}
+            videos, images = params.get("num_videos"), params.get("num_images")
+            cost = params.get("total_cost")
+            if not all(isinstance(v, int) and not isinstance(v, bool)
+                       for v in (videos, images, cost)):
+                return None
+            kind = ("video" if videos and not images else "image" if images and not videos
+                    else "mixed")
+            return Quote(count=videos + images, kind=kind, credits=cost)
+    return None
 
 
 def parse_plan(text: str) -> Plan:
@@ -87,6 +99,7 @@ def _record(row: Any) -> FlowMedia | None:
         return None
     links = list(_strings(row))
     status = opt_index(details, 8, 0)
+    created = opt_index(details, 0, 0)
     seconds = opt_index(row, 7, 1, 2, 0)
     size = opt_index(details, 13)
     return FlowMedia(
@@ -95,6 +108,7 @@ def _record(row: Any) -> FlowMedia | None:
         prompt=opt_index(details, 1) if isinstance(opt_index(details, 1), str) else None,
         model_key=_str(opt_index(details, 6, 1, 0, 0)),
         status=status if isinstance(status, int) else None,
+        created=created if isinstance(created, int) else None,
         seconds=seconds if isinstance(seconds, int) else None,
         size=size if isinstance(size, int) else None,
         video_url=next((s for s in links if s.startswith(_VIDEO)), None),
@@ -104,6 +118,13 @@ def _record(row: Any) -> FlowMedia | None:
 
 def _str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _lists(node: Any):
+    if isinstance(node, list):
+        yield node
+        for child in node:
+            yield from _lists(child)
 
 
 def _strings(node: Any):

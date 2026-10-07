@@ -60,6 +60,7 @@ def check_options(kind: str, model: FlowModel | None, aspect: str | None, count:
 
 def instruction(kind: str, prompt: str, *, count: int, model_label: str | None,
                 seconds: int | None, aspect: str | None) -> str:
+    prompt = " ".join(prompt.split())  # typing a newline presses Enter, which submits
     noun = kind if count == 1 else f"{kind}s"
     length = f"{seconds}-second " if seconds else ""
     model = f" with {model_label}" if model_label else ""

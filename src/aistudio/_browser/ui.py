@@ -101,7 +101,8 @@ async def _collapsed(locator: Any) -> str:
 
 
 async def _aria_checked(locator: Any) -> bool:
-    return (await locator.get_attribute("aria-checked")) == "true"
+    """aria-checked radios and native ``<input type=radio>`` alike (Flow uses both)."""
+    return bool(await locator.is_checked())
 
 
 def _window_closed() -> BrowserError:

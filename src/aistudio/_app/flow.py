@@ -22,6 +22,7 @@ from aistudio.exceptions import (
     OverBudgetError,
     PlanMismatchError,
     SchemaDriftError,
+    ServerError,
     ValidationError,
 )
 from aistudio.paths import Profile
@@ -76,16 +77,22 @@ async def flow_generate(
         page = page_factory(ui)
         project_id = await _open(page, profile, project_id)
         previous = await page.read_defaults(kind)
+        if not previous.asks:
+            raise ValidationError(
+                "Flow's agent is set to generate without asking first",
+                hint="in Flow's settings set 'Confirm before generating' to Always; with Never, "
+                     "any prompt can spend credits. Nothing was sent")
         wanted = Defaults(flow_model.label if flow_model else previous.model,
                           aspect or previous.aspect, count or previous.count)
+        _check_output(out, wanted.count, overwrite)  # the count may come from Flow's defaults
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
             await page.new_session()
-            await page.submit(instruction(kind, prompt, count=wanted.count,
-                                          model_label=flow_model.label if flow_model else None,
-                                          seconds=duration, aspect=aspect))
-            turn = await page.wait_for_quote(timeout_s=90.0)
+            turn = await page.submit_for_quote(instruction(
+                kind, prompt, count=wanted.count,
+                model_label=flow_model.label if flow_model else None, seconds=duration,
+                aspect=aspect))
             if turn.quote is None:
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
@@ -107,12 +114,16 @@ async def flow_generate(
                                       f"--max-credits {max_credits}",
                                       hint=f"nothing was spent; re-run with --max-credits "
                                            f"{turn.quote.credits} to accept")
-            outcome = await page.approve_and_follow(count=wanted.count, timeout_s=timeout_s)
+            try:
+                outcome = await page.approve_and_follow(count=wanted.count, timeout_s=timeout_s,
+                                                        kind=kind)
+            except Exception as exc:  # after Approve: credits may be spent; never invite a re-run
+                raise _spent(exc, page.paid_media, project_id) from exc
         finally:
             if wanted != previous:
                 try:
                     await page.apply_defaults(kind, previous)
-                except AIStudioError:
+                except Exception:  # noqa: BLE001 - restoring must never hide the run's outcome
                     warnings.append(f"could not restore Flow's {kind} defaults "
                                     f"({previous.model}, {previous.aspect}, x{previous.count}); "
                                     "set them in Flow's settings")
@@ -131,6 +142,16 @@ async def flow_generate(
             "credits_left": outcome.credits_left,
             "model": flow_model.id if flow_model else wanted.model, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
+
+
+def _spent(exc: Exception, media_ids: list[str], project_id: str) -> AIStudioError:
+    """An error after Approve: credits may be spent, so name the media and forbid a re-run."""
+    note = (f"credits were spent: Flow made media {', '.join(media_ids) or '(not seen yet)'} in "
+            f"{PROJECT_URL.format(id=project_id)}; do not re-run, check the project in Flow")
+    if isinstance(exc, AIStudioError):
+        exc.hint = note
+        return exc
+    return ServerError(f"Flow job interrupted: {type(exc).__name__}: {exc}", hint=note)
 
 
 def _project_id(value: str) -> str:
@@ -193,8 +214,11 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
             saved = write_file(path, data, overwrite=overwrite and path == out)
             files.append({"path": str(saved), "mime_type": mime, "bytes": len(data),
                           "media_id": item.media_id})
-    except AIStudioError as exc:
+    except Exception as exc:  # a paid result: name it whatever went wrong
         note = f"Flow made media {ids} in {project_url}; download it there"
+        if not isinstance(exc, AIStudioError):
+            raise ServerError(f"saving Flow media failed: {type(exc).__name__}: {exc}",
+                              hint=note) from exc
         exc.hint = f"{note} ({exc.hint})" if exc.hint else note
         raise
     return files

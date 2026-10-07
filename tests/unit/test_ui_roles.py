@@ -158,7 +158,10 @@ async def test_text_checked_and_url_reads():
             return "  Omni 1.1 Flash \n arrow_drop_down "
 
         async def get_attribute(self, name):
-            return "true" if name == "aria-checked" else None
+            return None
+
+        async def is_checked(self):  # native radios have no aria-checked (live: Flow's spending)
+            return True
 
     page = Page({"button": [Box()], "radio": [El(), Box()]})
     ui = PlaywrightUi(page)
