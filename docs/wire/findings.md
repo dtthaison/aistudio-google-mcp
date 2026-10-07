@@ -274,3 +274,74 @@ was made: one image ($0.034) and one clip ($0.04).
   user-meaningful limits, so no `account` command for now.
 - **Never recorded:** `EvaluateTargeting` sends bare billing-account ids. The redactor now also
   masks bare `XXXXXX-XXXXXX-XXXXXX` ids.
+
+## Google Flow (flow.google.com) discovery (2026-10-07)
+
+Free probes were read-only or blocked every request after Run inside the page. Then **one
+approved real video** was made: Veo 3.1 Lite, 8 s, x1, which cost 10 credits (1,050 → 1,040).
+The scratch scripts live in `/tmp` and are not kept.
+
+- **Access.** The saved Google session opens Flow signed in. The account shows "PRO" (Google AI
+  Pro), and the account menu reads "1,050 Google Flow credits". No API key is involved.
+  `flow.google.com/?pli=1` lists projects (`/project/<uuid>`); new projects are titled by date.
+- **RPC.** The app uses Google `batchexecute` at
+  `flow.google.com/_/AiSandboxAngularFrontend/data/batchexecute?rpcids=<id>`. The body is
+  `f.req=[[[rpcid, "<json>", null, "generic"]]]&at=<xsrf>`, and the response is framed as
+  `)]}'`, then a length, then `[["wrb.fr", rpcid, "<json>"…]]`.
+- **Agent.** The agent chat is
+  `…/google.internal.labs.aisandbox.proto.flow.agent.v1.FlowCreationAgentService/StreamChat`.
+  An approval is sent as a chat message
+  `[session, [[[["Approve"]]]], ["projects/<id>", null, [<~2.4 KB token>, 1], null, null, 2], null, 1]`.
+  The token is reCAPTCHA (the page footer says "protected by reCAPTCHA"), so generation is
+  page-driven.
+- **Project page.** It is agent-only.
+  - **Editor:** the prompt is a ProseMirror editor (`flow-rich-text-editor.prompt-input
+    .ProseMirror`, placeholder "What do you want to create?"). Playwright `fill` does not reach
+    it; focus plus keyboard typing does.
+  - **Title:** "Editable text" is the **project title** input, not the prompt.
+  - **Buttons:** "Start generation", "Add media menu" (Upload, New collection, Create character,
+    New scene), "Add ingredients to the prompt box", "Agent instructions", and a `tune` settings
+    button.
+- **Tune panel (defaults).**
+  - **Agent spending:** "Always: agent will ask for confirmation before generating media" /
+    "Never: agent will generate media and spend credits automatically".
+  - **Image:** aspect 16:9 / 4:3 / 1:1 / 3:4 / 9:16, outputs x1–x4, model "Nano Banana 2.1" or
+    "Nano Banana Pro".
+  - **Video:** aspect 16:9 / 9:16, outputs x1–x4, model "Omni 1.1 Flash", "Veo 3.1 - Lite",
+    "Veo 3.1 - Fast" or "Veo 3.1 - Quality".
+  - **Watermark:** a "Visible watermarking" switch, but a visible watermark is required in this
+    region.
+  - **Keyboard only:** in a minimized window, pointer clicks on the panel and its options time
+    out. Focus plus Enter works. Escape does not close the panel; reloading the page does.
+- **Generation flow.**
+  1. The agent restates its plan ("I'm going to generate an 8-second video … using Veo 3.1 -
+     Lite").
+  2. It asks permission in a `flow-permission-message`: "Would you like me to kick off this 1
+     video generation, costing 10 credits?" The options are `role=radio` in the radiogroup
+     "Permission options": **Approve / Always approve / Reject**. Focus plus Enter on "Approve"
+     works.
+  3. The question persists server-side: it was still waiting when the project was reopened later.
+  4. After approval: "scheduled and is waiting in the queue due to high demand". A ▶ tile
+     appeared after about 60 s.
+- **Media records.**
+  - `bOKtO`, `jwpduf` (polled every 5 s) and `as29s` return
+    `[media_id, project_id, workflow_id, …, [[created], prompt, …, [null, [[model_key, 1, null,
+    null, 2, 1]], [[prompt]], null, 1], null, [status], 1, <poster url>, [], null, <bytes>], …,
+    [null, null, [<seconds>]]]`.
+  - Model key `veo_3_1_t2v_lite`; status 2 = running, 3 = done; 8 seconds; 1,285,983 bytes.
+  - `jwpduf` starts with `[null, <credits left>, …]` (1040 after the run).
+- **Downloads.** `as29s` holds signed CDN links
+  `https://flow-content.google/{video|image}/<media_id>?Expires=…&KeyName=labs-flow-prod-cdn-key&Signature=…`,
+  valid for about 6 h. A plain GET **without cookies** returns `video/mp4` (1280×720, "Veo"
+  watermark) or the `image/jpeg` poster.
+- **Characters** (`/project/<id>/character`): "Build and reuse characters for consistent videos".
+  - Starters: archetypes (Eccentric, Professional, Wildcard, Familiar, Wicked, Fantastical).
+  - Inputs: Upload and Add from project.
+  - Controls: "Format", "Select model family" (Nano Banana Pro / 2 Lite / 2.1), and its own
+    "Start generation".
+- **Ingredients panel.** Tabs All / Images / Videos / Voices / Characters / Avatars / Uploads,
+  "Upload media", "Add to prompt", a "Select project" picker, and "Trim start/end" sliders for
+  video ingredients.
+- **Tools** (`/project/<id>/tools`): My Tools / Community / Templates. Out of scope.
+- **Prices** (third-party, consistent with the observed 10): Veo 3.1 Lite 10, Fast 20, Quality
+  100; Omni Flash 4–15 depending on resolution and length.
