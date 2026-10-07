@@ -56,7 +56,7 @@ def test_instruction_is_explicit():
     (Quote(1, "image", 2), PLAN, 50, Decision.REJECT_MISMATCH),         # kind
     (QUOTE, Plan("Veo 3.1 - Fast", 8), 50, Decision.REJECT_MISMATCH),  # model
     (QUOTE, Plan("Veo 3.1 - Lite", 6), 50, Decision.REJECT_MISMATCH),  # length
-    (QUOTE, Plan(None, None), 50, Decision.REJECT_MISMATCH),           # unstated plan
+    (QUOTE, Plan(None, None), 50, Decision.APPROVE),  # unstated: settings were saved and re-read
 ])
 def test_decide_matrix(quote, plan, budget, decision):
     assert decide(quote, plan, EXPECT, budget)[0] is decision

@@ -91,11 +91,14 @@ def decide(quote: Quote, plan: Plan, expect: Expect,
         wrong.append(f"kind: expected {expect.kind}, quoted {quote.kind}")
     if quote.count != expect.count:
         wrong.append(f"count: expected {expect.count}, quoted {quote.count}")
-    if expect.model is not None and _norm(plan.model) != _norm(expect.model):
+    # Flow's permission request carries only counts and cost (live probe): the model comes from
+    # the settings saved and re-read before asking, and the length is checked after the job.
+    # A plan the agent does state must still match.
+    if expect.model is not None and plan.model is not None and (
+            _norm(plan.model) != _norm(expect.model)):
         wrong.append(f"model: expected {expect.model!r}, planned {plan.model!r}")
-    if expect.seconds is not None and plan.seconds != expect.seconds:
-        planned = f"{plan.seconds} s" if plan.seconds is not None else "no length"
-        wrong.append(f"length: expected {expect.seconds} s, planned {planned}")
+    if expect.seconds is not None and plan.seconds is not None and plan.seconds != expect.seconds:
+        wrong.append(f"length: expected {expect.seconds} s, planned {plan.seconds} s")
     if max_credits is None:
         return Decision.QUOTE_ONLY, wrong
     if wrong:

@@ -121,6 +121,10 @@ async def flow_generate(
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": turn.quote.credits,
                 **({"warnings": warnings} if warnings else {})}
+    if duration is not None:
+        lengths = {m.seconds for m in outcome.media if m.seconds is not None}
+        warnings += [f"Flow made a {n}-second video, not the {duration} seconds asked for"
+                     for n in sorted(lengths) if n != duration]
     files = await _save_all(kind, outcome.media, out=out, overwrite=overwrite,
                             downloader=downloader, stamp=now(), project_url=project_url)
     return {"status": "done", "files": files, "credits_spent": turn.quote.credits,

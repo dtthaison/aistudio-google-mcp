@@ -221,3 +221,16 @@ async def test_credits(logged_in_profile):
     kw, _, _ = harness()
     assert await flow_credits(logged_in_profile(), browser=kw["browser"],
                               page_factory=kw["page_factory"]) == {"credits": 1040}
+
+
+async def test_a_different_length_after_the_job_is_a_warning(logged_in_profile, tmp_path):
+    # Flow sends the length only after Approve (live: ask_for_permission has counts and cost).
+    six = FlowMedia("m1", PID, "an apple", "veo_3_1_t2v_lite", 3, 6, 3, DONE.video_url,
+                    DONE.image_url)
+    kw, _, _ = harness(turn=AgentTurn("kick off this 1 video generation, costing 10 credits?",
+                                      Quote(1, "video", 10)),
+                       outcome=FlowOutcome([six], 1040, False))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "done"
+    assert result["warnings"] == ["Flow made a 6-second video, not the 8 seconds asked for"]

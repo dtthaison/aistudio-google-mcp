@@ -35,6 +35,9 @@ MODEL_BUTTON = {"video": "Video generation default model",
                 "image": "Image generation default model"}
 GROUP = {"image": 0, "video": 1}  # tune panel: the image group comes first
 FLOW_RPC = "batchexecute"
+SAVE = "Save"  # the tune panel keeps changes only after Save (live probe)
+SAVE_METHOD = "Kcr7Ub"  # the save call Save sends
+SAVE_TIMEOUT_S = 10.0
 MEDIA_METHODS = ("as29s", "jwpduf", "bOKtO")
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
@@ -144,7 +147,12 @@ class FlowPage:
         await self._ui.activate(TUNE_ROLE, _aspect_name(wanted.aspect),
                                 nth=_group(kind, wanted.aspect))
         await self._ui.activate(TUNE_ROLE, _count_name(wanted.count), nth=_group(kind))
-        await self._ui.pause(800)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            await self._ui.activate("button", SAVE, exact=True)
+            saved = await log.next(SAVE_METHOD, timeout_s=SAVE_TIMEOUT_S)
+        if saved is None or saved.status >= 400:
+            raise BrowserError(f"Flow did not save the {kind} settings",
+                               hint="re-run; if it persists, the Flow UI changed")
         await self._close_tune()
         if await self.read_defaults(kind) != wanted:
             raise BrowserError(f"Flow's {kind} settings did not take effect",

@@ -35,6 +35,9 @@ uv run aistudio voices list
 uv run aistudio generate speech "Hello! <laugh> Nice to meet you." --voice Tova --style "warm, slow" -o hello.wav
 uv run aistudio generate image "a red apple on a white table" -o apple.jpg
 uv run aistudio generate music "calm solo piano, slow tempo" -o piano.mp3
+uv run aistudio flow credits
+uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8   # shows the quote
+uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8 --max-credits 10 -o apple.mp4
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 
@@ -44,6 +47,13 @@ $0.034 per image (`gemini-3.1-flash-lite-image`, the default), $0.04 per clip
 (`lyria-3-clip-preview`, the default) and $0.08 per full song (`-m lyria-3.5`). Video (Veo) needs
 a paid upgrade and Imagen refuses this kind of session, so neither is offered. Chatting with a
 model needs a Gemini API key, so it is not offered either.
+
+Video comes from Google Flow (`aistudio flow video|image`). Flow is paid in your Google AI
+plan's Flow credits: Veo 3.1 Lite is about 10 credits, Fast 20 and Quality 100. **Nothing is spent
+without `--max-credits`**: a run without it only shows Flow's quote. When the quote fits the budget
+and Flow's plan matches your options, aistudio approves it and downloads the result. Results go
+to a Flow project named "aistudio", unless you pass `--project`. Your Flow default settings are
+restored after each run.
 
 Design: `docs/superpowers/specs/2026-10-06-aistudio-cli-design.md`
 

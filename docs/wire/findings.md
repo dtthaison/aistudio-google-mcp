@@ -345,3 +345,17 @@ The scratch scripts live in `/tmp` and are not kept.
 - **Tools** (`/project/<id>/tools`): My Tools / Community / Templates. Out of scope.
 - **Prices** (third-party, consistent with the observed 10): Veo 3.1 Lite 10, Fast 20, Quality
   100; Omni Flash 4–15 depending on resolution and length.
+
+### Flow core build, live findings (2026-10-07)
+
+- **Saving tune settings.** Changes in the tune panel are kept only after its **Save** button,
+  which sends `Kcr7Ub`. Without Save, a reload brings back the old defaults. `apply_defaults`
+  presses Save, waits for `Kcr7Ub`, reloads, then reads the settings back.
+- **The permission request is structured, but thin.** The `StreamChat` stream carries
+  `ask_for_permission` with only `num_videos`, `num_images`, `total_cost` and `num_total`. The
+  model, length and aspect are sent only after Approve, in the job record. The agent does not
+  always restate its plan in text (one run said "using Veo 3.1 - Lite", a later one only asked
+  the price question). So, before spending, aistudio checks:
+  - kind, count and cost from the quote;
+  - model, aspect and outputs from the saved and re-read settings;
+  - the length after the job, as a warning.

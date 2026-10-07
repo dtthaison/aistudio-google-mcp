@@ -1,6 +1,6 @@
 ---
 name: aistudio
-description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, or generating speech, images or music with AI Studio — or mentions the aistudio CLI.
+description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, or video/images with Google Flow — or mentions the aistudio CLI.
 ---
 
 # aistudio CLI
@@ -58,6 +58,9 @@ quotes and write each `'` as `'\''`.
 | Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
 | Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
+| Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
+| Flow video / image quote (free: shows the credit cost, spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
+| Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".
@@ -65,6 +68,13 @@ quotes and write each `'` as `'\''`.
 - Speech: expression tags such as `<laugh>` go inside the text.
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
+- **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
+  1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`.
+  2. Show the user the cost and ask.
+  3. Re-run with `--max-credits <credits>`.
+
+  `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected and nothing was spent.
+  `"status": "timeout"` means credits were spent: give the user `project_url`.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
@@ -79,7 +89,7 @@ quotes and write each `'` as `'\''`.
 These are not in the CLI yet. Say so plainly; do not drive the browser or call Google's internal
 endpoints yourself.
 
-- Video (Veo): AI Studio asks for a paid upgrade.
+- Video in AI Studio (Veo asks for a paid upgrade): use `aistudio flow video` (Flow credits).
 - Imagen: AI Studio's Imagen page refuses this kind of session. Use a Gemini image model.
 - Chatting with a model: it requires a Gemini API key, which is not supported.
 

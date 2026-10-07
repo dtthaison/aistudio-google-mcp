@@ -108,9 +108,13 @@ async def test_credits_from_the_account_menu(fake_ui):
     assert await FlowPage(ui).credits() == 1040
 
 
+SAVED = CapturedResponse("Kcr7Ub", 200, ")]}'\n", "")
+
+
 async def test_apply_defaults_sets_model_aspect_count_and_checks_they_took(fake_ui):
     model_button = ("button", "Video generation default model")
-    ui = fake_ui(inner={model_button: ["Omni 1.1 Flash arrow_drop_down",
+    ui = fake_ui({"Kcr7Ub": [SAVED]},
+                 inner={model_button: ["Omni 1.1 Flash arrow_drop_down",
                                        "Veo 3.1 - Lite arrow_drop_down"]},
                  checks={("radio", r"(^|\s)9:16$", 1): [True], ("radio", r"^x2$", 1): [True]},
                  url=f"https://flow.google.com/project/{PID}")
@@ -118,12 +122,27 @@ async def test_apply_defaults_sets_model_aspect_count_and_checks_they_took(fake_
     assert ("activate", "menuitem", re.escape("Veo 3.1 - Lite"), 0) in ui.ops
     assert ("activate", "radio", r"(^|\s)9:16$", 1) in ui.ops
     assert ("activate", "radio", r"^x2$", 1) in ui.ops
+    # Flow keeps tune changes only after Save (live: the save call is Kcr7Ub).
+    assert ui.ops.index(("activate", "button", "Save", 0)) > ui.ops.index(
+        ("activate", "radio", r"^x2$", 1))
+
+
+async def test_settings_flow_never_saves_are_an_error(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(inner={("button", "Video generation default model"): ["Veo 3.1 - Lite"]},
+                 url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).apply_defaults("video", Defaults("Veo 3.1 - Lite",
+                                                                         "16:9", 1))
+    assert "save" in info.value.message
 
 
 async def test_settings_that_do_not_take_effect_are_an_error(fake_ui):
     from aistudio.exceptions import BrowserError
 
-    ui = fake_ui(inner={("button", "Video generation default model"): ["Omni 1.1 Flash"]},
+    ui = fake_ui({"Kcr7Ub": [SAVED]},
+                 inner={("button", "Video generation default model"): ["Omni 1.1 Flash"]},
                  checks={("radio", r"(^|\s)16:9$", 1): [True], ("radio", r"^x1$", 1): [True]},
                  url=f"https://flow.google.com/project/{PID}")
     with pytest.raises(BrowserError):
