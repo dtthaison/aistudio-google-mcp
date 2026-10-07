@@ -7,8 +7,9 @@ Controls are located by accessible role and name as mapped in docs/wire/findings
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 
-from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, Ui
+from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, Name, Ui
 from aistudio.exceptions import BrowserError, ValidationError
 
 SPEECH_URL = "https://aistudio.google.com/generate-speech"
@@ -22,7 +23,9 @@ VOICE_SEARCH = "Search voices"
 STYLE_BUTTON = "Style"
 STYLE_BOX = "Describe the voice style"
 VIEW_ALL = re.compile(r"^View all \d+")
-BACK = re.compile(r"back", re.I)
+BACK = re.compile(r"^Back to library$")  # the voice-group view's back button
+POLLS = 8  # x 250 ms: the panel's search filters asynchronously
+LOAD_POLLS = 20  # x 250 ms: voice names render ~1 s after the panel opens (live probe)
 FAVORITE = re.compile(r"^(?:Favorite|Remove from favorites) (\S+)$")
 
 
@@ -40,19 +43,19 @@ class SpeechPage:
         await self._ui.click("button", CREATE_DIALOG)
 
     async def select_model(self, model_id: str) -> None:
-        current = await self._ui.labels("button", MODEL_BUTTON)
-        if current and model_id in current[0].split():
+        if await self._model_is(model_id):
             return
         await self._ui.click("button", MODEL_BUTTON)
         await self._ui.fill("textbox", MODEL_SEARCH, model_id)
-        await self._ui.pause(1500)
         option = re.compile(re.escape(model_id) + r"(?![\w.-])")
-        if not await self._ui.visible("button", option):
+        if not await self._eventually_visible("button", option):
             await self._ui.key("Escape")
             raise ValidationError(f"the speech page has no model {model_id!r}",
                                   hint='see "aistudio models list --category audio"')
         await self._ui.click("button", option)
-        await self._ui.pause(1000)
+        if not await self._becomes(lambda: self._model_is(model_id)):
+            raise BrowserError(f"choosing model {model_id!r} did not take effect",
+                               hint="re-run; if it persists, the AI Studio UI changed")
 
     async def select_voice(self, voice: str) -> str:
         name = voice_display_name(voice)
@@ -60,15 +63,15 @@ class SpeechPage:
             return name
         await self._ui.click("button", SPEAKER)
         await self._ui.fill("textbox", VOICE_SEARCH, name)
-        await self._ui.pause(1500)
-        if not await self._ui.visible("button", name, exact=True):
+        if not await self._eventually_visible("button", name, exact=True):
             await self._ui.key("Escape")
             raise ValidationError(f"no voice named {name!r}", hint='see "aistudio voices list"')
         await self._ui.click("button", name, exact=True)
-        await self._ui.pause(1000)
+        await self._ui.pause(500)
         if await self._ui.visible("textbox", VOICE_SEARCH):
             await self._ui.key("Escape")  # the panel stays open after a choice
-        if not await self._speaker_is(name):
+        # The open panel covers the Speaker button; it re-renders shortly after Escape.
+        if not await self._becomes(lambda: self._speaker_is(name)):
             raise BrowserError(f"choosing voice {name!r} did not take effect",
                                hint="re-run; if it persists, the AI Studio UI changed")
         return name
@@ -91,25 +94,57 @@ class SpeechPage:
 
     async def list_voices(self) -> list[str]:
         await self._ui.click("button", SPEAKER)
-        names = await self._voice_names()
+        names = await self._voice_names_loaded()
         groups = len(await self._ui.labels("button", VIEW_ALL))
         for index in range(groups):
             await self._ui.click("button", VIEW_ALL, nth=index)
-            await self._ui.pause(1000)
-            names += await self._voice_names()
+            names += await self._voice_names_loaded()
             await self._ui.click("button", BACK)
-            await self._ui.pause(500)
+            if not await self._loaded("button", VIEW_ALL):
+                raise BrowserError("the voice panel did not return to its group list",
+                                   hint="re-run; if it persists, the AI Studio UI changed")
         await self._ui.key("Escape")
         return sorted(set(names))
+
+    async def _loaded(self, role: str, name: Name) -> list[str]:
+        """Poll until controls matching ``name`` render (the panel loads asynchronously)."""
+        for _ in range(LOAD_POLLS):
+            labels = await self._ui.labels(role, name)
+            if labels:
+                return labels
+            await self._ui.pause(250)
+        return []
+
+    async def _voice_names_loaded(self) -> list[str]:
+        labels = await self._loaded("button", FAVORITE)
+        if not labels:
+            raise BrowserError("the voice panel showed no voices",
+                               hint="re-run; if it persists, the AI Studio UI changed")
+        return _names(labels)
+
+    async def _eventually_visible(self, role: str, name: Name, *, exact: bool = False) -> bool:
+        for _ in range(POLLS):
+            await self._ui.pause(250)
+            if await self._ui.visible(role, name, exact=exact):
+                return True
+        return False
+
+    async def _becomes(self, check: Callable[[], Awaitable[bool]]) -> bool:
+        for _ in range(LOAD_POLLS):
+            if await check():
+                return True
+            await self._ui.pause(250)
+        return False
+
+    async def _model_is(self, model_id: str) -> bool:
+        current = await self._ui.labels("button", MODEL_BUTTON)
+        return bool(current) and model_id in current[0].split()
 
     async def _speaker_is(self, name: str) -> bool:
         labels = await self._ui.labels("button", SPEAKER)
         return bool(labels) and labels[0].split(" - ", 1)[-1].split()[0] == name
 
-    async def _voice_names(self) -> list[str]:
-        names = []
-        for label in await self._ui.labels("button", FAVORITE):
-            match = FAVORITE.match(label)
-            if match:
-                names.append(match.group(1))
-        return names
+
+
+def _names(labels: list[str]) -> list[str]:
+    return [m.group(1) for m in map(FAVORITE.match, labels) if m]

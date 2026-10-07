@@ -73,7 +73,10 @@ async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, 
         )
     except Exception as exc:  # playwright.async_api.Error, missing executables
         if _PROFILE_IN_USE.search(str(exc)):
-            hint = "another aistudio browser window is using this profile; close it and retry"
+            raise BrowserError(
+                "another aistudio command is using this profile's browser",
+                hint="wait for it to finish, then retry; browser commands run one at a time",
+            ) from exc
         elif browser == "chrome":
             hint = (
                 'install Google Chrome, or use "--browser chromium" '

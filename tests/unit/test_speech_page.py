@@ -18,6 +18,7 @@ from aistudio.exceptions import BrowserError, ValidationError
 CURRENT_MODEL = "Gemini 3.8 Flash TTS gemini-3.8-flash-tts Flagship TTS model"
 LITE = "gemini-3.8-flash-lite-tts"
 LITE_OPTION = r"gemini\-3\.8\-flash\-lite\-tts(?![\w.-])"
+LITE_LABEL = "Gemini 3.8 Flash Lite TTS gemini-3.8-flash-lite-tts High-speed"
 
 
 def test_voice_display_name():
@@ -38,7 +39,7 @@ async def test_select_model_is_a_no_op_when_already_current(fake_ui):
 
 
 async def test_select_model_searches_and_clicks_the_option(fake_ui):
-    ui = fake_ui(labels={("button", MODEL_BUTTON.pattern): [[CURRENT_MODEL]]},
+    ui = fake_ui(labels={("button", MODEL_BUTTON.pattern): [[CURRENT_MODEL], [LITE_LABEL]]},
                  visible={("button", LITE_OPTION): [True]})
     await SpeechPage(ui).select_model(LITE)
     assert ui.ops == [("click", "button", MODEL_BUTTON.pattern, 0),
@@ -122,3 +123,59 @@ async def test_list_voices_walks_every_group(fake_ui):
                       ("click", "button", VIEW_ALL.pattern, 1),
                       ("click", "button", BACK.pattern, 0)]
     assert ui.ops[-1] == ("key", "Escape")
+
+
+async def test_a_model_choice_that_does_not_apply_is_a_browser_error(fake_ui):
+    ui = fake_ui(labels={("button", MODEL_BUTTON.pattern): [[CURRENT_MODEL]]},
+                 visible={("button", LITE_OPTION): [True]})
+    with pytest.raises(BrowserError):
+        await SpeechPage(ui).select_model(LITE)
+
+
+async def test_slow_voice_search_is_polled_not_misreported(fake_ui):
+    ui = fake_ui(labels={("button", SPEAKER.pattern): [["Speaker 1 - Fola arrow_drop_down"],
+                                                       ["Speaker 1 - Tova arrow_drop_down"]]},
+                 visible={("button", "Tova"): [False, False, True]})
+    assert await SpeechPage(ui).select_voice("Tova") == "Tova"
+
+
+def test_back_is_the_exact_voice_panel_button():
+    assert BACK.fullmatch("Back to library")
+    for other in ("Send feedback", "Playback speed", "Feedback", "Back to start"):
+        assert not BACK.fullmatch(other)
+
+
+async def test_list_voices_requires_the_group_list_after_going_back(fake_ui):
+    ui = fake_ui(labels={("button", FAVORITE.pattern): [["Favorite Bodi"]],
+                         ("button", VIEW_ALL.pattern): [["View all 7"], []]})
+    with pytest.raises(BrowserError):
+        await SpeechPage(ui).list_voices()
+
+
+async def test_list_voices_waits_for_names_to_load(fake_ui):
+    ui = fake_ui(labels={
+        ("button", FAVORITE.pattern): [[], [], ["Favorite Tova"], ["Favorite Zephyr"]],
+        ("button", VIEW_ALL.pattern): [["View all 3"]],
+    })
+    assert await SpeechPage(ui).list_voices() == ["Tova", "Zephyr"]
+
+
+async def test_a_voice_panel_that_never_loads_is_an_error_not_zero_voices(fake_ui):
+    ui = fake_ui(labels={("button", FAVORITE.pattern): [[]]})
+    with pytest.raises(BrowserError) as info:
+        await SpeechPage(ui).list_voices()
+    assert "voice" in info.value.message
+
+
+async def test_voice_check_waits_for_the_speaker_button_to_rerender(fake_ui):
+    ui = fake_ui(labels={("button", SPEAKER.pattern): [["Speaker 1 - Fola arrow_drop_down"],
+                                                       [], [],
+                                                       ["Speaker 1 - Tova arrow_drop_down"]]},
+                 visible={("button", "Tova"): [True], ("textbox", VOICE_SEARCH): [True]})
+    assert await SpeechPage(ui).select_voice("Tova") == "Tova"
+
+
+async def test_model_check_waits_for_the_picker_to_close(fake_ui):
+    ui = fake_ui(labels={("button", MODEL_BUTTON.pattern): [[CURRENT_MODEL], [], [LITE_LABEL]]},
+                 visible={("button", LITE_OPTION): [True]})
+    await SpeechPage(ui).select_model(LITE)

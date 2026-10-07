@@ -35,7 +35,6 @@ apps.
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
 | Recently opened items | `aistudio app recent --json` |
 | Service incidents | `aistudio status --json [--active]` |
-| TTS voices | `aistudio voices list --json [--search T]` (reads the page headless; no quota) |
 | Build gallery / templates | `aistudio gallery list --json [--group showcase\|template] [--tag T] [--search T]`, `aistudio gallery get <slug-or-prefix> --json` |
 
 JSON notes:
@@ -46,11 +45,17 @@ JSON notes:
 
 ## Commands that change things (only when the user asks)
 
+**Never put the user's text inside double quotes in a shell command**: `` ` ``, `$(…)` and `$VAR`
+would run or expand. For speech, write the text to a file with your file tool and pass
+`--text-file`. For other text arguments (`app create`, `app prompt`, `--style`), use single
+quotes and write each `'` as `'\''`.
+
 | Action | Command |
 |---|---|
 | Star / unstar a model (saved to the account) | `aistudio models star <id> --json`, `aistudio models unstar <id> --json` |
 | Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
-| Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech "<text>" [--voice V] [--style S] -o out.wav --json` |
+| TTS voices (opens a hidden Chrome; no quota) | `aistudio voices list --json [--search T]` |
+| Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".

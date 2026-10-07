@@ -187,4 +187,5 @@ async def test_profile_in_use_gets_a_close_the_other_window_hint(aistudio_home):
     ))
     with pytest.raises(BrowserError) as info:
         await run_login(get_profile("default"), playwright_factory=factory(chromium), poll=0)
-    assert "another aistudio browser window" in info.value.hint
+    assert "wait for it" in info.value.hint and "close" not in info.value.hint
+    assert "\n" not in info.value.message
