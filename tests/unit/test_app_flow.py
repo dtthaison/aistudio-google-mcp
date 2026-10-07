@@ -1,0 +1,223 @@
+import contextlib
+import json
+from datetime import datetime
+
+import pytest
+
+from aistudio._app.flow import STATE_FILE, flow_credits, flow_generate
+from aistudio._flow.page import AgentTurn, Defaults, FlowOutcome
+from aistudio._flow.rows import FlowMedia, Quote
+from aistudio.exceptions import (
+    AgentReplyError,
+    BrowserError,
+    NetworkError,
+    NotFoundError,
+    OverBudgetError,
+    PlanMismatchError,
+    ValidationError,
+)
+
+PID = "72df29b1-e119-4741-ad44-ba18bc1ad34a"
+NOW = datetime(2026, 10, 7, 12, 0, 0)
+TEXT = ("I'm going to generate an 8-second video using Veo 3.1 - Lite. Would you like me to kick "
+        "off this 1 video generation, costing 10 credits?")
+DONE = FlowMedia("m1", PID, "an apple", "veo_3_1_t2v_lite", 3, 8, 3, "https://flow-content.google"
+                 "/video/m1?Signature=s", "https://flow-content.google/image/m1?Signature=s")
+
+
+TURN = AgentTurn(TEXT, Quote(1, "video", 10))
+OMNI = Defaults("Omni 1.1 Flash", "16:9", 1)
+
+
+class FakePage:
+    """Scripted FlowPage: records calls; behaviour set per test."""
+
+    def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
+                 restore_error=None):
+        self.calls, self.turn, self.defaults = [], turn, defaults
+        self.outcome = outcome or FlowOutcome([DONE], 1040, False)
+        self.missing, self.restore_error = set(missing), restore_error
+
+    async def open_project(self, pid):
+        self.calls.append(("open", pid))
+        if pid in self.missing:
+            raise NotFoundError("gone")
+
+    async def create_project(self, title):
+        self.calls.append(("create", title))
+        return PID
+
+    async def read_defaults(self, kind):
+        return self.defaults
+
+    async def apply_defaults(self, kind, wanted):
+        if wanted == self.defaults and self.restore_error:
+            raise self.restore_error
+        self.calls.append(("apply", wanted))
+
+    async def new_session(self):
+        self.calls.append(("session",))
+
+    async def submit(self, text):
+        self.calls.append(("submit", text))
+
+    async def wait_for_quote(self, *, timeout_s=90.0):
+        return self.turn
+
+    async def reject(self):
+        self.calls.append(("reject",))
+
+    async def approve_and_follow(self, *, count, timeout_s):
+        self.calls.append(("approve", count))
+        return self.outcome
+
+    async def credits(self):
+        return 1040
+
+
+def harness(**page_kw):
+    pages, opened = [], []
+
+    @contextlib.asynccontextmanager
+    async def browser(profile, *, window):
+        opened.append(window)
+        yield object()
+
+    def factory(ui):
+        pages.append(FakePage(ui, **page_kw))
+        return pages[-1]
+
+    async def downloader(url):
+        return b"\x00\x00\x00\x18ftypmp4" if "/video/" in url else b"\x89PNG..."
+
+    return {"browser": browser, "page_factory": factory, "downloader": downloader,
+            "now": lambda: NOW}, pages, opened
+
+
+def store(profile, pid):
+    profile.ensure()
+    (profile.root / STATE_FILE).write_text(json.dumps({"project_id": pid}))
+
+
+async def test_quote_only_without_a_budget_spends_nothing(logged_in_profile, tmp_path):
+    kw, pages, opened = harness()
+    result = await flow_generate(logged_in_profile(), "video", "an apple",
+                                 model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "quoted" and result["credits"] == 10
+    assert ("approve", 1) not in pages[0].calls and ("reject",) not in pages[0].calls
+    assert opened == ["minimized"]
+
+
+async def test_approved_video_is_downloaded_and_defaults_restored(logged_in_profile, tmp_path):
+    kw, pages, _ = harness()
+    out = tmp_path / "a.mp4"
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=out, **kw)
+    assert result["status"] == "done" and result["credits_spent"] == 10
+    assert result["credits_left"] == 1040 and result["model"] == "veo-3.1-lite"
+    assert result["files"] == [{"path": str(out), "mime_type": "video/mp4", "bytes": 11,
+                                "media_id": "m1"}]
+    applied = [c[1] for c in pages[0].calls if c[0] == "apply"]
+    assert applied == [Defaults("Veo 3.1 - Lite", "16:9", 1), Defaults("Omni 1.1 Flash", "16:9", 1)]
+    submit = next(c[1] for c in pages[0].calls if c[0] == "submit")
+    assert submit.startswith("Generate exactly 1 8-second video with Veo 3.1 - Lite")
+
+
+async def test_over_budget_rejects_and_spends_nothing(logged_in_profile, tmp_path):
+    kw, pages, _ = harness()
+    with pytest.raises(OverBudgetError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=5, out=tmp_path / "a.mp4", **kw)
+    assert "--max-credits 10" in info.value.hint and ("reject",) in pages[0].calls
+
+
+async def test_plan_mismatch_rejects_and_spends_nothing(logged_in_profile, tmp_path):
+    turn = AgentTurn(TEXT.replace("Lite", "Fast"), Quote(1, "video", 20))
+    kw, pages, _ = harness(turn=turn)
+    with pytest.raises(PlanMismatchError):
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            max_credits=50, out=tmp_path / "a.mp4", **kw)
+    assert ("reject",) in pages[0].calls and not any(c[0] == "approve" for c in pages[0].calls)
+
+
+async def test_an_agent_question_is_an_agent_reply(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("Which style would you like?", None))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "image", "an apple", max_credits=5,
+                            out=tmp_path / "a.png", **kw)
+    assert "Which style" in info.value.message
+
+
+async def test_a_deleted_stored_project_is_replaced(logged_in_profile, tmp_path):
+    profile = logged_in_profile()
+    store(profile, "11111111-1111-1111-1111-111111111111")
+    kw, pages, _ = harness(missing={"11111111-1111-1111-1111-111111111111"})
+    await flow_generate(profile, "video", "an apple", out=tmp_path / "a.mp4", **kw)
+    assert ("create", "aistudio") in pages[0].calls
+    assert json.loads((profile.root / STATE_FILE).read_text()) == {"project_id": PID}
+
+
+async def test_restore_failure_after_a_paid_job_keeps_files_and_warns(logged_in_profile,
+                                                                      tmp_path):
+    kw, _, _ = harness(restore_error=BrowserError("tune changed"))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert (tmp_path / "a.mp4").exists()
+    assert "could not restore Flow's video defaults (Omni 1.1 Flash, 16:9, x1)" in (
+        result["warnings"][0])
+
+
+async def test_several_outputs_need_a_folder(logged_in_profile, tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"x")
+    kw, pages, opened = harness()
+    with pytest.raises(ValidationError):
+        await flow_generate(logged_in_profile(), "video", "an apple", count=2,
+                            out=tmp_path / "a.mp4", **kw)
+    assert opened == []
+
+
+async def test_a_failed_download_names_the_media(logged_in_profile, tmp_path):
+    kw, _, _ = harness()
+
+    async def broken(url):
+        raise NetworkError("reset")
+
+    kw["downloader"] = broken
+    with pytest.raises(NetworkError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "m1" in info.value.hint and PID in info.value.hint
+
+
+async def test_a_timeout_reports_the_media_and_spent_credits(logged_in_profile, tmp_path):
+    late = FlowMedia("m1", PID, None, None, 2, None, None, None, None)
+    kw, _, _ = harness(outcome=FlowOutcome([late], None, True))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert result == {"status": "timeout", "media_ids": ["m1"], "credits_spent": 10,
+                      "project_url": f"https://flow.google.com/project/{PID}"}
+
+
+async def test_image_defaults_name_files_by_their_bytes(logged_in_profile, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    kw, _, _ = harness(turn=AgentTurn("kick off this 1 image generation, costing 2 credits?",
+                                      Quote(1, "image", 2)))
+    result = await flow_generate(logged_in_profile(), "image", "an apple", max_credits=2, **kw)
+    assert result["files"][0]["path"] == "flow-image-20261007-120000.png"
+
+
+async def test_bad_inputs_fail_before_chrome(logged_in_profile, tmp_path):
+    kw, _, opened = harness()
+    for args in ({"prompt": "  "}, {"max_credits": -1}, {"project": "not-a-project"},
+                 {"model": "nano-banana-pro"}, {"duration": 7}):
+        prompt = args.pop("prompt", "an apple")
+        with pytest.raises(ValidationError):
+            await flow_generate(logged_in_profile(), "video", prompt, out=tmp_path / "a.mp4",
+                                **args, **kw)
+    assert opened == []
+
+
+async def test_credits(logged_in_profile):
+    kw, _, _ = harness()
+    assert await flow_credits(logged_in_profile(), browser=kw["browser"],
+                              page_factory=kw["page_factory"]) == {"credits": 1040}
