@@ -35,6 +35,7 @@ apps.
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
 | Recently opened items | `aistudio app recent --json` |
 | Service incidents | `aistudio status --json [--active]` |
+| TTS voices | `aistudio voices list --json [--search T]` (reads the page headless; no quota) |
 | Build gallery / templates | `aistudio gallery list --json [--group showcase\|template] [--tag T] [--search T]`, `aistudio gallery get <slug-or-prefix> --json` |
 
 JSON notes:
@@ -49,10 +50,16 @@ JSON notes:
 |---|---|
 | Star / unstar a model (saved to the account) | `aistudio models star <id> --json`, `aistudio models unstar <id> --json` |
 | Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
+| Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech "<text>" [--voice V] [--style S] -o out.wav --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".
 - An AI Studio tab open at the same time can overwrite a star change.
+- Speech: expression tags such as `<laugh>` go inside the text. An existing output file is never
+  overwritten without `--force`, which needs the user's OK.
+- Browser commands (`app create/prompt`, `generate speech`, `voices list`) share one Chrome
+  profile: run them one at a time. A "profile is in use" error means another one is running;
+  wait for it rather than retrying in a loop.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
   without the user's OK.
 
@@ -61,7 +68,7 @@ JSON notes:
 These are not in the CLI yet. Say so plainly; do not drive the browser or call Google's internal
 endpoints yourself.
 
-- Generating speech, images, video or music.
+- Generating images, video or music.
 - Chatting with a model: it requires a Gemini API key, which is not supported.
 
 ## Build or change an app (only when the user asks)

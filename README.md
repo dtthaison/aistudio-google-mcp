@@ -31,6 +31,8 @@ uv run aistudio gallery list --tag google-maps
 uv run aistudio status                      # AI Studio / Gemini API incidents
 uv run aistudio models star lyria-3.5       # stars sync with the AI Studio picker
 uv run aistudio app export <id-prefix> ./my-app   # download an app's code (verified)
+uv run aistudio voices list
+uv run aistudio generate speech "Hello! <laugh> Nice to meet you." --voice Tova --style "warm, slow" -o hello.wav
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 
