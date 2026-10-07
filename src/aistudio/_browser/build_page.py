@@ -23,6 +23,7 @@ APPS_URL = "https://aistudio.google.com/apps"
 PROMPT_BOX = "textarea"
 SEND_BUTTON = "Send"  # the app editor's submit control
 START_TIMEOUT_S = 60.0
+CONTROL_WAIT_S = 30.0
 CREATE = "CreateApplet"
 START = "CodeAssistantOffline"
 STREAM = "StreamCodeAssistantOfflineGeneration"
@@ -53,12 +54,14 @@ class BuildPage:
         self._now = now
 
     async def create(self, idea: str, *, timeout_s: float) -> BuildOutcome:
+        deadline = self._now() + timeout_s  # --timeout covers the start waits too
         async with self._ui.responses() as log:
             await self._ui.goto(APPS_URL)
-            await self._submit(idea)
-            app_id = decode_created_app(wire.decode((await self._expect(log, CREATE)).text))
+            await self._submit(idea, deadline=deadline)
+            created = await self._expect(log, CREATE, deadline)
+            app_id = decode_created_app(wire.decode(created.text))
             try:
-                return await self._follow(log, timeout_s)
+                return await self._follow(log, deadline)
             except AIStudioError as exc:
                 # The app shell already exists; never leave the user with an unnamed orphan.
                 note = f"the app was already created at {app_url(app_id)}"
@@ -66,24 +69,35 @@ class BuildPage:
                 raise
 
     async def prompt(self, app_id: str, text: str, *, timeout_s: float) -> BuildOutcome:
+        deadline = self._now() + timeout_s
         async with self._ui.responses() as log:
             await self._ui.goto(app_url(app_id))
             # The editor disables Send for ~1s while it loads the app; ⌘↵ pressed earlier is
             # silently ignored (docs/wire/findings.md). The /apps create page has no Send button.
-            await self._submit(text, wait_for=SEND_BUTTON)
-            return await self._follow(log, timeout_s)
+            await self._submit(text, deadline=deadline, wait_for=SEND_BUTTON)
+            return await self._follow(log, deadline)
 
-    async def _submit(self, text: str, *, wait_for: str | None = None) -> None:
-        await self._ui.fill_first(PROMPT_BOX, text)
+    def _left(self, deadline: float, cap: float) -> float:
+        """Seconds a start wait may take: at most ``cap``, never past --timeout."""
+        remaining = deadline - self._now()
+        if remaining <= 0:
+            raise BrowserError("AI Studio did not start the build within --timeout",
+                               hint="re-run with a larger --timeout")
+        return min(cap, remaining)
+
+    async def _submit(self, text: str, *, deadline: float, wait_for: str | None = None) -> None:
+        await self._ui.fill_first(PROMPT_BOX, text, timeout_s=self._left(deadline, CONTROL_WAIT_S))
         if wait_for:
-            await self._ui.wait_enabled("button", wait_for)
+            await self._ui.wait_enabled("button", wait_for,
+                                        timeout_s=self._left(deadline, CONTROL_WAIT_S))
         await self._ui.press_first(PROMPT_BOX, RUN_SHORTCUT)
 
-    async def _expect(self, log: ResponseLog, method: str) -> CapturedResponse:
-        response = await log.next(method, timeout_s=START_TIMEOUT_S)
+    async def _expect(self, log: ResponseLog, method: str, deadline: float) -> CapturedResponse:
+        wait = self._left(deadline, START_TIMEOUT_S)
+        response = await log.next(method, timeout_s=wait)
         if response is None:
             raise BrowserError(
-                f"AI Studio did not send {method} within {START_TIMEOUT_S:.0f}s",
+                f"AI Studio did not send {method} within {wait:.0f}s",
                 hint="re-run; if it persists, the AI Studio UI changed",
             )
         if response.status >= 400:
@@ -94,9 +108,9 @@ class BuildPage:
             raise err
         return response
 
-    async def _follow(self, log: ResponseLog, timeout_s: float) -> BuildOutcome:
-        run_id, app_id = decode_started_run(wire.decode((await self._expect(log, START)).text))
-        deadline = self._now() + timeout_s
+    async def _follow(self, log: ResponseLog, deadline: float) -> BuildOutcome:
+        started = await self._expect(log, START, deadline)
+        run_id, app_id = decode_started_run(wire.decode(started.text))
         while (remaining := deadline - self._now()) > 0:
             response = await log.next(STREAM, timeout_s=remaining)
             if response is None:

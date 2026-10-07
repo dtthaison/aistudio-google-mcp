@@ -164,7 +164,9 @@ def _build(state: CliState, run: Callable[..., Awaitable[dict[str, Any]]], *args
            timeout: int, visible: bool, json_output: bool) -> None:
     state.require_browser()
     if not json_output:
-        stderr.print("Building in a minimized Chrome window; this usually takes a few minutes…")
+        window = "visible" if visible else "minimized"
+        stderr.print(f"Building in a {window} Chrome window; this usually takes 5-7 minutes…",
+                     markup=False)
     result = asyncio.run(run(state.profile(), *args, timeout_s=timeout, visible=visible))
     emit(result, json_output=json_output, render=_render_build)
     if result["status"] != "done":

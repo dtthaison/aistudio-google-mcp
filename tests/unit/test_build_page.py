@@ -126,3 +126,47 @@ async def test_a_failed_stream_for_this_run_fails_fast(fake_ui, captured):
                   "StreamCodeAssistantOfflineGeneration": [failed, stream(captured, UPDATE_RUN)]})
     with pytest.raises(ServerError):
         await BuildPage(ui).prompt(APP, "x", timeout_s=60)
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def recording_ui(fake_ui, clock, step):
+    """A FakeUi whose waits record how long they were asked to wait, and take ``step`` s."""
+    ui = fake_ui()
+    asked = []
+
+    async def next_(method, *, timeout_s):
+        asked.append((method, timeout_s))
+        clock.t += step
+        return None
+
+    async def fill_first(selector, text, *, timeout_s=30.0):
+        asked.append(("fill", timeout_s))
+        clock.t += step
+
+    ui.next = next_
+    ui.fill_first = fill_first
+    return ui, asked
+
+
+async def test_timeout_caps_the_start_waits(fake_ui):
+    clock = Clock()
+    ui, asked = recording_ui(fake_ui, clock, step=10)
+    with pytest.raises(BrowserError):
+        await BuildPage(ui, now=clock).create("an idea", timeout_s=25)
+    assert asked == [("fill", 25), ("CreateApplet", 15)]
+
+
+async def test_a_start_with_no_time_left_fails_without_waiting(fake_ui):
+    clock = Clock()
+    ui, asked = recording_ui(fake_ui, clock, step=30)
+    with pytest.raises(BrowserError) as info:
+        await BuildPage(ui, now=clock).create("an idea", timeout_s=20)
+    assert asked == [("fill", 20)]
+    assert "--timeout" in info.value.hint

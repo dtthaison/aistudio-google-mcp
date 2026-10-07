@@ -23,7 +23,8 @@ async def test_live_apps_recent_and_gallery_decode(profile):
         apps = await client.apps.list()
         recent = await client.apps.recent()
         gallery = await client.gallery.list()
-        runs = [await client.apps.runs(a.id) for a in apps if a.storage == "applet"][:1]
+        runs = [await client.apps.runs(a.id) for a in [a for a in apps
+                                                         if a.storage == "applet"][:1]]
     assert all(a.id for a in apps)
     assert all(i.kind in {"app", "gallery", "prompt", "unknown"} for i in recent)
     assert {a.group for a in gallery} >= {"showcase", "template"}

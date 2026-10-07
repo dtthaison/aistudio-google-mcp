@@ -67,3 +67,12 @@ def test_timeout_wording_does_not_claim_it_is_still_building(logged_in_profile, 
     res = CliRunner().invoke(cli, ["app", "create", "x"])
     assert res.exit_code == 2
     assert "stopped waiting" in res.stdout and "still building" not in res.stdout
+
+
+def test_build_notice_matches_the_window(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    monkeypatch.setattr("aistudio.cli.app_cmd.create_app", fake(RESULT, []))
+    visible = CliRunner().invoke(cli, ["app", "create", "an idea", "--visible"])
+    hidden = CliRunner().invoke(cli, ["app", "create", "an idea"])
+    assert "visible Chrome window" in visible.stderr and "minimized" not in visible.stderr
+    assert "minimized Chrome window" in hidden.stderr

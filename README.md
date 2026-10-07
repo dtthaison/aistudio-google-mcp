@@ -25,7 +25,7 @@ uv run aistudio prompt list --type chat
 uv run aistudio count-tokens "hello world" -m gemini-flash-latest
 uv run aistudio app list                    # your Build apps
 uv run aistudio app get <id-prefix>         # one app and its builder runs
-uv run aistudio app create "a pomodoro timer with dark mode"   # builds in a minimized Chrome (~2-4 min)
+uv run aistudio app create "a pomodoro timer with dark mode"   # builds in a minimized Chrome (~5-7 min)
 uv run aistudio app prompt <id-prefix> "make the start button green"
 uv run aistudio gallery list --tag google-maps
 uv run aistudio status                      # AI Studio / Gemini API incidents
