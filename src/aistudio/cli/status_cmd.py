@@ -30,11 +30,19 @@ def _render(data: dict[str, Any]) -> None:
 @click.command()
 @click.option("--active", "active_only", is_flag=True, help="Only incidents not yet resolved.")
 @click.option("--limit", type=click.IntRange(1, 200), default=10, show_default=True)
+@click.option("--fail-if-active", is_flag=True,
+              help="Exit with code 3 (after printing) when any incident is active.")
 @json_option
 @click.pass_obj
 @handle_errors
-def status(state: CliState, active_only: bool, limit: int, json_output: bool) -> None:
-    """AI Studio and Gemini API incidents, newest first."""
+def status(state: CliState, active_only: bool, limit: int, fail_if_active: bool,
+           json_output: bool) -> None:
+    """AI Studio and Gemini API incidents, newest first.
+
+    State and product names are inferred from AI Studio's numeric codes (JSON keeps the raw
+    "state_code"). Unknown codes show as state:N or product:N, and unknown states count as
+    active.
+    """
     state.require_http()
     profile = state.profile()
 
@@ -42,4 +50,7 @@ def status(state: CliState, active_only: bool, limit: int, json_output: bool) ->
         async with AIStudioClient.from_profile(profile) as client:
             return await list_incidents(client, active_only=active_only, limit=limit)
 
-    emit(asyncio.run(run()), json_output=json_output, render=_render)
+    data = asyncio.run(run())
+    emit(data, json_output=json_output, render=_render)
+    if fail_if_active and data["active"]:
+        raise SystemExit(3)

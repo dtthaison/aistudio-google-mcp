@@ -41,6 +41,7 @@ def _incident(row: Any, i: int) -> Incident:
             state=_code(STATES, opt_index(u, 0), "state"),
             time=as_timestamp(opt_index(u, 2)),
             message=as_str(opt_index(u, 3)),
+            state_code=as_int(opt_index(u, 0)),
         )
         for u in (raw_updates if isinstance(raw_updates, list) else [])
     )

@@ -40,3 +40,23 @@ def test_status_active_only(logged_in_profile):
     result = CliRunner().invoke(cli, ["status", "--active"])
     assert result.exit_code == 0, result.output
     assert "AI Studio [down]" in result.stdout and "investigating" in result.stdout.lower()
+
+
+ACTIVE = ["x", "AI Studio [down]", 1, [[1, "t", ["1790865060"], "Looking into it"]], 1, [3]]
+
+
+@respx.mock
+def test_fail_if_active_exits_3_after_printing(logged_in_profile, captured):
+    logged_in_profile()
+    serve(wire.encode([[[ACTIVE]]]))
+    result = CliRunner().invoke(cli, ["status", "--fail-if-active", "--json"])
+    assert result.exit_code == 3
+    assert json.loads(result.stdout)["active"] == 1
+    respx.reset()
+    serve(captured("ListIncidentsHistory", 6).raw["response"]["body"])
+    assert CliRunner().invoke(cli, ["status", "--fail-if-active"]).exit_code == 0
+
+
+def test_status_help_says_names_are_inferred():
+    text = " ".join(CliRunner().invoke(cli, ["status", "--help"]).output.split())
+    assert "inferred" in text and "count as active" in text

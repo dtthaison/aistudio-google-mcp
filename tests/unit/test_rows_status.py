@@ -62,3 +62,12 @@ async def test_listing_is_sorted_newest_first(make_client, captured):
             data = await list_incidents(client, limit=63)
     times = [i["updated"] or "" for i in data["incidents"]]
     assert times == sorted(times, reverse=True)
+
+
+def test_the_raw_state_code_is_kept_so_inferred_names_can_be_checked():
+    raw = [[[["x", "Down", 1, [[1, "t", ["1790865060"], "Looking"], [9, "t", ["1790868480"], "?"]],
+              1, [3]]]]]
+    (incident,) = decode_incidents(raw)
+    data = incident.to_dict()
+    assert (data["state"], data["state_code"], data["active"]) == ("state:9", 9, True)
+    assert [u["state_code"] for u in data["updates"]] == [1, 9]
