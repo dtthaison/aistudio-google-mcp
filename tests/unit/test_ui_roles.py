@@ -142,3 +142,27 @@ async def test_reads_on_a_closed_window_are_browser_errors():
         with pytest.raises(BrowserError) as info:
             await read()
         assert "closed" in info.value.message
+
+
+def test_rpcids_name_batchexecute_responses():
+    from aistudio._browser.ui import _method
+
+    assert _method("https://flow.google.com/_/X/data/batchexecute?rpcids=jwpduf&bl=1") == "jwpduf"
+    assert _method("https://a.example/$rpc/x.MakerSuiteService/GenerateContent") == (
+        "GenerateContent")
+
+
+async def test_text_checked_and_url_reads():
+    class Box(El):
+        async def inner_text(self):
+            return "  Omni 1.1 Flash \n arrow_drop_down "
+
+        async def get_attribute(self, name):
+            return "true" if name == "aria-checked" else None
+
+    page = Page({"button": [Box()], "radio": [El(), Box()]})
+    ui = PlaywrightUi(page)
+    assert await ui.inner_text("button", "Video generation default model") == (
+        "Omni 1.1 Flash arrow_drop_down")
+    assert await ui.checked("radio", "16:9", nth=1) is True
+    assert ui.current_url() == page.url

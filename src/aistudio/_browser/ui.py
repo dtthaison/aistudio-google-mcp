@@ -15,7 +15,7 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
 from aistudio.exceptions import AIStudioError, AuthError, BrowserError
@@ -72,7 +72,36 @@ class Ui(Protocol):
 
     async def pause(self, ms: int) -> None: ...
 
-    def responses(self) -> contextlib.AbstractAsyncContextManager[ResponseLog]: ...
+    def responses(self, marker: str = ...) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
+        ...
+
+    async def type_text(self, selector: str, text: str) -> None: ...
+
+    async def text_of(self, selector: str) -> str: ...
+
+    async def inner_text(self, role: str, name: Name, *, exact: bool = False,
+                         nth: int = 0) -> str: ...
+
+    async def checked(self, role: str, name: Name, *, nth: int = 0) -> bool: ...
+
+    async def wait_for(self, selector: str, *, timeout_s: float = 30.0) -> None: ...
+
+    def current_url(self) -> str: ...
+
+
+def _method(url: str) -> str:
+    """The RPC a response answers: batchexecute's ``rpcids``, else the URL's last segment."""
+    parsed = urlparse(url)
+    rpc = parse_qs(parsed.query).get("rpcids")
+    return rpc[0] if rpc else parsed.path.rsplit("/", 1)[-1]
+
+
+async def _collapsed(locator: Any) -> str:
+    return " ".join(((await locator.inner_text()) or "").split())
+
+
+async def _aria_checked(locator: Any) -> bool:
+    return (await locator.get_attribute("aria-checked")) == "true"
 
 
 def _window_closed() -> BrowserError:
@@ -248,8 +277,43 @@ class PlaywrightUi:
     async def pause(self, ms: int) -> None:
         await self._page.wait_for_timeout(ms)
 
+    async def type_text(self, selector: str, text: str) -> None:
+        """Type into a rich-text editor, which ignores ``fill`` (Flow's prompt box)."""
+        element = await self._first_visible(selector, 30.0)
+        try:
+            await element.focus()
+            await self._page.keyboard.type(text, delay=10)
+        except Exception as exc:
+            raise BrowserError(f"could not type into {selector!r}: {exc}") from exc
+
+    async def text_of(self, selector: str) -> str:
+        """The last visible match's text, collapsed; "" when nothing matches."""
+        async def read() -> str:
+            found = ""
+            for element in await self._page.locator(selector).all():
+                if await element.is_visible():
+                    found = " ".join((await element.inner_text()).split())
+            return found
+
+        return await self._read(read)
+
+    async def inner_text(self, role: str, name: Name, *, exact: bool = False,
+                         nth: int = 0) -> str:
+        locator = self._role(role, name, exact).nth(nth)
+        return await self._read(lambda: _collapsed(locator))
+
+    async def checked(self, role: str, name: Name, *, nth: int = 0) -> bool:
+        locator = self._role(role, name).nth(nth)
+        return await self._read(lambda: _aria_checked(locator))
+
+    async def wait_for(self, selector: str, *, timeout_s: float = 30.0) -> None:
+        await self._first_visible(selector, timeout_s)
+
+    def current_url(self) -> str:
+        return str(getattr(self._page, "url", "") or "")
+
     @contextlib.asynccontextmanager
-    async def responses(self) -> AsyncIterator[ResponseLog]:
+    async def responses(self, marker: str = RPC_MARKER) -> AsyncIterator[ResponseLog]:
         log = _QueueLog()
         pending: set[asyncio.Task[None]] = set()
 
@@ -258,12 +322,12 @@ class PlaywrightUi:
                 text = await response.text()  # a streamed response resolves when it ends
             except Exception:
                 text = ""
-            method = response.url.split("?", 1)[0].rsplit("/", 1)[-1]
+            method = _method(response.url)
             log.put(CapturedResponse(method, response.status, text,
                                      response.request.post_data or ""))
 
         def on_response(response: Any) -> None:
-            if RPC_MARKER in response.url:
+            if marker in response.url:
                 task = asyncio.ensure_future(store(response))
                 pending.add(task)
                 task.add_done_callback(pending.discard)

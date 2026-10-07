@@ -8,6 +8,7 @@ import pytest
 
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
 from aistudio._rpc import wire
+from aistudio.exceptions import BrowserError
 from aistudio.paths import get_profile
 
 TEST_API_KEY = "AIza" + "k" * 35
@@ -96,9 +97,16 @@ class FakeUi:
     are left.
     """
 
-    def __init__(self, responses=None, labels=None, visible=None, record_pauses=False):
+    def __init__(self, responses=None, labels=None, visible=None, record_pauses=False,
+                 texts=None, checks=None, inner=None, url="https://flow.google.com/",
+                 missing=()):
         self.ops = []
         self._record_pauses = record_pauses
+        self._texts = {k: list(v) for k, v in (texts or {}).items()}
+        self._checks = {k: list(v) for k, v in (checks or {}).items()}
+        self._inner = {k: list(v) for k, v in (inner or {}).items()}
+        self.url = url
+        self._missing = set(missing)
         self._responses = {k: list(v) for k, v in (responses or {}).items()}
         self._labels = {k: list(v) for k, v in (labels or {}).items()}
         self._visible = {k: list(v) for k, v in (visible or {}).items()}
@@ -151,8 +159,28 @@ class FakeUi:
         if self._record_pauses:
             self.ops.append(("pause", ms))
 
+    async def type_text(self, selector, text):
+        self.ops.append(("type", selector, text))
+
+    async def text_of(self, selector):
+        return self._answer(self._texts, selector, "")
+
+    async def inner_text(self, role, name, *, exact=False, nth=0):
+        return self._answer(self._inner, (role, self._key(name)), "")
+
+    async def checked(self, role, name, *, nth=0):
+        return self._answer(self._checks, (role, self._key(name), nth), False)
+
+    async def wait_for(self, selector, *, timeout_s=30.0):
+        self.ops.append(("wait_for", selector))
+        if selector in self._missing:
+            raise BrowserError(f"{selector} not found")
+
+    def current_url(self):
+        return self.url
+
     @contextlib.asynccontextmanager
-    async def responses(self):
+    async def responses(self, marker=None):
         yield self
 
     async def next(self, method, *, timeout_s):
