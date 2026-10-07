@@ -93,8 +93,13 @@ async def generate_speech(
     sent = _sent(captured.request_body)
     _confirm(sent, model_id=model_id, text=text, voice=chosen_voice)
     sent_style = wire.opt_index(sent, 1, 0, 0, 0, 40, 1) or None
-    warnings = ([f"AI Studio sent the style {sent_style!r}, not {style!r}"]
-                if style and sent_style != style else [])
+    warnings: list[str] = []
+    if style:
+        # Where the style travels may differ by model; look for it anywhere in the request.
+        if _contains(sent, style):
+            sent_style = style
+        else:
+            warnings.append(f"AI Studio did not include the style {style!r} in the request")
     try:
         audio = decode_speech(wire.decode(captured.text))
     except ValueError as exc:  # truncated or non-JSON body
@@ -116,6 +121,14 @@ def _sent(request_body: str) -> Any:
         return wire.decode(request_body) if request_body else None
     except ValueError:
         return None
+
+
+def _contains(node: Any, text: str) -> bool:
+    if isinstance(node, str):
+        return node == text
+    if isinstance(node, list):
+        return any(_contains(child, text) for child in node)
+    return False
 
 
 def _short(value: Any) -> str:

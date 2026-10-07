@@ -201,7 +201,7 @@ async def test_a_style_mismatch_keeps_the_audio_and_warns(logged_in_profile, mak
                                    client_factory=lambda p: make_client(),
                                    browser=browser_with(speech_ui(fake_ui, captured), []))
     assert out.exists() and result["style"] == FIXTURE_STYLE
-    assert result["warnings"] == [f"AI Studio sent the style {FIXTURE_STYLE!r}, not 'calm'"]
+    assert result["warnings"] == ["AI Studio did not include the style 'calm' in the request"]
 
 
 @respx.mock
@@ -214,3 +214,26 @@ async def test_a_text_mismatch_names_what_was_sent(logged_in_profile, make_clien
                               client_factory=lambda p: make_client(),
                               browser=browser_with(speech_ui(fake_ui, captured), []))
     assert "'Other words'" in info.value.message and "Good morning!" in info.value.message
+
+
+@respx.mock
+async def test_a_style_sent_elsewhere_in_the_request_counts(logged_in_profile, make_client,
+                                                            fake_ui, captured, tmp_path):
+    import json as _json
+
+    from aistudio._rpc import wire as _wire
+
+    profile = logged_in_profile()
+    serve_catalog(captured)
+    record = captured("GenerateContent", 3).raw
+    request = _wire.decode(record["request"]["body"])
+    request[1][0][0][0][40] = None  # not at the usual place …
+    request[3].append(["speaker style", "calm and slow"])  # … but elsewhere
+    response = CapturedResponse("GenerateContent", 200, record["response"]["body"],
+                                _json.dumps(request))
+    ui = fake_ui({"GenerateContent": [response]},
+                 labels={("button", MODEL_BUTTON.pattern): [[CURRENT_MODEL]]})
+    result = await generate_speech(profile, FIXTURE_TEXT, style="calm and slow",
+                                   out=tmp_path / "x.wav", client_factory=lambda p: make_client(),
+                                   browser=browser_with(ui, []))
+    assert result["style"] == "calm and slow" and "warnings" not in result
