@@ -11,6 +11,7 @@ from aistudio.cli import (
     app_cmd,
     chat_cmd,
     dev_cmd,
+    generate_cmd,
     models_cmd,
     profile_cmd,
     prompt_cmd,
@@ -51,6 +52,8 @@ cli.add_command(chat_cmd.count_tokens)
 cli.add_command(app_cmd.app)
 cli.add_command(app_cmd.gallery)
 cli.add_command(status_cmd.status)
+cli.add_command(generate_cmd.generate)
+cli.add_command(generate_cmd.voices)
 
 
 def main() -> None:
