@@ -75,3 +75,10 @@ def test_schema_drift_names_method_and_path():
 
 def test_http_fallback_treats_invalid_api_key_as_auth_error():
     assert type(error_from_http(400, "API key not valid")) is AuthError
+
+
+def test_flow_spending_errors_have_their_own_codes():
+    from aistudio.exceptions import AgentReplyError, OverBudgetError, PlanMismatchError
+
+    assert [e("m").code for e in (OverBudgetError, PlanMismatchError, AgentReplyError)] == [
+        "OVER_BUDGET", "PLAN_MISMATCH", "AGENT_REPLY"]

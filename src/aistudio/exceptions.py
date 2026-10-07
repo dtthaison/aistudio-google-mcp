@@ -89,6 +89,18 @@ class WaitTimeoutError(AIStudioError):
     code = "TIMEOUT"
 
 
+class OverBudgetError(AIStudioError):
+    code = "OVER_BUDGET"
+
+
+class PlanMismatchError(AIStudioError):
+    code = "PLAN_MISMATCH"
+
+
+class AgentReplyError(AIStudioError):
+    code = "AGENT_REPLY"
+
+
 def error_from_status(status: int, message: str) -> AIStudioError:
     """Map a gRPC status from an error envelope to an exception (spec §9)."""
     quota = "quota" in message.lower()
