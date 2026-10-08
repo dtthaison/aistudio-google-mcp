@@ -37,8 +37,10 @@ class FakePage:
     """Scripted FlowPage: records calls; behaviour set per test."""
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
-                 restore_error=None, follow_error=None, reject_error=None, approve_error=None):
+                 restore_error=None, follow_error=None, reject_error=None, approve_error=None,
+                 credit_values=(1050, 1040)):
         self.calls, self.turn, self.defaults = [], turn, defaults
+        self.credit_values = list(credit_values)
         self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
         self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
@@ -84,7 +86,13 @@ class FakePage:
         return self.outcome
 
     async def credits(self):
-        return 1040
+        return self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
+
+    async def media_details(self, media_id):
+        self.calls.append(("details", media_id))
+        return dataclasses.replace(DONE, media_id=media_id, model_key=None, seconds=None,
+                                   video_url=None,
+                                   image_url=f"https://flow-content.google/image/{media_id}?S=s")
 
 
 def harness(**page_kw):
@@ -243,7 +251,7 @@ async def test_bad_inputs_fail_before_chrome(logged_in_profile, tmp_path):
 
 
 async def test_credits(logged_in_profile):
-    kw, _, _ = harness()
+    kw, _, _ = harness(credit_values=(1040,))
     assert await flow_credits(logged_in_profile(), browser=kw["browser"],
                               page_factory=kw["page_factory"]) == {"credits": 1040}
 
@@ -383,3 +391,38 @@ async def test_a_refusal_before_approve_rejects_and_is_not_spent(logged_in_profi
         await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                             duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert info.value.hint == "re-run" and ("reject",) in pages[0].calls
+
+
+
+async def test_a_free_image_is_downloaded_without_approval(logged_in_profile, tmp_path):
+    # Plan F: Flow generates free images at once; there is nothing to approve (live).
+    from aistudio._flow.rows import Generated
+
+    made = (Generated("g1", "success", "image", "Nano Banana 2.1", "16:9"),
+            Generated("g2", "failed", "image", "Nano Banana 2.1", "16:9"))
+    kw, pages, _ = harness(turn=AgentTurn("I've generated it.", None, generated=made),
+                           credit_values=(1010, 1010))
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert result["status"] == "done" and result["credits_spent"] == 0
+    assert [f["media_id"] for f in result["files"]] == ["g1"] and (tmp_path / "x.png").exists()
+    assert any("without asking" in w for w in result["warnings"])
+    assert any("g2" in w for w in result["warnings"])
+    assert not any(c[0] in ("approve", "reject") for c in pages[0].calls)
+
+
+async def test_a_reply_with_nothing_made_is_still_an_agent_reply(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("Which apple?", None))
+    with pytest.raises(AgentReplyError):
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+
+
+async def test_credits_are_read_before_and_a_different_charge_warns(logged_in_profile, tmp_path):
+    kw, _, _ = harness(credit_values=(1060, 1040))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert any("20" in w and "10" in w for w in result["warnings"])
+    kw, _, _ = harness(credit_values=(1050, 1040))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "b.mp4", **kw)
+    assert "warnings" not in result

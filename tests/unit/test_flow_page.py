@@ -291,3 +291,24 @@ async def test_approve_checks_the_cost_flow_shows(fake_ui):
         await page.approve_and_follow(count=1, credits=10, timeout_s=5, kind="video")
     assert "20" in info.value.message and not page.started
     assert not any(op[:3] == ("activate", "radio", "Approve") for op in ui.ops)
+
+
+
+async def test_a_turn_reports_what_flow_generated(fake_ui):
+    # Plan F: free models generate at once, with no permission request (live).
+    from tests.unit.test_flow_rows import generated_call, generated_result
+
+    ui = fake_ui({"StreamChat": [chat(stream(generated_call(), generated_result()))]},
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 image."], AGENT_MESSAGE: ["done"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 image.")
+    assert turn.quote is None and [g.media_id for g in turn.generated] == ["g1"]
+
+
+async def test_a_permission_request_wins_over_generated_results(fake_ui):
+    from tests.unit.test_flow_rows import generated_call, generated_result
+
+    ui = fake_ui({"StreamChat": [chat(stream(generated_call(), generated_result(),
+                                             permission(cost=10)))]},
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
+    assert turn.quote is not None and turn.quote.credits == 10

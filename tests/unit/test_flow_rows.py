@@ -76,6 +76,24 @@ def permission(videos=1, images=0, cost=10):
              "c"], True]
 
 
+def generated_call(placeholder="ph1", model="\U0001f34c Nano Banana 2.1", aspect="16:9"):
+    """A free generation's tool call (live shape, plan F findings)."""
+    pairs = [["model_usage_key", [None, None, "BELUGA"]], ["aspect_ratio", [None, None, aspect]],
+             ["placeholder_frontend_id", [None, None, placeholder]],
+             ["prompt", [None, None, "a lemon"]], ["model_display_name", [None, None, model]]]
+    return [[[[["text", [None, None, "I'm going to generate"]]]],
+             [["e1", None, None, ["generate_image", "generate_image", [pairs], placeholder]]],
+             "e1"]]
+
+
+def generated_result(media_id="g1", placeholder="ph1", status="success"):
+    pairs = [["media_id", [None, None, media_id]],
+             ["placeholder_frontend_id", [None, None, placeholder]],
+             ["display_name", [None, None, "Yellow lemon"]], ["status", [None, None, status]]]
+    return [[None, [["e2", None, None, None, ["generate_image", "generate_image", [pairs],
+                                               placeholder]]], "e2"]]
+
+
 def stream(*items):
     lines = [")]}'", ""]
     for item in items:
@@ -95,3 +113,15 @@ def test_parse_permission_reads_flows_structured_request():
     assert parse_permission(permission(videos=0, images=2, cost=4)) == Quote(2, "image", 4)
     assert parse_permission(permission(videos=1, images=1, cost=12)).kind == "mixed"
     assert parse_permission([[None, [["c", None, None, ["open_chat_panel"]]]]]) is None
+
+
+
+def test_generated_results_are_read_from_the_stream():
+    from aistudio._flow.rows import agent_generated
+
+    got = agent_generated([generated_call(), generated_result(),
+                           generated_call("ph2"), generated_result("g2", "ph2", "failed")])
+    assert [(g.media_id, g.status, g.kind, g.model, g.aspect) for g in got] == [
+        ("g1", "success", "image", "Nano Banana 2.1", "16:9"),
+        ("g2", "failed", "image", "Nano Banana 2.1", "16:9")]
+    assert agent_generated([permission()]) == []

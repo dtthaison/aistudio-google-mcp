@@ -52,6 +52,16 @@ class FlowProject:
 
 
 @dataclass(frozen=True)
+class Generated:
+    """Media Flow's agent made without asking (a free model): from its ``generate_*`` tool."""
+    media_id: str
+    status: str | None  # "success" when made
+    kind: str  # "image" | "video"
+    model: str | None  # the call's display name, e.g. "Nano Banana 2.1"
+    aspect: str | None
+
+
+@dataclass(frozen=True)
 class FlowCharacter:
     id: str
     name: str
@@ -255,6 +265,42 @@ def parse_permission(payload: Any) -> Quote | None:
                     else "mixed")
             return Quote(count=videos + images, kind=kind, credits=cost)
     return None
+
+
+def agent_generated(items: list[Any]) -> list[Generated]:
+    """``generate_*`` tool results in StreamChat payloads, joined to their calls by placeholder:
+    ``["generate_image", "generate_image", [[["media_id", [None, None, id]], …]], placeholder]``.
+    """
+    calls: dict[Any, dict[str, Any]] = {}
+    results: dict[str, tuple[str, dict[str, Any]]] = {}
+    for payload in items:
+        for node in _lists(payload):
+            if (len(node) >= 3 and isinstance(node[0], str) and node[0].startswith("generate_")
+                    and node[1] == node[0] and isinstance(node[2], list)):
+                values = {pair[0]: pair[1][-1] for pair in opt_index(node, 2, 0) or []
+                          if isinstance(pair, list) and len(pair) == 2
+                          and isinstance(pair[0], str) and isinstance(pair[1], list) and pair[1]}
+                media_id = values.get("media_id")
+                if isinstance(media_id, str) and media_id:
+                    results[media_id] = (node[0], values)
+                else:
+                    calls[values.get("placeholder_frontend_id")] = values
+    out = []
+    for media_id, (name, values) in results.items():
+        call = calls.get(values.get("placeholder_frontend_id"), {})
+        model = call.get("model_display_name")
+        out.append(Generated(media_id, _str(values.get("status")),
+                             "video" if "video" in name else "image",
+                             _plain(model) if isinstance(model, str) else None,
+                             _str(call.get("aspect_ratio"))))
+    return out
+
+
+def _plain(label: str) -> str:
+    """'🍌 Nano Banana 2.1' -> 'Nano Banana 2.1'."""
+    while label and not label[0].isalnum():
+        label = label[1:].lstrip()
+    return label
 
 
 def parse_plan(text: str) -> Plan:

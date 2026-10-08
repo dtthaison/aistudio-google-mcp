@@ -52,6 +52,12 @@ def _left(data: dict[str, Any]) -> str:
     return "credits left unknown" if left is None else f"{left} left"
 
 
+def _spent_line(data: dict[str, Any]) -> str:
+    spent = data.get("credits_spent")
+    head = "credits spent unknown" if spent is None else f"Spent {spent} credits"
+    return f"{head}; {_left(data)}"
+
+
 def _render(data: dict[str, Any]) -> None:
     if data["status"] == "quoted":
         stdout.print(f"Flow quotes {data['credits']} credits for {data['count']} output(s): "
@@ -64,7 +70,7 @@ def _render(data: dict[str, Any]) -> None:
     else:
         for file in data["files"]:
             stdout.print(f"Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
-        stdout.print(f"Spent {data['credits_spent']} credits; {_left(data)}", markup=False)
+        stdout.print(_spent_line(data), markup=False)
     for warning in data.get("warnings", []):
         stderr.print(f"Warning: {warning}", markup=False)
 
@@ -141,7 +147,7 @@ def _render_files(data: dict[str, Any]) -> None:
     for file in data.get("files", []):
         stdout.print(f"Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
     if "credits_spent" in data and data.get("status") == "done":
-        stdout.print(f"Spent {data['credits_spent']} credits; {_left(data)}", markup=False)
+        stdout.print(_spent_line(data), markup=False)
     for warning in data.get("warnings", []):
         stderr.print(f"Warning: {warning}", markup=False)
 

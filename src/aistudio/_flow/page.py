@@ -23,8 +23,10 @@ from aistudio._flow.models import ASPECTS
 from aistudio._flow.rows import (
     FlowMedia,
     FlowProject,
+    Generated,
     ProjectContents,
     Quote,
+    agent_generated,
     character_id,
     character_name,
     credits_left,
@@ -117,6 +119,7 @@ class AgentTurn:
     quote: Quote | None
     characters: tuple[str, ...] = ()  # character ids sent with the request that was quoted
     media: tuple[str, ...] = ()  # attached media ids sent with it
+    generated: tuple[Generated, ...] = ()  # made without asking (free models)
 
 
 @dataclass(frozen=True)
@@ -250,16 +253,23 @@ class FlowPage:
             await self._wait_for_prompt(PROMPT_EDITOR, text)
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
+            seen: list[object] = []
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
                 if response is None or response.status >= 400:
                     continue
+                body = response.request_body
                 for _, payload in payloads(response.text):
+                    seen.append(payload)
                     quote = parse_permission(payload)
-                    if quote is not None:
-                        body = response.request_body
+                    if quote is not None:  # a request to approve always wins
                         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
                                          tuple(sent_characters(body)), tuple(sent_media(body)))
+                generated = agent_generated(seen)
+                if generated:  # a free model: Flow generated without asking (live)
+                    return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
+                                     tuple(sent_characters(body)), tuple(sent_media(body)),
+                                     tuple(generated))
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
 

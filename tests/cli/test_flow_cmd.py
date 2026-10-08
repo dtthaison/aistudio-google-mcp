@@ -239,3 +239,13 @@ def test_long_list_lines_do_not_wrap(logged_in_profile, monkeypatch):
          "count": 1, "project": "p"}, []))
     res = CliRunner().invoke(cli, ["flow", "scene", "list"])
     assert f"s1  {title.strip()}  1 clip(s), 8 s" in res.stdout
+
+
+def test_an_unverified_charge_says_unknown(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    free = {"status": "done", "files": [], "credits_spent": None, "credits_left": None,
+            "model": "nano-banana-2.1", "project": "p",
+            "warnings": ["Flow generated without asking (free model), so there was no quote"]}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", fake(free, []))
+    res = CliRunner().invoke(cli, ["flow", "image", "x"])
+    assert "Spent None" not in res.stdout and "credits spent unknown" in res.stdout

@@ -96,8 +96,10 @@ async def flow_generate(
     warnings: list[str] = []
     if on_start:
         on_start()
+    free: tuple[list[Any], list[str], int | None] | None = None
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
+        before = await page.credits()  # free models generate without asking (plan F)
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id) if attachments or characters else None
         titles, known_ids = _attachment_titles(contents, attachments)
@@ -140,63 +142,68 @@ async def flow_generate(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect))
-            if turn.quote is None:
+            if turn.quote is None and not turn.generated:
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
                                            "spent")
-            if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
-                waiting = await _reject_noting(page)
-                raise PlanMismatchError(
-                    f"Flow's request carries media {list(turn.media) or 'none'}, "
-                    f"not {attached_ids or 'none'} (in that order)",
-                    hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
-                         f"re-run{waiting}")
-            wanted_ids = {c.id for c in chosen}
-            if set(turn.characters) != wanted_ids:
-                waiting = await _reject_noting(page)
-                raise PlanMismatchError(
-                    f"Flow's request carries characters {sorted(turn.characters) or 'none'}, "
-                    f"not {sorted(wanted_ids) or 'none'}",
-                    hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
-                         f"re-run{waiting}")
-            expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
-                            duration)
-            decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
-            if decision is Decision.QUOTE_ONLY:
-                # Declined in Flow too: a waiting request could later be approved there with
-                # the restored settings, not the quoted ones.
-                declined = True
-                try:
-                    await page.reject()
-                except BrowserError:
-                    declined = False
-                    wrong = [*wrong, "Flow's request is still waiting: press Reject on it in "
-                                     "Flow, do not approve it (the settings were restored)"]
-                return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
-                        "count": turn.quote.count, "plan": turn.text, "project": project_id,
-                        **({"uploads": uploads} if uploads else {}),
-                        **({"warnings": wrong} if wrong else {})}
-            if decision is Decision.REJECT_MISMATCH:
-                await page.reject()
-                raise PlanMismatchError("; ".join(wrong),
-                                        hint="nothing was spent; adjust the flags or the prompt")
-            if decision is Decision.REJECT_OVER_BUDGET:
-                await page.reject()
-                raise OverBudgetError(f"Flow quotes {turn.quote.credits} credits, over "
-                                      f"--max-credits {max_credits}",
-                                      hint=f"nothing was spent; re-run with --max-credits "
-                                           f"{turn.quote.credits} to accept")
-            try:
-                outcome = await page.approve_and_follow(count=wanted.count,
-                                                        credits=turn.quote.credits,
-                                                        timeout_s=timeout_s, kind=kind)
-            except Exception as exc:
-                if not page.started:  # refused before Approve: decline the waiting request
+            if turn.quote is None:  # a free model: Flow generated without asking (live)
+                free = await _free_run(page, turn, kind, wanted.count, flow_model, aspect,
+                                       attached_ids, [c.id for c in chosen])
+            else:
+                if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
                     waiting = await _reject_noting(page)
-                    if waiting and isinstance(exc, AIStudioError):
-                        exc.hint = f"{exc.hint or ''}{waiting}"
-                    raise
-                raise _spent(exc, page.paid_media, project_id) from exc  # Approve may have spent
+                    raise PlanMismatchError(
+                        f"Flow's request carries media {list(turn.media) or 'none'}, "
+                        f"not {attached_ids or 'none'} (in that order)",
+                        hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
+                             f"re-run{waiting}")
+                wanted_ids = {c.id for c in chosen}
+                if set(turn.characters) != wanted_ids:
+                    waiting = await _reject_noting(page)
+                    raise PlanMismatchError(
+                        f"Flow's request carries characters {sorted(turn.characters) or 'none'}, "
+                        f"not {sorted(wanted_ids) or 'none'}",
+                        hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
+                             f"re-run{waiting}")
+                expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
+                                duration)
+                decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
+                if decision is Decision.QUOTE_ONLY:
+                    # Declined in Flow too: a waiting request could later be approved there with
+                    # the restored settings, not the quoted ones.
+                    declined = True
+                    try:
+                        await page.reject()
+                    except BrowserError:
+                        declined = False
+                        wrong = [*wrong, "Flow's request is still waiting: press Reject on it in "
+                                         "Flow, do not approve it (the settings were restored)"]
+                    return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
+                            "count": turn.quote.count, "plan": turn.text, "project": project_id,
+                            **({"uploads": uploads} if uploads else {}),
+                            **({"warnings": wrong} if wrong else {})}
+                if decision is Decision.REJECT_MISMATCH:
+                    await page.reject()
+                    raise PlanMismatchError("; ".join(wrong), hint="nothing was spent; adjust "
+                                                                   "the flags or the prompt")
+                if decision is Decision.REJECT_OVER_BUDGET:
+                    await page.reject()
+                    raise OverBudgetError(f"Flow quotes {turn.quote.credits} credits, over "
+                                          f"--max-credits {max_credits}",
+                                          hint=f"nothing was spent; re-run with --max-credits "
+                                               f"{turn.quote.credits} to accept")
+                try:
+                    outcome = await page.approve_and_follow(count=wanted.count,
+                                                            credits=turn.quote.credits,
+                                                            timeout_s=timeout_s, kind=kind)
+                except Exception as exc:
+                    if not page.started:  # refused before Approve: decline the waiting request
+                        waiting = await _reject_noting(page)
+                        if waiting and isinstance(exc, AIStudioError):
+                            exc.hint = f"{exc.hint or ''}{waiting}"
+                        raise
+                    # Approve may have spent: name the media, never invite a re-run
+                    raise _spent(exc, page.paid_media, project_id) from exc
         finally:
             if wanted != previous:
                 try:
@@ -206,6 +213,21 @@ async def flow_generate(
                                     f"({previous.model}, {previous.aspect}, x{previous.count}); "
                                     "set them in Flow's settings")
     project_url = PROJECT_URL.format(id=project_id)
+    if free is not None:
+        media, notes, after = free
+        spent, charge_notes = _free_charge(before, after)
+        files, saved_notes = await _save_all(kind, media, out=out, overwrite=overwrite,
+                                             downloader=downloader, stamp=now(),
+                                             project_url=project_url)
+        warnings = notes + charge_notes + warnings + saved_notes
+        model_id = next((label_to_id(g.model) for g in turn.generated if g.model), None)
+        return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
+                "model": model_id, "project": project_id,
+                **({"warnings": warnings} if warnings else {})}
+    if (before is not None and outcome.credits_left is not None
+            and before - outcome.credits_left != turn.quote.credits):
+        warnings.append(f"Flow charged {before - outcome.credits_left} credits; the quote was "
+                        f"{turn.quote.credits}")
     if outcome.timed_out:
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": turn.quote.credits,
@@ -226,6 +248,50 @@ async def flow_generate(
             "credits_left": outcome.credits_left,
             "model": expected_id, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
+
+
+async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any,
+                    aspect: str | None, attached_ids: list[str], character_ids: list[str]
+                    ) -> tuple[list[Any], list[str], int | None]:
+    """What Flow made without asking: the media with links, notes, and credits after."""
+    notes = ["Flow generated without asking (free model), so there was no quote to check"]
+    made = [g for g in turn.generated if g.status == "success"]
+    notes += [f"Flow reported {g.media_id} as {g.status or 'unknown'}, not made"
+              for g in turn.generated if g.status != "success"]
+    if len(made) != count:
+        notes.append(f"Flow made {len(made)} {kind}(s), not {count}")
+    if flow_model is not None:
+        notes += [f"Flow used {g.model}, not {flow_model.label}"
+                  for g in made if g.model and g.model != flow_model.label]
+    if aspect is not None:
+        notes += [f"Flow made {g.aspect}, not {aspect}"
+                  for g in made if g.aspect and g.aspect != aspect]
+    if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
+        notes.append(f"Flow's request carried media {list(turn.media) or 'none'}, not "
+                     f"{attached_ids or 'none'}")
+    if set(turn.characters) != set(character_ids):
+        notes.append(f"Flow's request carried characters {sorted(turn.characters) or 'none'}, "
+                     f"not {sorted(character_ids) or 'none'}")
+    media = []
+    for generated in made:
+        try:
+            found = await page.media_details(generated.media_id)
+        except Exception:  # noqa: BLE001 - it exists in Flow; name it, never fail the run
+            found = None
+        if found is None or not (found.video_url if kind == "video" else found.image_url):
+            notes.append(f"no link yet for {generated.media_id}; download it with: "
+                         f"aistudio flow download {generated.media_id}")
+        else:
+            media.append(found)
+    after, read_notes = await _credits_after(page, None)
+    return media, read_notes + notes, after
+
+
+def _free_charge(before: int | None, after: int | None) -> tuple[int | None, list[str]]:
+    if before is None or after is None:
+        return None, ["could not read Flow credits around the run; the charge was not verified"]
+    spent = before - after
+    return spent, ([f"Flow charged {spent} credits without asking"] if spent else [])
 
 
 _MEDIA_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
