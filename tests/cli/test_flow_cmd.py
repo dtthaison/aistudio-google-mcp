@@ -147,7 +147,8 @@ def test_character_create_passes_name_photo_and_rights(logged_in_profile, monkey
                                    "--i-have-rights", "--json"])
     assert res.exit_code == 0, res.output
     assert calls[-1] == (("Apple", None), {
-        "photo": "m3", "i_have_rights": True, "personality": None, "max_credits": None,
+        "photo": "m3", "i_have_rights": True, "personality": None, "model": None,
+        "max_credits": None,
         "project": None, "out": None, "overwrite": False, "visible": False})
     res = CliRunner().invoke(cli, ["flow", "character", "create", "Apple", "--photo", "m3"])
     assert res.exit_code == 0 and "c7" in res.stdout and "Apple" in res.stdout

@@ -66,6 +66,10 @@ class FakePage(PlanBPage):
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
                          Quote(1, "video", 10), self.turn_characters, tuple(self.attached))
 
+    async def choose_character_model(self, label):
+        self.calls.append(("choose", label))
+        self.character_model_label = label
+
     async def attach_character(self, name):
         self.calls.append(("attach_character", name))
 
@@ -440,3 +444,18 @@ async def test_attachments_with_a_character(logged_in_profile, tmp_path):
     calls = pages[0].calls
     assert result["status"] == "quoted"
     assert calls.index(("attach", "apple.jpg")) < calls.index(("attach_character", "Paper boat"))
+
+
+
+async def test_character_with_a_chosen_model(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010))
+    result = await flow_character(profile, "Robot", "a robot", model="nano-banana-pro",
+                                 out=tmp_path / "r.png", **kw)
+    assert ("choose", "Nano Banana Pro") in pages[0].calls
+    assert result["model"] == "nano-banana-pro" and result["credits_spent"] == 0
+    kw, pages, opened = harness()
+    with pytest.raises(ValidationError):
+        await flow_character(profile, "Robot", "a robot", model="veo-3.1-lite",
+                             out=tmp_path / "s.png", **kw)
+    assert opened == []

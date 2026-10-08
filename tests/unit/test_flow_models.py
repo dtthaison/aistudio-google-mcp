@@ -96,3 +96,19 @@ def test_unpriced_actions_are_refused():
     with pytest.raises(ValidationError) as info:
         check_direct_spend("extend", "Veo 3.1 - Fast", 100)
     assert "price" in info.value.message
+
+
+
+def test_measured_prices():
+    # Plan G: the user-approved measurements (findings, "Flow paid measurements").
+    from aistudio._flow.models import check_direct_spend
+    from aistudio.exceptions import OverBudgetError
+
+    assert check_direct_spend("character", "Nano Banana Pro", None) == 0
+    assert check_direct_spend("body", "Nano Banana 2.1", None) == 0
+    assert check_direct_spend("edit", "Omni 1.1 Flash", 20) == 20
+    with pytest.raises(OverBudgetError):
+        check_direct_spend("edit", "Omni 1.1 Flash", None)
+    for action, label in (("character", "Nano Banana 2 Lite"), ("body", "Nano Banana Pro")):
+        with pytest.raises(ValidationError):
+            check_direct_spend(action, label, 100)

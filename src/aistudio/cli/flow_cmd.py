@@ -223,6 +223,8 @@ def character() -> None:
 @click.option("--i-have-rights", is_flag=True,
               help="Confirm you have the rights to the local photo; Flow asks this before upload.")
 @click.option("--personality", help="The character's personality notes (free).")
+@click.option("-m", "--model", type=click.Choice(["nano-banana-2.1", "nano-banana-pro"]),
+              help="Image model for a character from a DESCRIPTION (both measured at 0 credits).")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
 @click.option("--max-credits", type=click.IntRange(0),
               help="Needed only when aistudio's price table says the character costs credits.")
@@ -233,7 +235,8 @@ def character() -> None:
 @click.pass_obj
 @handle_errors
 def character_create(state: CliState, name: str, description: str | None, photo: str | None,
-                     i_have_rights: bool, personality: str | None, project: str | None,
+                     i_have_rights: bool, personality: str | None, model: str | None,
+                     project: str | None,
                      max_credits: int | None, out: Path | None, force: bool, visible: bool,
                      json_output: bool) -> None:
     """Create a character called NAME from DESCRIPTION, or from --photo.
@@ -243,7 +246,7 @@ def character_create(state: CliState, name: str, description: str | None, photo:
     state.require_browser()
     result = asyncio.run(flow_character(
         state.profile(), name, description, photo=photo, i_have_rights=i_have_rights,
-        personality=personality, max_credits=max_credits, project=project, out=out,
+        personality=personality, model=model, max_credits=max_credits, project=project, out=out,
         overwrite=force, visible=visible))
 
     def render(data: dict[str, Any]) -> None:

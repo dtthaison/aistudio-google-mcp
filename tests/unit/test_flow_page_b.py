@@ -237,3 +237,24 @@ async def test_the_page_says_when_start_was_pressed(fake_ui):
     assert page.started is False
     await page.extend("rolls off", timeout_s=60)
     assert page.started is True
+
+
+
+async def test_choose_character_model_reads_the_picker_back(fake_ui):
+    import re
+
+    from aistudio._flow.page import CHARACTER_MODEL
+    from aistudio.exceptions import BrowserError
+
+    pro = "\U0001f34c Nano Banana Pro arrow_drop_down"
+    ui = fake_ui(inner={("button", CHARACTER_MODEL): [pro]})
+    await FlowPage(ui).choose_character_model("Nano Banana Pro")
+    dispatched = [op for op in ui.ops if op[0] == "dispatch"]
+    assert dispatched[0] == ("dispatch", "button", CHARACTER_MODEL)
+    assert dispatched[1][:2] == ("dispatch", "menuitem")
+    assert re.search(dispatched[1][2], "\U0001f34c Nano Banana Pro")
+    other = "\U0001f34c Nano Banana 2.1 arrow_drop_down"
+    ui = fake_ui(inner={("button", CHARACTER_MODEL): [other]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).choose_character_model("Nano Banana Pro")
+    assert "nothing was spent" in info.value.message

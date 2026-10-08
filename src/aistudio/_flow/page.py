@@ -497,6 +497,17 @@ class FlowPage:
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
         return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
 
+    async def choose_character_model(self, label: str) -> None:
+        """Pick the image model in the character page's "Select model family" (findings)."""
+        await self._ui.dispatch_click("button", CHARACTER_MODEL, exact=True)
+        await self._ui.pause(1200)
+        await self._ui.dispatch_click("menuitem", re.compile(re.escape(label) + "$"))
+        await self._ui.pause(1200)
+        shown = _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+        if shown != label:
+            raise BrowserError(f"Flow's character page kept {shown}, not {label}; nothing was "
+                               "spent", hint="re-run; if it persists, the Flow UI changed")
+
     async def start_character(self, description: str) -> CharacterOutcome:
         """Call after open_character (same page load). Creating a character may spend."""
         if not self._ui.current_url().split("?", 1)[0].endswith("/character"):

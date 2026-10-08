@@ -607,7 +607,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
 
 async def flow_character(profile: Profile, name: str, description: str | None = None, *,
                          photo: str | None = None, i_have_rights: bool = False,
-                         personality: str | None = None,
+                         personality: str | None = None, model: str | None = None,
                          max_credits: int | None = None, project: str | None = None,
                          out: Path | None = None, overwrite: bool = False, visible: bool = False,
                          browser: Callable[..., Any] = open_browser,
@@ -620,6 +620,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
     description = " ".join((description or "").split()) or None
     if (description is None) == (photo is None):
         raise ValidationError("give the character a DESCRIPTION or a --photo (exactly one)")
+    chosen_model = find_model(model, "image") if model else None
+    if chosen_model is not None and photo is not None:
+        raise ValidationError("-m applies to a character made from a DESCRIPTION; a --photo "
+                              "makes no image")
     source = (_attachments(None, None, [photo], i_have_rights)[0][1]
               if photo is not None else None)
     project_id = _project_id(project) if project else None
@@ -652,6 +656,9 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                              f"download it with: aistudio flow download {image_id}")
         else:
             model = await page.open_character(project_id)
+            if chosen_model is not None and model != chosen_model.label:
+                await page.choose_character_model(chosen_model.label)
+                model = chosen_model.label
             price = check_direct_spend("character", model, max_credits)  # before any spend
             try:
                 outcome = await page.start_character(description or "")
