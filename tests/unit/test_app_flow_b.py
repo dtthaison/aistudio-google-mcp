@@ -459,3 +459,20 @@ async def test_unknown_image_bytes_without_an_output_name_warn(tmp_path, monkeyp
                                       overwrite=False, downloader=gif, stamp=NOW,
                                       project_url="u")
     assert files[0]["path"].endswith(".bin") and any("not recognised" in w for w in warnings)
+
+
+async def test_uploads_happen_before_the_session_and_the_page_is_reloaded(logged_in_profile,
+                                                                         tmp_path):
+    # Live: after "Upload media" the + panel stays over the grid, so the tile's menu cannot be
+    # reached; upload everything first, reload, then start the session and attach.
+    profile = logged_in_profile()
+    store(profile)
+    photo = tmp_path / "me.jpg"
+    photo.write_bytes(b"\xff\xd8x")
+    kw, pages, _ = harness()
+    await flow_generate(profile, "video", "an apple", start_frame=str(photo), ingredients=[IMG],
+                        i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    names = [c[0] for c in pages[0].calls]
+    upload = names.index("upload")
+    assert upload < names.index("session") < names.index("attach")
+    assert "open" in names[upload:names.index("session")]

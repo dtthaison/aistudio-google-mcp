@@ -127,8 +127,7 @@ async def flow_generate(
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
-            await page.new_session()
-            for (_, value), title in zip(attachments, titles, strict=True):
+            for _, value in attachments:
                 if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
                     media_id = await page.upload(value, known_ids=known_ids)
                     known_ids.add(media_id)  # its late as29s record is not the next upload
@@ -136,6 +135,10 @@ async def flow_generate(
                     attached_ids.append(media_id)
                 else:
                     attached_ids.append(value)
+            if uploads:  # the + panel stays over the grid after an upload (live): reload
+                await page.open_project(project_id)
+            await page.new_session()
+            for title in titles:
                 await page.attach(title)
             for chosen_character in chosen:
                 await page.attach_character(chosen_character.name)
