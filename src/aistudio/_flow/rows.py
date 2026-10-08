@@ -42,10 +42,57 @@ class Plan:
     seconds: int | None
 
 
+@dataclass(frozen=True)
+class FlowProject:
+    id: str
+    title: str | None
+    created: int | None
+
+
+@dataclass(frozen=True)
+class ProjectContents:
+    titles: dict[str, str]  # media_id -> its workflow title (what the grid shows)
+    media: list[FlowMedia]
+
+
+def decode_projects(payload: Any) -> list[FlowProject]:
+    out = []
+    for row in opt_index(payload, 0) or []:
+        pid, meta = opt_index(row, 0), opt_index(row, 1)
+        if isinstance(pid, str) and isinstance(meta, list):
+            created = opt_index(meta, 2, 0)
+            out.append(FlowProject(pid, _str(opt_index(meta, 0)),
+                                   created if isinstance(created, int) else None))
+    return out
+
+
+def decode_contents(payload: Any) -> ProjectContents:
+    titles: dict[str, str] = {}
+    for workflow in opt_index(payload, 1) or []:
+        title, media_id = opt_index(workflow, 3, 0), opt_index(workflow, 3, 4)
+        if isinstance(title, str) and isinstance(media_id, str):
+            titles[media_id] = title
+    media = [m for m in (_record(r) for r in opt_index(payload, 2) or []) if m is not None]
+    return ProjectContents(titles, media)
+
+
+def character_id(payload: Any) -> str | None:
+    return _str(opt_index(payload, 0, 1))
+
+
+def extend_started(payload: Any) -> tuple[int | None, list[FlowMedia]]:
+    credits = opt_index(payload, 1)
+    media = [m for m in (_record(r) for r in opt_index(payload, 3) or []) if m is not None]
+    return (credits if isinstance(credits, int) and not isinstance(credits, bool) else None,
+            media)
+
+
 def media_records(method: str, payload: Any) -> list[FlowMedia]:
     """``jwpduf``: ``[None, credits, [record, …]]``; ``as29s``/``bOKtO``: one record (or a list)."""
     if method == "jwpduf":
         rows = opt_index(payload, 2)
+    elif method == "ogiZ0b":  # a character image: [[record, …], …]
+        rows = opt_index(payload, 0)
     elif method in ("as29s", "bOKtO"):
         rows = [payload] if isinstance(opt_index(payload, 0), str) else (
             opt_index(payload, 0) if isinstance(opt_index(payload, 0), list) else [])
