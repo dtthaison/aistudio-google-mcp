@@ -397,3 +397,22 @@ The scratch scripts live in `/tmp` and are not kept.
   The CLI may press "I agree" only with an explicit `--i-have-rights` for that run (user
   decision).
 - **Expiry.** A banner reads: "Your oldest creations will expire soon. Opt-in to keep them around."
+
+### Flow plan B discovery: extend, scenes, characters (2026-10-08, free)
+
+- **Scenes.** "Add media → New scene" (a dispatched click on the menu item) creates and opens
+  `/project/<id>/scene/<scene-id>`. The probe left an empty scene, "Untitled Scene 10-08
+  01:38:21", in the "aistudio" project.
+  - The editor lists the project's clips by title as buttons ("apple.jpg", "Red apple rolling on
+    table").
+  - Controls: "Add clip", "Zoom in/out", "Toggle aspect ratio", playback, "Download scene",
+    "Move to trash", "Done editing scene", and a prompt box with "Start generation".
+- **Extend.** Not found yet. A dispatched click on a video tile opens no detail view, and the
+  visible actions show "Reuse prompt" but no "Extend". It may sit behind a real click or hover on
+  the tile, or be an agent request with the video attached (attachments are media ids).
+- **Characters** (`/project/<id>/character`).
+  - The description goes into the same ProseMirror editor. The model picker reads "Nano Banana
+    2.1".
+  - The page also has "Upload" and "Add from project".
+  - A dispatched click on "Start generation" (with every request blocked) sent nothing. The real
+    trigger and its cost prompt are still unknown.
