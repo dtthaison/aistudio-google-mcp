@@ -71,6 +71,8 @@ class Ui(Protocol):
 
     async def labels(self, role: str, name: Name) -> list[str]: ...
 
+    async def enabled(self, role: str, name: Name) -> list[bool]: ...
+
     async def pause(self, ms: int) -> None: ...
 
     def responses(self, marker: str = ...) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
@@ -282,6 +284,19 @@ class PlaywrightUi:
 
         async def read() -> bool:
             return await locator.count() > 0 and await locator.first.is_visible()
+
+        return await self._read(read)
+
+    async def enabled(self, role: str, name: Name) -> list[bool]:
+        """For each control with exactly this name, in page order (the order ``nth`` uses):
+        visible and not disabled (Flow keeps answered permission radios, aria-disabled)."""
+        async def read() -> list[bool]:
+            out: list[bool] = []
+            for element in await self._role(role, name, True).all():
+                out.append(await element.is_visible()
+                           and await element.get_attribute("aria-disabled") != "true"
+                           and await element.is_enabled())
+            return out
 
         return await self._read(read)
 

@@ -234,3 +234,20 @@ async def test_a_tile_below_the_window_is_scrolled_into_view_before_hovering():
     page.get_by_text = lambda text, exact=False: caption
     await PlaywrightUi(page).hover_text("apple.jpg")
     assert caption.steps == ["scroll", "measure"] and page.mouse.moved == [(120, 300)]
+
+
+async def test_enabled_reads_aria_disabled_in_page_order():
+    class Radio(El):
+        def __init__(self, disabled):
+            super().__init__()
+            self._disabled = disabled
+
+        async def get_attribute(self, name):
+            return "true" if name == "aria-disabled" and self._disabled else None
+
+        async def is_enabled(self):
+            return True
+
+    page = Page({"radio": [Radio(True), Radio(False)]})
+    assert await PlaywrightUi(page).enabled("radio", "Approve") == [False, True]
+    assert page.asked[-1] == ("radio", "Approve", True)

@@ -243,3 +243,34 @@ async def test_a_cut_prompt_is_not_sent(fake_ui):
     with pytest.raises(BrowserError):
         await FlowPage(ui, now=Clock()).submit_for_quote(text)
     assert ("key", "Enter") not in ui.ops
+
+
+
+async def test_approve_presses_the_one_waiting_request(fake_ui):
+    # Live: an older, answered request stays in the chat with disabled radios.
+    from aistudio._browser.ui import CapturedResponse
+
+    ui = fake_ui({"jwpduf": [CapturedResponse("jwpduf", 200, "", "")]},
+                 enabled={("radio", "Approve"): [[False, True]]})
+    page = FlowPage(ui, now=Clock(), clock=lambda: 0)
+    await page.approve_and_follow(count=1, timeout_s=2, kind="video")
+    assert ("activate", "radio", "Approve", 1) in ui.ops and page.started
+
+
+async def test_approve_refuses_two_waiting_requests(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(enabled={("radio", "Approve"): [[True, True]]})
+    page = FlowPage(ui, now=Clock())
+    with pytest.raises(BrowserError) as info:
+        await page.approve_and_follow(count=1, timeout_s=2, kind="video")
+    assert "nothing was spent" in info.value.message and not page.started
+    assert not any(op[:3] == ("activate", "radio", "Approve") for op in ui.ops)
+
+
+async def test_reject_presses_every_waiting_request_and_only_those(fake_ui):
+    ui = fake_ui(enabled={("radio", "Reject"): [[False, True, True], [False, False, True],
+                                                [False, False, False]]})
+    await FlowPage(ui).reject()
+    assert [op for op in ui.ops if op[0] == "activate"] == [
+        ("activate", "radio", "Reject", 1), ("activate", "radio", "Reject", 2)]

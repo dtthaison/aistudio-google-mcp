@@ -87,6 +87,7 @@ CHARACTERS_TAB = re.compile(r"Characters$")  # the + panel's tab (mat-list-item,
 SEARCH_ASSETS = 'input[placeholder="Search assets"]'  # the + panel's search box
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
+REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
@@ -267,17 +268,28 @@ class FlowPage:
                                 "watch it")
 
     async def reject(self) -> None:
-        await self._ui.activate("radio", "Reject", exact=True)
-        await self._ui.pause(1000)
+        """Reject every request still waiting in the chat (answered ones keep disabled radios,
+        so the first "Reject" on the page can be an old one: live)."""
+        for _ in range(REJECT_ROUNDS):
+            waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject")) if ok]
+            if not waiting:
+                return
+            await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
+            await self._ui.pause(1000)
+        raise BrowserError("Flow still shows a waiting request after Reject",
+                           hint="press Reject on it in Flow, never Approve")
 
     async def approve_and_follow(self, *, count: int, timeout_s: float,
                                  kind: str) -> FlowOutcome:
-        if len(await self._ui.labels("radio", re.compile(r"^Approve$"))) != 1:
-            raise BrowserError("could not find exactly one Approve option; nothing was spent",
-                               hint="re-run; if it persists, the Flow UI changed")
+        waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Approve")) if ok]
+        if len(waiting) != 1:  # the quote just read must be the only request that can be approved
+            raise BrowserError(f"found {len(waiting)} waiting Approve options, not exactly one; "
+                               "nothing was spent",
+                               hint="re-run; if it persists, check Flow's chat for old requests")
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
-            await self._ui.activate("radio", "Approve", exact=True)
+            self.started = True
+            await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
             return await self._follow(log, count, timeout_s, kind, since)
 
     async def projects(self) -> list[FlowProject]:

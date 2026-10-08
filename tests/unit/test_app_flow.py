@@ -37,9 +37,9 @@ class FakePage:
     """Scripted FlowPage: records calls; behaviour set per test."""
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
-                 restore_error=None, follow_error=None, reject_error=None):
+                 restore_error=None, follow_error=None, reject_error=None, approve_error=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
-        self.reject_error = reject_error
+        self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
         self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
         self.missing, self.restore_error = set(missing), restore_error
@@ -74,6 +74,9 @@ class FakePage:
             raise self.reject_error
 
     async def approve_and_follow(self, *, count, timeout_s, kind):
+        if self.approve_error:  # refused before pressing Approve
+            raise self.approve_error
+        self.started = True
         self.calls.append(("approve", count))
         if self.follow_error:
             self.paid_media = ["m9"]
@@ -368,3 +371,15 @@ async def test_a_different_model_after_the_job_is_a_warning(logged_in_profile, t
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-fast",
                                  max_credits=20, out=tmp_path / "a.mp4", **kw)
     assert "Flow made the video with veo-3.1-lite, not veo-3.1-fast" in result["warnings"]
+
+
+
+async def test_a_refusal_before_approve_rejects_and_is_not_spent(logged_in_profile, tmp_path):
+    # Live: "could not find exactly one Approve option; nothing was spent" came with a
+    # "credits were spent" hint, and Flow's request was left waiting.
+    kw, pages, _ = harness(approve_error=BrowserError(
+        "could not find exactly one waiting Approve option; nothing was spent", hint="re-run"))
+    with pytest.raises(BrowserError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert info.value.hint == "re-run" and ("reject",) in pages[0].calls

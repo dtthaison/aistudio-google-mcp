@@ -189,8 +189,13 @@ async def flow_generate(
             try:
                 outcome = await page.approve_and_follow(count=wanted.count, timeout_s=timeout_s,
                                                         kind=kind)
-            except Exception as exc:  # after Approve: credits may be spent; never invite a re-run
-                raise _spent(exc, page.paid_media, project_id) from exc
+            except Exception as exc:
+                if not page.started:  # refused before Approve: decline the waiting request
+                    waiting = await _reject_noting(page)
+                    if waiting and isinstance(exc, AIStudioError):
+                        exc.hint = f"{exc.hint or ''}{waiting}"
+                    raise
+                raise _spent(exc, page.paid_media, project_id) from exc  # Approve may have spent
         finally:
             if wanted != previous:
                 try:
