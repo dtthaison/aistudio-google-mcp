@@ -103,15 +103,17 @@ def _command(kind: str) -> click.Command:
                 timeout: int, **options: Any) -> None:
         state.require_browser()
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
-        if not json_output:
-            window = "visible" if options["visible"] else "minimized"
+        window = "visible" if options["visible"] else "minimized"
+
+        def notice() -> None:
             stderr.print(f"Asking Flow in a {window} Chrome window…", markup=False)
         out = options.pop("out")
         options["ingredients"] = list(options.pop("ingredient"))
         options["characters"] = list(options["characters"])
         result = asyncio.run(flow_generate(
             state.profile(), kind, content, out=out, overwrite=options.pop("force"),
-            timeout_s=float(timeout), **{**{"duration": None}, **options}))
+            timeout_s=float(timeout), on_start=None if json_output else notice,
+            **{**{"duration": None}, **options}))
         emit(result, json_output=json_output, render=_render)
         if result["status"] == "timeout":
             raise SystemExit(2)

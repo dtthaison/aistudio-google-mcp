@@ -34,7 +34,7 @@ def test_flow_video_passes_every_option(logged_in_profile, monkeypatch, tmp_path
         "model": "veo-3.1-lite", "aspect": "9:16", "count": 1, "duration": 8, "max_credits": 10,
         "project": "p1", "out": out, "overwrite": True, "timeout_s": 300.0, "visible": True,
         "start_frame": None, "end_frame": None, "ingredients": [], "i_have_rights": False,
-        "characters": []})
+        "characters": [], "on_start": None})
 
 
 def test_a_quote_tells_people_how_to_spend(logged_in_profile, monkeypatch):
@@ -204,3 +204,24 @@ def test_video_passes_characters(logged_in_profile, monkeypatch):
                                    "--character", "c2", "--json"])
     assert res.exit_code == 0, res.output
     assert calls[-1][1]["characters"] == ["Paper boat", "c2"]
+
+
+def test_flow_notice_comes_after_validation(logged_in_profile, monkeypatch):
+    # Plan C review M5: no "Asking Flow…" for a run that fails its checks.
+    from aistudio.exceptions import ValidationError
+
+    logged_in_profile()
+
+    async def refuse(profile, *args, **kwargs):
+        raise ValidationError("bad duration")
+
+    async def start(profile, *args, **kwargs):
+        kwargs["on_start"]()
+        return QUOTED
+
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", refuse)
+    res = CliRunner().invoke(cli, ["flow", "video", "x", "--duration", "99"])
+    assert res.exit_code == 1 and "Asking Flow" not in res.stderr
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", start)
+    res = CliRunner().invoke(cli, ["flow", "video", "x"])
+    assert res.exit_code == 0 and "Asking Flow" in res.stderr

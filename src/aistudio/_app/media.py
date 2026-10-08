@@ -197,7 +197,7 @@ async def _generate_media(
     media = decode_media(body, part_kind)
     files: list[dict[str, Any]] = []
     first: Path | None = None
-    for part in media.parts:
+    for index, part in enumerate(media.parts):
         ext = extension_for(part.mime_type)
         if first is None:
             path = out or _free_name(Path(f"aistudio-{name}-{now():%Y%m%d-%H%M%S}{ext}"))
@@ -208,7 +208,7 @@ async def _generate_media(
                 warnings.append(f"{path} appeared while generating; saved to {saved} instead")
             first = saved
         else:  # extra images never clobber anything, so nothing fails after a paid run
-            saved = _write(_free_name(first.with_suffix(ext), start=2), part.data,
+            saved = _write(_free_name(first.with_suffix(ext), start=index + 1), part.data,
                            overwrite=False)
         files.append({"path": str(saved), "mime_type": part.mime_type, "bytes": len(part.data)})
     return {

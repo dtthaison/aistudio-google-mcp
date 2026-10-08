@@ -50,7 +50,8 @@ def character_ui(fake_ui, image_payload):
     if image_payload is not None:
         responses["ogiZ0b"] = [CapturedResponse("ogiZ0b", 200, batch("ogiZ0b", image_payload), "")]
     return fake_ui(responses, inner={("button", "Select model family"): [
-        "🍌 Nano Banana 2.1 arrow_drop_down"]}, texts={EDITOR_ANY: ["a robot"]})
+        "🍌 Nano Banana 2.1 arrow_drop_down"]}, texts={EDITOR_ANY: ["a robot"]},
+        url=f"https://flow.google.com/project/{PID}/character")
 
 
 IMAGE_ROW = ["i1", None, "w1", None, None, None,
@@ -208,3 +209,22 @@ async def test_character_starts_only_once_the_editor_shows_the_prompt(fake_ui):
     with pytest.raises(BrowserError):
         await page.start_character("a robot")
     assert not any(op[0] == "click" for op in ui.ops)
+
+
+async def test_extend_reads_the_start_before_the_scene(fake_ui):
+    # Plan C review M2: no 15 s wait for a scene reply that may never come before the spend.
+    ui = extend_ui(fake_ui, ("as29s", [poll("as29s", record(media_id="m2"))]))
+    await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).extend("rolls off", timeout_s=60)
+    methods = [m for m, _ in ui.waits]
+    assert methods.index("fZytfe") < methods.index("rqZuUc")
+    assert dict(ui.waits)["rqZuUc"] <= 2.0
+
+
+async def test_start_character_needs_the_character_page(fake_ui):
+    # Plan C review M8: never type and press Start on some other page.
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(texts={EDITOR_ANY: ["a robot"]}, url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui, now=Clock()).start_character("a robot")
+    assert not any(op[0] in ("type", "click") for op in ui.ops)

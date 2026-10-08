@@ -161,5 +161,32 @@ async def test_a_cached_prefix_does_not_hide_a_new_exact_id(aistudio_home, make_
     profile = get_profile("default")
     cache_without(profile, captured, "gemini-3.1-flash-lite", T0)
     async with make_client() as client:
-        model = await get_model(client, profile, "gemini-3.1-flash-lite", now=lambda: T0 + 5)
+        # older than RECHECK_S: a cached prefix match is rechecked (plan E: a recent one is used)
+        model = await get_model(client, profile, "gemini-3.1-flash-lite", now=lambda: T0 + 400)
     assert model["id"] == "gemini-3.1-flash-lite" and route.call_count == 1
+
+
+@respx.mock
+async def test_a_bad_cache_fetches_once(aistudio_home, make_client, captured):
+    # Plan C review M3: a fresh cache that does not decode is one network read, not two.
+    route = serve_catalog(captured)
+    profile = get_profile("default")
+    profile.ensure()
+    profile.models.write_text(json.dumps({"fetched_at": T0, "response": {"bogus": 1}}))
+    async with make_client() as client:
+        with pytest.raises(NotFoundError):
+            await get_model(client, profile, "no-such-model", now=lambda: T0 + 5)
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_a_prefix_lookup_uses_a_recent_cache(aistudio_home, make_client, captured):
+    # Plan C review M4: an abbreviated id must not refetch the catalog on every call.
+    route = serve_catalog(captured)
+    profile = get_profile("default")
+    cache_without(profile, captured, "no-such-model", T0)
+    async with make_client() as client:
+        model = await get_model(client, profile, "gemini-3.1-flash-lite-im", now=lambda: T0 + 60)
+        assert model["id"] == "gemini-3.1-flash-lite-image" and route.call_count == 0
+        await get_model(client, profile, "gemini-3.1-flash-lite-im", now=lambda: T0 + 400)
+    assert route.call_count == 1

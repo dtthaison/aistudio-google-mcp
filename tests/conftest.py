@@ -101,6 +101,7 @@ class FakeUi:
                  texts=None, checks=None, inner=None, url="https://flow.google.com/",
                  missing=()):
         self.ops = []
+        self.waits = []  # (method, timeout_s) of every ResponseLog.next
         self._record_pauses = record_pauses
         self._texts = {k: list(v) for k, v in (texts or {}).items()}
         self._checks = {k: list(v) for k, v in (checks or {}).items()}
@@ -205,6 +206,7 @@ class FakeUi:
         yield self
 
     async def next(self, method, *, timeout_s):
+        self.waits.append((method, timeout_s))
         queue = self._responses.get(method) or []
         return queue.pop(0) if queue else None
 

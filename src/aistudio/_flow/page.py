@@ -78,6 +78,7 @@ ASKS_FIRST = re.compile(r"^Always\b.*ask for confirmation")  # "Confirm before g
 CREATED_SLACK_S = 120  # clock skew allowed when matching job records to this run
 REPLY_GRACE_S = 10.0  # after a reply without a permission request, wait this long for one
 PROMPT_POLLS = 20  # x 250 ms for the editor to show a typed or inserted prompt
+PROMPT_TAIL = 40  # the editor must show the prompt's last characters (a cut prompt fails)
 SAVE = "Save"  # the tune panel keeps changes only after Save (live probe)
 SAVE_METHOD = "Kcr7Ub"  # the save call Save sends
 SAVE_TIMEOUT_S = 10.0
@@ -253,13 +254,14 @@ class FlowPage:
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
         immediate Enter sent an empty box (live)."""
-        want = int(len(" ".join(text.split())) * 0.9)
+        tail = " ".join(text.split())[-PROMPT_TAIL:]
         for _ in range(PROMPT_POLLS):
-            if len(await self._ui.text_of(editor)) >= want:
+            if tail in " ".join((await self._ui.text_of(editor)).split()):
                 return
             await self._ui.pause(250)
-        raise BrowserError("the prompt did not reach Flow's editor; nothing was sent",
-                           hint="re-run; if it persists, add --visible to watch it")
+        raise BrowserError("Flow's editor does not show the whole prompt; nothing was sent",
+                           hint="re-run; if it persists, shorten the prompt or add --visible to "
+                                "watch it")
 
     async def reject(self) -> None:
         await self._ui.activate("radio", "Reject", exact=True)
@@ -409,6 +411,9 @@ class FlowPage:
 
     async def start_character(self, description: str) -> CharacterOutcome:
         """Call after open_character (same page load). Creating a character may spend."""
+        if not self._ui.current_url().split("?", 1)[0].endswith("/character"):
+            raise BrowserError("Flow's character page is not open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
         await self._ui.type_text(EDITOR_ANY, description)
         await self._wait_for_prompt(EDITOR_ANY, description)
         async with self._ui.responses(marker=FLOW_RPC) as log:
@@ -451,11 +456,11 @@ class FlowPage:
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             await self._ui.click("button", START, exact=True, nth=-1)
-            scene = await log.next("rqZuUc", timeout_s=15.0)  # Flow wraps the clips in a scene
+            started = await log.next("fZytfe", timeout_s=60.0)
+            scene = await log.next("rqZuUc", timeout_s=2.0)  # sent first; usually queued already
             if scene is not None:
                 scene_id = opt_index(decode_batch(scene.text).get("rqZuUc"), 0, 0)
                 self.last_scene_id = scene_id if isinstance(scene_id, str) else None
-            started = await log.next("fZytfe", timeout_s=60.0)
             credits, media = (extend_started(decode_batch(started.text).get("fZytfe"))
                               if started is not None and started.status < 400 else (None, []))
             if not media:

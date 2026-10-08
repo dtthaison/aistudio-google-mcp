@@ -17,13 +17,15 @@ from aistudio.exceptions import AIStudioError, NotFoundError, SchemaDriftError
 from aistudio.paths import Profile
 
 CACHE_TTL = 3600
+RECHECK_S = 300  # a cached copy older than this is refetched once when it lacks an exact id
 
 
 def normalize_model_id(value: str) -> str:
     return value.strip().removeprefix("models/").lower()
 
 
-def _read_cache(profile: Profile, now: float) -> Any:
+def _read_cache(profile: Profile, now: float) -> tuple[Any, float] | None:
+    """The cached response and when it was fetched, if the cache is fresh."""
     if not profile.models.exists():
         return None
     try:
@@ -35,7 +37,7 @@ def _read_cache(profile: Profile, now: float) -> Any:
     fetched_at = data.get("fetched_at")
     if not isinstance(fetched_at, (int, float)) or not 0 <= now - fetched_at <= CACHE_TTL:
         return None
-    return data.get("response")
+    return data.get("response"), float(fetched_at)
 
 
 async def load_catalog(
@@ -46,18 +48,26 @@ async def load_catalog(
     now: Callable[[], float] = time.time,
     tz: tzinfo | None = None,
 ) -> list[Model]:
+    models, _, _ = await _load(client, profile, refresh=refresh, now=now, tz=tz)
+    return models
+
+
+async def _load(client: AIStudioClient, profile: Profile, *, refresh: bool,
+                now: Callable[[], float], tz: tzinfo | None) -> tuple[list[Model], float, bool]:
+    """``(models, fetched_at, fetched_now)``: the cache is read and parsed once."""
     if not refresh:
         cached = _read_cache(profile, now())
         if cached is not None:
             try:
-                return decode_models(cached, tz=tz)
+                return decode_models(cached[0], tz=tz), cached[1], False
             except SchemaDriftError:
                 pass  # written by an older decoder or damaged: refetch
     raw = await client.models.fetch_raw()
     models = decode_models(raw, tz=tz)
+    fetched_at = now()
     profile.ensure()
-    write_private_json(profile.models, {"fetched_at": now(), "response": raw})
-    return models
+    write_private_json(profile.models, {"fetched_at": fetched_at, "response": raw})
+    return models, fetched_at, True
 
 
 def filter_models(
@@ -134,6 +144,7 @@ async def get_model(
     # Refetch when the cached copy lacks the exact id: a cached prefix match (e.g. a -preview)
     # must not hide a model released within the cache hour.
     models = await catalog_with(client, profile, lambda ms: any(m.id == wanted for m in ms),
+                                near=lambda ms: any(m.id.startswith(wanted) for m in ms),
                                 refresh=refresh, now=now, tz=tz)
     # Spec §2.1: ids may be abbreviated to a unique prefix.
     model = pick(models, lambda m: m.id, wanted, noun="model", hint='see "aistudio models list"')
@@ -145,16 +156,20 @@ async def catalog_with(
     profile: Profile,
     found: Callable[[list[Model]], bool],
     *,
+    near: Callable[[list[Model]], bool] | None = None,
     refresh: bool = False,
     now: Callable[[], float] = time.time,
     tz: tzinfo | None = None,
 ) -> list[Model]:
-    """The catalog, fetched once more when the cached copy lacks what ``found`` looks for
-    (e.g. a model released within the cache hour)."""
-    from_cache = not refresh and _read_cache(profile, now()) is not None
-    models = await load_catalog(client, profile, refresh=refresh, now=now, tz=tz)
-    if from_cache and not found(models):  # a fresh network copy is not fetched twice
-        models = await load_catalog(client, profile, refresh=True, now=now, tz=tz)
+    """The catalog, fetched once more when the cached copy lacks what ``found`` looks for (e.g.
+    a model released within the cache hour). When a cached copy younger than ``RECHECK_S``
+    already has something ``near`` it (an abbreviated id's match), it is used as it is, so
+    abbreviations do not refetch on every call."""
+    models, fetched_at, fetched_now = await _load(client, profile, refresh=refresh, now=now,
+                                                  tz=tz)
+    recent_match = near is not None and near(models) and now() - fetched_at <= RECHECK_S
+    if not fetched_now and not found(models) and not recent_match:
+        models, _, _ = await _load(client, profile, refresh=True, now=now, tz=tz)
     return models
 
 

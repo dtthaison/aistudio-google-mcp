@@ -232,3 +232,14 @@ async def test_a_prompt_that_never_reaches_the_editor_is_not_sent(fake_ui):
         await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert "nothing was sent" in info.value.message
     assert ("key", "Enter") not in ui.ops
+
+
+async def test_a_cut_prompt_is_not_sent(fake_ui):
+    # Plan C review M1: 90% of the length is not the whole prompt.
+    from aistudio.exceptions import BrowserError
+
+    text = "Generate exactly 1 video of a red apple rolling slowly across a wooden kitchen table."
+    ui = fake_ui(texts={PROMPT_EDITOR: [text[:-6]]})
+    with pytest.raises(BrowserError):
+        await FlowPage(ui, now=Clock()).submit_for_quote(text)
+    assert ("key", "Enter") not in ui.ops

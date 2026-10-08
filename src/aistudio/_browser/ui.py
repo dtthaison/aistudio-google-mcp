@@ -126,10 +126,6 @@ def _methods(url: str) -> list[str]:
     return [parsed.path.rsplit("/", 1)[-1]]
 
 
-def _method(url: str) -> str:
-    return _methods(url)[0]
-
-
 async def _collapsed(locator: Any) -> str:
     return " ".join(((await locator.inner_text()) or "").split())
 

@@ -383,3 +383,14 @@ async def test_a_characters_image_id_is_not_an_ingredient(logged_in_profile, tmp
                             out=tmp_path / "a.mp4", **kw)
     assert "--character" in info.value.hint
     assert not any(c[0] == "submit" for c in pages[0].calls)
+
+
+
+def test_avif_heic_and_unknown_image_bytes():
+    # Plan C review M7: an ftyp image is not a video; unknown bytes are not called JPEG.
+    from aistudio._app.flow import _type_of
+
+    assert _type_of("image", b"\x00\x00\x00\x1cftypavif\x00") == ("image/avif", ".avif")
+    assert _type_of("image", b"\x00\x00\x00\x18ftypheic\x00") == ("image/heic", ".heic")
+    assert _type_of("image", b"GIF89a....") == ("application/octet-stream", ".bin")
+    assert _type_of("video", b"\x00\x00\x00\x18ftypisom") == ("video/mp4", ".mp4")

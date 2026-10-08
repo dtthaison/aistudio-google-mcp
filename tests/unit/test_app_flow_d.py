@@ -293,3 +293,26 @@ async def test_the_result_names_the_characters_image(logged_in_profile, tmp_path
     kw, _, _ = harness(credits=(1010, 1010))
     result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
     assert result["media_id"] == "i9"
+
+
+
+async def test_a_failed_description_character_names_it(logged_in_profile, tmp_path):
+    # Plan C review M8: the spent-hint named a character id as "media".
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010))
+
+    async def broken(description):
+        pages[-1].paid_media = ["c1"]
+        raise BrowserError("closed")
+
+    original = kw["page_factory"]
+
+    def factory(ui):
+        page = original(ui)
+        page.start_character = broken
+        return page
+
+    kw["page_factory"] = factory
+    with pytest.raises(BrowserError) as info:
+        await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
+    assert "character c1" in info.value.hint and "'Robot'" in info.value.hint

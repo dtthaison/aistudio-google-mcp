@@ -81,6 +81,7 @@ async def flow_generate(
     ingredients: list[str] | None = None,
     i_have_rights: bool = False,
     characters: list[str] | None = None,
+    on_start: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt:
@@ -93,6 +94,8 @@ async def flow_generate(
     check_options(kind, flow_model, aspect, count, duration)
     _check_output(out, count or 1, overwrite)
     warnings: list[str] = []
+    if on_start:
+        on_start()
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         project_id = await _open(page, profile, project_id)
@@ -537,8 +540,9 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
             price = check_direct_spend("character", model, max_credits)  # before any spend
             try:
                 outcome = await page.start_character(description or "")
-            except Exception as exc:
-                raise _spent(exc, page.paid_media, project_id) from exc
+            except Exception as exc:  # Start may have spent and made the character
+                made = page.paid_media[0] if page.paid_media else None
+                raise _character_made(exc, made, name) from exc
             cid, media = outcome.character_id, outcome.media
             image_id = media[0].media_id if media else None
             try:
@@ -826,9 +830,15 @@ def _type_of(kind: str, data: bytes) -> tuple[str, str]:
         return "image/jpeg", ".jpg"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp", ".webp"
-    if data[4:8] == b"ftyp" or kind == "video":
+    if kind == "image" and data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand in (b"avif", b"avis"):
+            return "image/avif", ".avif"
+        if brand in (b"heic", b"heix", b"mif1"):
+            return "image/heic", ".heic"
+    if kind == "video":
         return "video/mp4", ".mp4"
-    return "image/jpeg", ".jpg"
+    return "application/octet-stream", ".bin"  # unknown image bytes: never call them JPEG
 
 
 def _normal_suffix(suffix: str) -> str:

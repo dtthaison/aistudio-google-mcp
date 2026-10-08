@@ -289,3 +289,45 @@ async def test_on_start_runs_only_after_validation(logged_in_profile, fake_ui, t
                              browser=browser_with(fake_ui(), []),
                              on_start=lambda: started.append(1))
     assert started == []
+
+
+@respx.mock
+async def test_extra_parts_are_numbered_in_order(logged_in_profile, make_client, fake_ui,
+                                                 captured, tmp_path):
+    # Plan C review M6: jpg, png, jpg -> x.jpg, x-2.png, x-3.jpg.
+    serve_catalog(captured)
+    response = json.loads(captured("GenerateContent", 4).raw["response"]["body"])
+    first, finish = response[0]
+    png = json.loads(json.dumps(first))
+    png[0][0][0][0][0][2] = ["image/png", base64.b64encode(b"\x89PNG second").decode()]
+    body = json.dumps([[first, png, first, finish]])
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo",
+                       media_ui(fake_ui, captured, 4, body=body), [], make_client,
+                       out=tmp_path / "x.jpg")
+    assert [Path(f["path"]).name for f in result["files"]] == ["x.jpg", "x-2.png", "x-3.jpg"]
+
+
+@respx.mock
+async def test_on_start_runs_on_success(logged_in_profile, make_client, fake_ui, captured,
+                                        tmp_path):
+    serve_catalog(captured)
+    started = []
+    await run(generate_image, logged_in_profile(), "A red apple on a white table, studio photo",
+              media_ui(fake_ui, captured, 4), [], make_client, out=tmp_path / "a.jpg",
+              on_start=lambda: started.append(1))
+    assert started == [1]
+
+
+@respx.mock
+async def test_an_unknown_model_fails_before_the_browser(logged_in_profile, make_client, fake_ui,
+                                                        captured, tmp_path):
+    from aistudio.exceptions import AIStudioError
+
+    serve_catalog(captured)
+    opened, started = [], []
+    with pytest.raises(AIStudioError):
+        await run(generate_image, logged_in_profile(), "x", media_ui(fake_ui, captured, 4),
+                  opened, make_client, model="no-such-model", out=tmp_path / "a.jpg",
+                  on_start=lambda: started.append(1))
+    assert opened == [] and started == []
