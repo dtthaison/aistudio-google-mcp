@@ -41,13 +41,21 @@ from aistudio._flow.rows import (
 )
 from aistudio._flow.wire import decode_batch, payloads
 from aistudio._rpc.wire import opt_index
-from aistudio.exceptions import BrowserError, NotFoundError, ServerError, WaitTimeoutError
+from aistudio.exceptions import (
+    BrowserError,
+    NotFoundError,
+    PlanMismatchError,
+    ServerError,
+    WaitTimeoutError,
+)
 
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
 PROJECT_ID = re.compile(r"/project/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 PROMPT_EDITOR = "flow-rich-text-editor.prompt-input .ProseMirror"
 AGENT_MESSAGE = ".agent-message-content"
+PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission request
+_SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
 TITLE = "Editable text"
 TUNE = "Settings"
 NEW_PROJECT = re.compile(r"New project")
@@ -279,13 +287,21 @@ class FlowPage:
         raise BrowserError("Flow still shows a waiting request after Reject",
                            hint="press Reject on it in Flow, never Approve")
 
-    async def approve_and_follow(self, *, count: int, timeout_s: float,
+    async def approve_and_follow(self, *, count: int, credits: int, timeout_s: float,
                                  kind: str) -> FlowOutcome:
+        """Approve the one waiting request, only if it shows the cost that was checked."""
         waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Approve")) if ok]
         if len(waiting) != 1:  # the quote just read must be the only request that can be approved
             raise BrowserError(f"found {len(waiting)} waiting Approve options, not exactly one; "
                                "nothing was spent",
                                hint="re-run; if it persists, check Flow's chat for old requests")
+        # Live: the agent can ask twice in one run; the waiting request may not be the quote read.
+        shown = _SHOWN_COST.search(await self._ui.text_of(PERMISSION_LAST))
+        shown_credits = int(shown.group(1).replace(",", "")) if shown else None
+        if shown_credits != credits:
+            raise PlanMismatchError(f"Flow's waiting request shows {shown_credits} credits, not "
+                                    f"the {credits} that were checked; nothing was spent",
+                                    hint="re-run to get a fresh quote")
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True

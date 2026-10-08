@@ -6,6 +6,7 @@ from aistudio._browser.ui import CapturedResponse
 from aistudio._flow.page import (
     AGENT_MESSAGE,
     NEW_SESSION,
+    PERMISSION_LAST,
     PROMPT_EDITOR,
     TUNE,
     Defaults,
@@ -19,6 +20,8 @@ PID = "72df29b1-e119-4741-ad44-ba18bc1ad34a"
 QUOTED = ("I'm going to generate an 8-second video using Veo 3.1 - Lite. Would you like me to "
           "kick off this 1 video generation, costing 10 credits? Approve Always approve Reject")
 
+
+ASKING = "Would you like me to kick off this 1 video generation, costing 10 credits? Approve"
 
 class Clock:
     def __init__(self):
@@ -106,9 +109,9 @@ async def test_approve_presses_only_the_single_approve_option(fake_ui):
     done = record(status=3)
     ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1040, [record(status=2, with_links=False)]])],
                   "as29s": [poll("as29s", done)]},
-                 labels={("radio", r"^Approve$"): [["Approve"]]})
+                 texts={PERMISSION_LAST: [ASKING]})
     outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
-        count=1, timeout_s=60, kind="video")
+        count=1, credits=10, timeout_s=60, kind="video")
     assert ("activate", "radio", "Approve", 0) in ui.ops
     assert [m.media_id for m in outcome.media] == [MEDIA]
     assert (outcome.credits_left, outcome.timed_out) == (1040, False)
@@ -117,17 +120,17 @@ async def test_approve_presses_only_the_single_approve_option(fake_ui):
 async def test_a_late_running_poll_does_not_undo_done(fake_ui):
     ui = fake_ui({"as29s": [poll("as29s", record(status=3))],
                   "jwpduf": [poll("jwpduf", [None, 1040, [record(status=2, with_links=False)]])]},
-                 labels={("radio", r"^Approve$"): [["Approve"]]})
+                 texts={PERMISSION_LAST: [ASKING]})
     outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
-        count=1, timeout_s=60, kind="video")
+        count=1, credits=10, timeout_s=60, kind="video")
     assert not outcome.timed_out and outcome.media[0].status == 3
 
 
 async def test_follow_times_out_with_what_it_saw(fake_ui):
     ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1040, [record(status=2, with_links=False)]])]},
-                 labels={("radio", r"^Approve$"): [["Approve"]]})
+                 texts={PERMISSION_LAST: [ASKING]})
     page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
-    outcome = await page.approve_and_follow(count=1, timeout_s=5, kind="video")
+    outcome = await page.approve_and_follow(count=1, credits=10, timeout_s=5, kind="video")
     assert outcome.timed_out and [m.media_id for m in outcome.media] == [MEDIA]
     assert page.paid_media == [MEDIA]
 
@@ -138,9 +141,9 @@ async def test_older_media_in_the_project_is_never_taken_for_this_job(fake_ui):
                             poll("as29s", record(status=3))],
                   "bOKtO": [poll("bOKtO", record(media_id=old, status=7,
                                                  created=CREATED - 86_400))]},
-                 labels={("radio", r"^Approve$"): [["Approve"]]})
+                 texts={PERMISSION_LAST: [ASKING]})
     outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
-        count=1, timeout_s=60, kind="video")
+        count=1, credits=10, timeout_s=60, kind="video")
     assert [m.media_id for m in outcome.media] == [MEDIA] and not outcome.timed_out
 
 
@@ -148,9 +151,9 @@ async def test_a_video_is_ready_only_with_its_video_link(fake_ui):
     poster_only = record(status=3)
     poster_only[5][11] = None  # no video link yet, only the poster image
     ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1040, [poster_only]])]},
-                 labels={("radio", r"^Approve$"): [["Approve"]]})
+                 texts={PERMISSION_LAST: [ASKING]})
     outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
-        count=1, timeout_s=5, kind="video")
+        count=1, credits=10, timeout_s=5, kind="video")
     assert outcome.timed_out
 
 
@@ -251,9 +254,9 @@ async def test_approve_presses_the_one_waiting_request(fake_ui):
     from aistudio._browser.ui import CapturedResponse
 
     ui = fake_ui({"jwpduf": [CapturedResponse("jwpduf", 200, "", "")]},
-                 enabled={("radio", "Approve"): [[False, True]]})
+                 enabled={("radio", "Approve"): [[False, True]]}, texts={PERMISSION_LAST: [ASKING]})
     page = FlowPage(ui, now=Clock(), clock=lambda: 0)
-    await page.approve_and_follow(count=1, timeout_s=2, kind="video")
+    await page.approve_and_follow(count=1, credits=10, timeout_s=2, kind="video")
     assert ("activate", "radio", "Approve", 1) in ui.ops and page.started
 
 
@@ -263,7 +266,7 @@ async def test_approve_refuses_two_waiting_requests(fake_ui):
     ui = fake_ui(enabled={("radio", "Approve"): [[True, True]]})
     page = FlowPage(ui, now=Clock())
     with pytest.raises(BrowserError) as info:
-        await page.approve_and_follow(count=1, timeout_s=2, kind="video")
+        await page.approve_and_follow(count=1, credits=10, timeout_s=2, kind="video")
     assert "nothing was spent" in info.value.message and not page.started
     assert not any(op[:3] == ("activate", "radio", "Approve") for op in ui.ops)
 
@@ -274,3 +277,17 @@ async def test_reject_presses_every_waiting_request_and_only_those(fake_ui):
     await FlowPage(ui).reject()
     assert [op for op in ui.ops if op[0] == "activate"] == [
         ("activate", "radio", "Reject", 1), ("activate", "radio", "Reject", 2)]
+
+
+
+async def test_approve_checks_the_cost_flow_shows(fake_ui):
+    # Live: the agent asked twice in one run; the request still waiting can differ from the
+    # quote that was checked, so the cost it shows must match before Approve is pressed.
+    from aistudio.exceptions import PlanMismatchError
+
+    ui = fake_ui(texts={PERMISSION_LAST: [ASKING.replace("10 credits", "20 credits")]})
+    page = FlowPage(ui, now=Clock())
+    with pytest.raises(PlanMismatchError) as info:
+        await page.approve_and_follow(count=1, credits=10, timeout_s=5, kind="video")
+    assert "20" in info.value.message and not page.started
+    assert not any(op[:3] == ("activate", "radio", "Approve") for op in ui.ops)

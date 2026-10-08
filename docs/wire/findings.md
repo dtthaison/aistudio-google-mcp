@@ -525,3 +525,7 @@ blocked; the RPCs that went through are free.
   and focus plus Enter on it attached the **first** character (`21f9fe8d`, caught by the slot-3
   check). Typing the name into "Search assets" leaves it as the only, highlighted option, and the
   click then attaches it (slot 3 carried `5f54e5a5`; quote 10 credits, rejected).
+- **Answered and superseded requests stay in the chat** with `aria-disabled` radios. One run with
+  a character showed two 10-credit requests: the first disabled, the second waiting. Approve and
+  Reject must act only on enabled radios. Before Approve, aistudio checks that the waiting
+  request shows the cost it checked ("costing N credits").

@@ -73,7 +73,7 @@ class FakePage:
         if self.reject_error:
             raise self.reject_error
 
-    async def approve_and_follow(self, *, count, timeout_s, kind):
+    async def approve_and_follow(self, *, count, credits, timeout_s, kind):
         if self.approve_error:  # refused before pressing Approve
             raise self.approve_error
         self.started = True

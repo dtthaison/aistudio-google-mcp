@@ -187,8 +187,9 @@ async def flow_generate(
                                       hint=f"nothing was spent; re-run with --max-credits "
                                            f"{turn.quote.credits} to accept")
             try:
-                outcome = await page.approve_and_follow(count=wanted.count, timeout_s=timeout_s,
-                                                        kind=kind)
+                outcome = await page.approve_and_follow(count=wanted.count,
+                                                        credits=turn.quote.credits,
+                                                        timeout_s=timeout_s, kind=kind)
             except Exception as exc:
                 if not page.started:  # refused before Approve: decline the waiting request
                     waiting = await _reject_noting(page)
