@@ -10,12 +10,17 @@ import click
 
 from aistudio._app.flow import (
     flow_character,
+    flow_characters,
     flow_credits,
     flow_download,
     flow_extend,
     flow_generate,
     flow_media,
     flow_projects,
+    flow_rename_character,
+    flow_scene_download,
+    flow_scenes,
+    flow_stitch,
 )
 from aistudio._flow.models import ASPECTS, MODELS
 from aistudio.cli.error_handler import handle_errors
@@ -88,6 +93,8 @@ def _command(kind: str) -> click.Command:
     @click.option("--i-have-rights", is_flag=True,
                   help="Confirm you have the rights to the local files you pass; Flow asks this "
                        "before any upload.")
+    @click.option("--character", "characters", multiple=True,
+                  help="A Flow character to feature, by unique name or id (repeatable).")
     @click.option("--visible", is_flag=True, help="Show the browser window.")
     @json_option
     @click.pass_obj
@@ -101,6 +108,7 @@ def _command(kind: str) -> click.Command:
             stderr.print(f"Asking Flow in a {window} Chrome window…", markup=False)
         out = options.pop("out")
         options["ingredients"] = list(options.pop("ingredient"))
+        options["characters"] = list(options["characters"])
         result = asyncio.run(flow_generate(
             state.profile(), kind, content, out=out, overwrite=options.pop("force"),
             timeout_s=float(timeout), **{**{"duration": None}, **options}))
@@ -196,7 +204,12 @@ def character() -> None:
 
 
 @character.command("create")
-@click.argument("description")
+@click.argument("name")
+@click.argument("description", required=False)
+@click.option("--photo", help="Make the character from this image: a file or a Flow media id "
+                              "(free; nothing is generated).")
+@click.option("--i-have-rights", is_flag=True,
+              help="Confirm you have the rights to the local photo; Flow asks this before upload.")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
 @click.option("--max-credits", type=click.IntRange(0),
               help="Needed only when aistudio's price table says the character costs credits.")
@@ -206,14 +219,120 @@ def character() -> None:
 @json_option
 @click.pass_obj
 @handle_errors
-def character_create(state: CliState, description: str, project: str | None,
-                     max_credits: int | None, out: Path | None, force: bool, visible: bool,
-                     json_output: bool) -> None:
-    """Create a character from DESCRIPTION (Flow charges without a quote; see the price table)."""
+def character_create(state: CliState, name: str, description: str | None, photo: str | None,
+                     i_have_rights: bool, project: str | None, max_credits: int | None,
+                     out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
+    """Create a character called NAME from DESCRIPTION, or from --photo.
+
+    Names are unique per project: --character picks characters by name. From a description Flow
+    charges without a quote (see the price table); from a photo nothing is generated."""
     state.require_browser()
-    _finish(asyncio.run(flow_character(state.profile(), description, max_credits=max_credits,
-                                       project=project, out=out, overwrite=force,
-                                       visible=visible)), json_output)
+    result = asyncio.run(flow_character(
+        state.profile(), name, description, photo=photo, i_have_rights=i_have_rights,
+        max_credits=max_credits, project=project, out=out, overwrite=force, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"Created character {data['character_id']} ({data['name']})", markup=False)
+        _render_files(data)
+
+    emit(result, json_output=json_output, render=render)
+
+
+@character.command("list")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_list(state: CliState, project: str | None, visible: bool,
+                   json_output: bool) -> None:
+    """Characters in a Flow project, with ids and names for --character (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_characters(state.profile(), project=project, visible=visible))
+    emit(result, json_output=json_output, render=lambda d: [
+        stdout.print(f"{c['id']}  {c['name']}{'' if c['media_id'] else '  (no image)'}",
+                     markup=False) for c in d["characters"]])
+
+
+@character.command("rename")
+@click.argument("character_id")
+@click.argument("name")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_rename(state: CliState, character_id: str, name: str, project: str | None,
+                     visible: bool, json_output: bool) -> None:
+    """Rename a character (free). Names are unique per project."""
+    state.require_browser()
+    result = asyncio.run(flow_rename_character(state.profile(), character_id, name,
+                                               project=project, visible=visible))
+    emit(result, json_output=json_output, render=lambda d: stdout.print(
+        f"Renamed {d['character_id']} to {d['name']}", markup=False))
+
+
+@flow.group("scene")
+def scene() -> None:
+    """Flow scenes: clips joined into one video (free)."""
+
+
+@scene.command("list")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def scene_list(state: CliState, project: str | None, visible: bool, json_output: bool) -> None:
+    """Scenes in a Flow project, with their clips in order (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_scenes(state.profile(), project=project, visible=visible))
+    emit(result, json_output=json_output, render=lambda d: [
+        stdout.print(f"{s['id']}  {s['title'] or '(untitled)'}  {len(s['clips'])} clip(s), "
+                     f"{sum(c['seconds'] for c in s['clips'])} s", markup=False)
+        for s in d["scenes"]])
+
+
+@scene.command("stitch")
+@click.argument("clips", nargs=-1, required=True)
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("-o", "--out", type=click.Path(path_type=Path), help="Output MP4 file.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--timeout", type=click.IntRange(10), default=300, show_default=True,
+              help="Seconds to wait for Flow to join the clips.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def scene_stitch(state: CliState, clips: tuple[str, ...], project: str | None, out: Path | None,
+                 force: bool, timeout: int, visible: bool, json_output: bool) -> None:
+    """Join finished video CLIPS into one MP4, in order (free).
+
+    Each clip is a media id, optionally trimmed in whole seconds: <id>@START-END."""
+    state.require_browser()
+    _finish(asyncio.run(flow_stitch(state.profile(), list(clips), project=project, out=out,
+                                    overwrite=force, timeout_s=float(timeout), visible=visible)),
+            json_output)
+
+
+@scene.command("download")
+@click.argument("scene_id")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("-o", "--out", type=click.Path(path_type=Path), help="Output MP4 file.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--timeout", type=click.IntRange(10), default=300, show_default=True,
+              help="Seconds to wait for Flow to join the clips.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def scene_download(state: CliState, scene_id: str, project: str | None, out: Path | None,
+                   force: bool, timeout: int, visible: bool, json_output: bool) -> None:
+    """Download a scene (e.g. the one "flow extend" reports) as one MP4 (free)."""
+    state.require_browser()
+    _finish(asyncio.run(flow_scene_download(state.profile(), scene_id, project=project, out=out,
+                                            overwrite=force, timeout_s=float(timeout),
+                                            visible=visible)), json_output)
 
 
 @flow.command("extend")

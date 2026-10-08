@@ -33,7 +33,8 @@ def test_flow_video_passes_every_option(logged_in_profile, monkeypatch, tmp_path
     assert calls[0] == (("video", "an apple"), {
         "model": "veo-3.1-lite", "aspect": "9:16", "count": 1, "duration": 8, "max_credits": 10,
         "project": "p1", "out": out, "overwrite": True, "timeout_s": 300.0, "visible": True,
-        "start_frame": None, "end_frame": None, "ingredients": [], "i_have_rights": False})
+        "start_frame": None, "end_frame": None, "ingredients": [], "i_have_rights": False,
+        "characters": []})
 
 
 def test_a_quote_tells_people_how_to_spend(logged_in_profile, monkeypatch):
@@ -110,8 +111,8 @@ def test_flow_character_and_extend(logged_in_profile, monkeypatch):
                         fake({"status": "done", "character_id": "c1", "files": [],
                               "credits_spent": 0, "credits_left": 1020, "model": "Nano Banana 2.1",
                               "project": "p"}, calls))
-    res = CliRunner().invoke(cli, ["flow", "character", "create", "a robot", "--json"])
-    assert res.exit_code == 0 and calls[-1][0] == ("a robot",)
+    res = CliRunner().invoke(cli, ["flow", "character", "create", "Robot", "a robot", "--json"])
+    assert res.exit_code == 0 and calls[-1][0] == ("Robot", "a robot")
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_extend",
                         fake({"status": "timeout", "media_ids": ["m2"], "credits_spent": 10,
                               "project_url": "u"}, calls))
@@ -133,3 +134,73 @@ def test_unknown_credits_say_unknown(logged_in_profile, monkeypatch):
                         fake({**DONE, "credits_left": None}, []))
     res = CliRunner().invoke(cli, ["flow", "video", "x", "--max-credits", "10"])
     assert "credits left unknown" in res.stdout and "None" not in res.stdout
+
+
+def test_character_create_passes_name_photo_and_rights(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character",
+                        fake({"status": "done", "character_id": "c7", "name": "Apple",
+                              "files": [], "credits_spent": 0, "credits_left": 1010,
+                              "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "create", "Apple", "--photo", "m3",
+                                   "--i-have-rights", "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[-1] == (("Apple", None), {
+        "photo": "m3", "i_have_rights": True, "max_credits": None, "project": None, "out": None,
+        "overwrite": False, "visible": False})
+    res = CliRunner().invoke(cli, ["flow", "character", "create", "Apple", "--photo", "m3"])
+    assert res.exit_code == 0 and "c7" in res.stdout and "Apple" in res.stdout
+
+
+def test_character_list_and_rename(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_characters", fake(
+        {"characters": [{"id": "c1", "name": "Paper boat", "media_id": "i1", "created": None},
+                        {"id": "c4", "name": "Sketch", "media_id": None, "created": None}],
+         "count": 2, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "list"])
+    assert res.exit_code == 0, res.output
+    assert "c1  Paper boat" in res.stdout and "Sketch  (no image)" in res.stdout
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_rename_character",
+                        fake({"character_id": "c1", "name": "Boat", "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "rename", "c1", "Boat", "--project", "p2"])
+    assert res.exit_code == 0 and calls[-1][0] == ("c1", "Boat")
+    assert calls[-1][1]["project"] == "p2" and "Boat" in res.stdout
+
+
+STITCHED = {"status": "done", "files": [{"path": "s.mp4", "mime_type": "video/mp4", "bytes": 9}],
+            "clips": [], "project": "p"}
+
+
+def test_scene_commands(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_stitch", fake(STITCHED, calls))
+    out = tmp_path / "s.mp4"
+    res = CliRunner().invoke(cli, ["flow", "scene", "stitch", "m1", "m2@2-5", "-o", str(out),
+                                   "--timeout", "120", "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[-1] == ((["m1", "m2@2-5"],), {"project": None, "out": out, "overwrite": False,
+                                               "timeout_s": 120.0, "visible": False})
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_scene_download",
+                        fake({**STITCHED, "scene_id": "s1"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "scene", "download", "s1"])
+    assert res.exit_code == 0 and calls[-1][0] == ("s1",) and "Wrote s.mp4" in res.stdout
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_scenes", fake(
+        {"scenes": [{"id": "s1", "title": "Untitled Scene", "created": None,
+                     "clips": [{"media_id": "m1", "title": "a", "seconds": 8}]}],
+         "count": 1, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "scene", "list"])
+    assert res.exit_code == 0 and "s1  Untitled Scene  1 clip(s), 8 s" in res.stdout
+
+
+def test_video_passes_characters(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", fake(QUOTED, calls))
+    res = CliRunner().invoke(cli, ["flow", "image", "x", "--character", "Paper boat",
+                                   "--character", "c2", "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[-1][1]["characters"] == ["Paper boat", "c2"]
