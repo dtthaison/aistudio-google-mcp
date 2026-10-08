@@ -8,12 +8,15 @@ out in a minimized window.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from aistudio._browser.ui import ResponseLog, Ui
 from aistudio._flow.models import ASPECTS
@@ -23,16 +26,21 @@ from aistudio._flow.rows import (
     ProjectContents,
     Quote,
     character_id,
+    character_name,
     credits_left,
     decode_contents,
     decode_projects,
     extend_started,
+    linked_image,
     media_records,
     parse_permission,
+    sent_characters,
+    stitch_job,
+    stitch_state,
 )
 from aistudio._flow.wire import decode_batch, payloads
 from aistudio._rpc.wire import opt_index
-from aistudio.exceptions import BrowserError, NotFoundError
+from aistudio.exceptions import BrowserError, NotFoundError, ServerError, WaitTimeoutError
 
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
@@ -73,6 +81,9 @@ SAVE = "Save"  # the tune panel keeps changes only after Save (live probe)
 SAVE_METHOD = "Kcr7Ub"  # the save call Save sends
 SAVE_TIMEOUT_S = 10.0
 MEDIA_METHODS = ("as29s", "jwpduf", "bOKtO")
+CHARACTERS_TAB = re.compile(r"Characters$")  # the + panel's tab (mat-list-item, role=tab)
+STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
+_STITCH_RUNNING, _STITCH_DONE = 2, 3
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
 
@@ -91,6 +102,7 @@ class Defaults:
 class AgentTurn:
     text: str
     quote: Quote | None
+    characters: tuple[str, ...] = ()  # character ids sent with the request that was quoted
 
 
 @dataclass(frozen=True)
@@ -230,7 +242,8 @@ class FlowPage:
                 for _, payload in payloads(response.text):
                     quote = parse_permission(payload)
                     if quote is not None:
-                        return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote)
+                        return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
+                                         tuple(sent_characters(response.request_body)))
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
 
@@ -321,6 +334,68 @@ class FlowPage:
         await self._ui.pause(800)
         await self._ui.dispatch_click("menuitem", ADD_TO_PROMPT)
         await self._ui.pause(800)
+
+    async def attach_character(self, name: str) -> None:
+        """Attach a character from the + panel's Characters tab (Flow lists them by name only)."""
+        await self._ui.activate("button", INGREDIENTS, exact=True)
+        await self._ui.pause(1500)
+        await self._ui.dispatch_click("tab", CHARACTERS_TAB)
+        await self._ui.pause(1500)
+        await self._ui.dispatch_click("option", name, exact=True)  # attaches and closes (live)
+        await self._ui.pause(800)
+
+    async def rename_character(self, project_id: str, character_id: str, name: str) -> None:
+        args = [[project_id, character_id, None, [1, name]], [["entity_info.display_name"]]]
+        status, text = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
+        if status >= 400 or character_name(decode_batch(text).get("rzMKMb")) != name:
+            raise BrowserError(f"Flow did not rename character {character_id}",
+                               hint="check its name in Flow's Characters; re-run to retry")
+
+    async def create_character_record(self, project_id: str, name: str) -> str:
+        """An empty, named character (free; what "Add from project" sends first)."""
+        status, text = await self._ui.batch_rpc(
+            "C4BZMd", json.dumps([[project_id, None, None, [1, name, []]]]))
+        cid = character_id(decode_batch(text).get("C4BZMd")) if status < 400 else None
+        if cid is None:
+            raise BrowserError("Flow did not create the character",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return cid
+
+    async def link_photo(self, project_id: str, character_id: str, media_id: str) -> str:
+        """Make a project image the character's image; returns the copy Flow makes (free)."""
+        args = [media_id, None, None, project_id, None, None, None,
+                [None, None, [character_id, [0]]], None,
+                str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper()]  # client ids, as the page
+        status, text = await self._ui.batch_rpc("Sc7aEb", json.dumps(args))
+        image = linked_image(decode_batch(text).get("Sc7aEb")) if status < 400 else None
+        if image is None:
+            raise BrowserError(f"Flow created character {character_id} but did not add the photo",
+                               hint="add one in Flow's Characters, or rename it; re-running "
+                                    "makes another character")
+        return image
+
+    async def stitch(self, clips: list[list[Any]], *, timeout_s: float) -> bytes:
+        """Join clips ``[media_id, None, [start], [end]]`` into one MP4 ("Download scene")."""
+        status, text = await self._ui.batch_rpc("GjQLTd", json.dumps([clips]))
+        job = stitch_job(decode_batch(text).get("GjQLTd")) if status < 400 else None
+        if job is None:
+            raise BrowserError("Flow did not start stitching the clips",
+                               hint="re-run; if it persists, the Flow UI changed")
+        deadline = self._now() + timeout_s
+        while self._now() < deadline:
+            await self._ui.pause(STITCH_POLL_MS)
+            status, text = await self._ui.batch_rpc("IxdSwd", json.dumps([[[job]]]))
+            if status >= 400:
+                continue
+            state, data = stitch_state(decode_batch(text).get("IxdSwd"))
+            if state in (None, _STITCH_RUNNING):
+                continue
+            if state == _STITCH_DONE and data:
+                return base64.b64decode(data)
+            raise ServerError(f"Flow could not stitch the clips (state {state})",
+                              hint="check the clips in Flow; nothing was spent")
+        raise WaitTimeoutError("Flow was still stitching when --timeout passed",
+                               hint="re-run with a larger --timeout; nothing was spent")
 
     async def open_character(self, project_id: str) -> str:
         """Open the character page and return the image model it will use (its picker)."""
