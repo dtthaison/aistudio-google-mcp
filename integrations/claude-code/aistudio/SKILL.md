@@ -98,8 +98,10 @@ quotes and write each `'` as `'\''`.
   file. It answers Flow's "Rights to use this image" question for them.
 - Flow character names are unique per project (Flow attaches characters by name). If
   `--character` says several characters share a name, show the user `flow character list` and ask
-  which one to rename; never pick one yourself. A `PLAN_MISMATCH` about characters means Flow's
-  request carried other characters: it was rejected and nothing was spent.
+  which one to rename; never pick one yourself. A `PLAN_MISMATCH` about characters or media means
+  Flow's request carried other attachments than asked (e.g. a leftover in Flow's prompt box): it
+  was rejected and nothing was spent. Tell the user to check the prompt box in Flow before a
+  re-run. A character's image id is not an ingredient: use `--character` instead.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   Stitch trims are whole seconds (`<id>@2-5`).
 - `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
