@@ -31,7 +31,7 @@ from aistudio._flow.rows import (
     parse_permission,
 )
 from aistudio._flow.wire import decode_batch, payloads
-from aistudio.exceptions import BrowserError, NotFoundError, ServerError
+from aistudio.exceptions import BrowserError, NotFoundError
 
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
@@ -73,7 +73,6 @@ SAVE_TIMEOUT_S = 10.0
 MEDIA_METHODS = ("as29s", "jwpduf", "bOKtO")
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
-_RUNNING = (1, 2)
 
 
 @dataclass(frozen=True)
@@ -279,8 +278,12 @@ class FlowPage:
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             await self._ui.choose_file("button", UPLOAD_MEDIA, path)
-            await self._ui.pause(1500)
-            await self._ui.dispatch_click("button", AGREE)
+            # Flow asks "Rights to use this image" only on a first upload (live).
+            for _ in range(10):
+                await self._ui.pause(500)
+                if await self._ui.visible("button", AGREE, exact=True):
+                    await self._ui.dispatch_click("button", AGREE)
+                    break
             if await log.next("maseQ", timeout_s=120.0) is None:
                 raise BrowserError(f"Flow did not upload {path.name}",
                                    hint="re-run; if it persists, the Flow UI changed")
@@ -396,11 +399,8 @@ class FlowPage:
                     seen[media.media_id] = _merge(old, media) if old else media
                     if media.media_id not in self.paid_media:
                         self.paid_media.append(media.media_id)
-                    if media.status not in (None, _DONE, *_RUNNING):
-                        raise ServerError(f"Flow could not make media {media.media_id} "
-                                          f"(status {media.status})",
-                                          hint="check the project in Flow; credits may be "
-                                               "refunded")
+                    # Statuses other than done mean "not finished" here: Flow also reports
+                    # queued (6) before running (2), so only the deadline ends the wait.
             ready = [m for m in seen.values()
                      if m.status == _DONE and (m.video_url if kind == "video" else m.image_url)]
             if len(ready) >= count:
@@ -420,10 +420,10 @@ class FlowPage:
 
 
 def _merge(old: FlowMedia, new: FlowMedia) -> FlowMedia:
-    """Later responses fill in what earlier ones lacked (links arrive with as29s); a status
-    never goes backwards, since a late "running" poll can follow the "done" record."""
+    """Later responses fill in what earlier ones lacked (links arrive with as29s); "done" never
+    goes back, since a late "running" or "queued" poll can follow the "done" record."""
     merged = {field: getattr(new, field) if getattr(new, field) is not None
               else getattr(old, field) for field in old.__dataclass_fields__}
-    if old.status is not None and new.status is not None:
-        merged["status"] = max(old.status, new.status)
+    if _DONE in (old.status, new.status):  # done is final; codes are not ordered (6 = queued)
+        merged["status"] = _DONE
     return FlowMedia(**merged)

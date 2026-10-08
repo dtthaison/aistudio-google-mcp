@@ -41,3 +41,15 @@ def test_extend_started_reads_credits_and_new_media():
     credits, media = extend_started([None, 1020, [["w2"]], [record(media_id="m2")]])
     assert credits == 1020 and [m.media_id for m in media] == ["m2"]
     assert extend_started(None) == (None, [])
+
+
+def test_a_character_image_in_its_recorded_shape():
+    # Live ogiZ0b (2026-10-08): the link sits in row[6], not in a details list at row[5].
+    row = ["5663ce6f-0720-4aff-988e-b7d07351008a", None, "9472694e-e599-455f-b7fb-01f122d155b1",
+           None, None, None,
+           [[None, 416771161, None, None, None, None, 1, "a robot", 36, None, None,
+             "9472694e-e599-455f-b7fb-01f122d155b1", None, IMAGE, 3,
+             [None, None, [["a robot", None, [[["a robot"]]]]], []], None,
+             "5663ce6f-0720-4aff-988e-b7d07351008a"], None, [1376, 768]]]
+    (media,) = media_records("ogiZ0b", [[row], [["9472694e-e599-455f-b7fb-01f122d155b1"]]])
+    assert (media.media_id, media.image_url, media.status) == (row[0], IMAGE, 3)

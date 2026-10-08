@@ -104,10 +104,21 @@ def media_records(method: str, payload: Any) -> list[FlowMedia]:
         return []
     out = []
     for row in rows if isinstance(rows, list) else []:
-        media = _record(row)
+        media = _record(row) or (_image_row(row) if method == "ogiZ0b" else None)
         if media is not None:
             out.append(media)
     return out
+
+
+def _image_row(row: Any) -> FlowMedia | None:
+    """A character image (ogiZ0b, live): ``[media_id, null, workflow_id, …, [[…, link, 3]]]``."""
+    media_id = opt_index(row, 0)
+    if not isinstance(media_id, str) or not media_id:
+        return None
+    link = next((s for s in _strings(row) if s.startswith(_IMAGE)), None)
+    return FlowMedia(media_id=media_id, project_id=None, prompt=None, model_key=None,
+                     status=3 if link else None, created=None, seconds=None, size=None,
+                     video_url=None, image_url=link)
 
 
 def credits_left(payload: Any) -> int | None:

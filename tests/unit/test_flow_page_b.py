@@ -28,7 +28,8 @@ async def test_upload_accepts_the_rights_dialog_and_returns_the_new_media(fake_u
     image = tmp_path / "apple.jpg"
     image.write_bytes(b"\xff\xd8x")
     ui = fake_ui({"maseQ": [CapturedResponse("maseQ", 200, ")]}'", "")],
-                  "as29s": [poll("as29s", record(media_id="new1"))]})
+                  "as29s": [poll("as29s", record(media_id="new1"))]},
+                 visible={("button", "I agree"): [True]})
     media_id = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).upload(image)
     assert media_id == "new1"
     assert ("choose_file", "button", "Upload media", str(image)) in ui.ops
@@ -127,3 +128,23 @@ async def test_media_details_fetch_links_from_inside_the_page(fake_ui):
     media = await FlowPage(ui).media_details(MEDIA)
     assert media.video_url and media.status == 3
     assert ("batch_rpc", "as29s", f'["{MEDIA}"]') in ui.ops
+
+
+async def test_a_queued_status_is_not_a_failure(fake_ui):
+    # Live: an extension's poll said status 6 (queued) before 2 (running) and 3 (done).
+    queued = record(media_id="m2", status=6, with_links=False)
+    ui = extend_ui(fake_ui, ("jwpduf", [poll("jwpduf", [None, 1010, [queued]])]),
+                   ("as29s", [poll("as29s", record(media_id="m2"))]))
+    outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).extend(
+        "rolls off", timeout_s=60)
+    assert [m.media_id for m in outcome.media] == ["m2"] and not outcome.timed_out
+
+
+async def test_upload_without_a_rights_dialog_still_completes(fake_ui, tmp_path):
+    # Live: Flow asks "Rights to use this image" only on a first upload.
+    image = tmp_path / "apple-start.jpg"
+    image.write_bytes(b"\xff\xd8x")
+    ui = fake_ui({"maseQ": [CapturedResponse("maseQ", 200, ")]}'", "")],
+                  "as29s": [poll("as29s", record(media_id="new2"))]})
+    assert await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).upload(image) == "new2"
+    assert ("dispatch", "button", "I agree") not in ui.ops
