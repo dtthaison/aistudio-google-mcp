@@ -64,7 +64,7 @@ class FakePage(PlanBPage):
     async def submit_for_quote(self, text, *, timeout_s=90.0):
         self.calls.append(("submit", text))
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
-                         Quote(1, "video", 10), self.turn_characters)
+                         Quote(1, "video", 10), self.turn_characters, tuple(self.attached))
 
     async def attach_character(self, name):
         self.calls.append(("attach_character", name))
@@ -416,3 +416,27 @@ async def test_create_with_personality_and_the_personality_command(logged_in_pro
     assert ("personality", "c1", "Brave") in pages[0].calls and done["personality"] == "Brave"
     with pytest.raises(NotFoundError):
         await flow_set_personality(profile, "c9", "Brave", **lists(kw))
+
+
+
+async def test_an_unnamed_character_cannot_be_attached(logged_in_profile, tmp_path):
+    # Plan E review M2: Flow's panel cannot pick a character with no name.
+    profile = profile_with_project(logged_in_profile)
+    unnamed = ProjectContents(FULL.titles, FULL.media, FULL.workflows,
+                              [*CHARS, FlowCharacter("c8", "", "i8", 60)], [SCENE])
+    kw, pages, _ = harness(contents=unnamed)
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(profile, "video", "x", characters=["c8"], out=tmp_path / "a.mp4", **kw)
+    assert "character rename c8" in info.value.hint
+    assert not any(c[0] == "attach_character" for c in pages[0].calls)
+
+
+async def test_attachments_with_a_character(logged_in_profile, tmp_path):
+    # Plan E review M7: both checks together.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness()
+    result = await flow_generate(profile, "video", "x", start_frame=IMG,
+                                 characters=["Paper boat"], out=tmp_path / "a.mp4", **kw)
+    calls = pages[0].calls
+    assert result["status"] == "quoted"
+    assert calls.index(("attach", "apple.jpg")) < calls.index(("attach_character", "Paper boat"))

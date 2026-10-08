@@ -434,3 +434,26 @@ async def test_an_extend_that_never_started_is_not_reported_as_spent(logged_in_p
     with pytest.raises(BrowserError) as info:
         await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "e.mp4", **kw)
     assert info.value.hint == "re-run"
+
+
+
+def test_avif_with_a_mif1_major_brand():
+    # Plan E review M5: an AVIF may name mif1 first and avif among its compatible brands.
+    from aistudio._app.flow import _type_of
+
+    avif = b"\x00\x00\x00\x20ftypmif1\x00\x00\x00\x00mif1avifmiaf"
+    assert _type_of("image", avif) == ("image/avif", ".avif")
+
+
+async def test_unknown_image_bytes_without_an_output_name_warn(tmp_path, monkeypatch):
+    from aistudio._app.flow import _save_all
+
+    monkeypatch.chdir(tmp_path)
+
+    async def gif(url):
+        return b"GIF89a...."
+
+    files, warnings = await _save_all("image", [media(IMG, video=False)], out=None,
+                                      overwrite=False, downloader=gif, stamp=NOW,
+                                      project_url="u")
+    assert files[0]["path"].endswith(".bin") and any("not recognised" in w for w in warnings)

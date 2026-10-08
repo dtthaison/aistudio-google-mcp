@@ -140,3 +140,12 @@ async def test_personality_sends_its_field_mask(fake_ui):
     ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [], status=500)]})
     with pytest.raises(BrowserError):
         await FlowPage(ui).set_personality(PID, "c1", "Calm")
+
+
+
+async def test_stitch_give_up_names_an_unreadable_reply(fake_ui):
+    ui = fake_ui({"GjQLTd": [rpc("GjQLTd", [None, [[JOB]]])],
+                  "IxdSwd": [CapturedResponse("IxdSwd", 200, "garbage", "") for _ in range(9)]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=10_000)
+    assert "unreadable" in info.value.message

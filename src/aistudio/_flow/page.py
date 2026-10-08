@@ -454,7 +454,9 @@ class FlowPage:
             if state is None:
                 failures += 1
                 if failures >= STITCH_FAILURES:
-                    raise BrowserError(f"Flow stopped answering about the stitch (HTTP {status})",
+                    last = f"HTTP {status}" if status >= 400 else f"HTTP {status}, unreadable"
+                    raise BrowserError(f"Flow stopped answering about the stitch (last reply "
+                                       f"{last})",
                                        hint="re-run; if it persists, sign in again with "
                                             '"aistudio login"; nothing was spent')
                 continue

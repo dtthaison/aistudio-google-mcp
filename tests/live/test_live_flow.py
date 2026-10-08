@@ -11,6 +11,7 @@ from datetime import datetime
 import pytest
 
 from aistudio._app.flow import (
+    _key,
     flow_character,
     flow_characters,
     flow_credits,
@@ -86,7 +87,7 @@ async def test_live_extend_one_clip(profile, tmp_path):
 @pytest.mark.live
 async def test_live_character_and_scene_lists(profile):
     characters = (await flow_characters(profile))["characters"]
-    assert characters and all(c["id"] and c["name"] for c in characters)
+    assert characters and all(c["id"] for c in characters)  # a name can be empty (plan E)
     scenes = (await flow_scenes(profile))["scenes"]
     assert all(s["id"] for s in scenes)
 
@@ -108,8 +109,9 @@ async def test_live_stitch_is_free(profile, tmp_path):
 @pytest.mark.live
 async def test_live_quote_with_a_character_carries_it(profile, tmp_path):
     characters = (await flow_characters(profile))["characters"]
-    names = [c["name"].casefold() for c in characters]
-    unique = [c for c in characters if c["media_id"] and names.count(c["name"].casefold()) == 1]
+    names = [_key(c["name"]) for c in characters]  # as aistudio compares names
+    unique = [c for c in characters
+              if c["media_id"] and c["name"].strip() and names.count(_key(c["name"])) == 1]
     if not unique:
         pytest.skip("no uniquely named character with an image")
     result = await flow_generate(profile, "video", "the character waves at the camera",

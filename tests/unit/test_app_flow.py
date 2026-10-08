@@ -426,3 +426,19 @@ async def test_credits_are_read_before_and_a_different_charge_warns(logged_in_pr
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, max_credits=10, out=tmp_path / "b.mp4", **kw)
     assert "warnings" not in result
+
+
+
+async def test_flow_generate_calls_on_start_before_the_browser(logged_in_profile, tmp_path):
+    # Plan E review M7: the use case itself, not only the CLI fake.
+    kw, _, opened = harness()
+    seen = []
+    await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                        duration=8, out=tmp_path / "a.mp4",
+                        on_start=lambda: seen.append(list(opened)), **kw)
+    assert seen == [[]] and opened == ["minimized"]
+    with pytest.raises(ValidationError):
+        await flow_generate(logged_in_profile(), "video", "an apple", duration=99,
+                            model="veo-3.1-lite", out=tmp_path / "b.mp4",
+                            on_start=lambda: seen.append("late"), **kw)
+    assert "late" not in seen

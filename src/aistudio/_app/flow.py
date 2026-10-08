@@ -348,8 +348,9 @@ def _attachment_titles(contents: ProjectContents | None,
             continue
         owner = next((c for c in contents.characters if c.media_id == value), None)
         if owner is not None:
-            raise ValidationError(f"{value} is the image of character {owner.name!r}",
-                                  hint=f'use --character "{owner.name}" instead; nothing was sent')
+            raise ValidationError(f"{value} is the image of character {owner.name or owner.id!r}",
+                                  hint=f'use --character "{owner.name or owner.id}" instead; '
+                                       f'nothing was sent')
         title = contents.titles.get(value)
         if title is None:
             raise NotFoundError(f"no media {value} in this Flow project",
@@ -415,6 +416,10 @@ def _characters(contents: ProjectContents, wanted: list[str]) -> list[FlowCharac
                 f"{len(same)} characters are named {found[0].name!r}",
                 hint=f'Flow attaches characters by name: rename one with "aistudio flow '
                      f'character rename {same[0].id} NEW-NAME"; nothing was sent')
+        if not found[0].name.strip():  # Flow's panel picks characters by name
+            raise ValidationError(f"character {found[0].id} has no name",
+                                  hint=f'name it first: aistudio flow character rename '
+                                       f'{found[0].id} NAME; nothing was sent')
         if found[0].media_id is None:
             raise ValidationError(f"character {found[0].name!r} has no image yet",
                                   hint="finish it in Flow first; nothing was sent")
@@ -928,6 +933,9 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
             else:
                 suffix = f"-{i + 1}" if len(media) > 1 else ""
                 path = free_name(folder / f"flow-{kind}-{stamp:%Y%m%d-%H%M%S}{suffix}{ext}")
+                if ext == ".bin":
+                    warnings.append(f"the type of {item.media_id} was not recognised; it was "
+                                    f"saved as {path.name}")
             saved = write_file(path, data, overwrite=overwrite and path == out)
             files.append({"path": str(saved), "mime_type": mime, "bytes": len(data),
                           "media_id": item.media_id})
@@ -950,10 +958,11 @@ def _type_of(kind: str, data: bytes) -> tuple[str, str]:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp", ".webp"
     if kind == "image" and data[4:8] == b"ftyp":
-        brand = data[8:12]
-        if brand in (b"avif", b"avis"):
+        size = int.from_bytes(data[:4], "big")
+        brands = [data[8:12]] + [data[i:i + 4] for i in range(16, min(size, 64), 4)]
+        if any(b in (b"avif", b"avis") for b in brands):  # AVIF may name mif1 first
             return "image/avif", ".avif"
-        if brand in (b"heic", b"heix", b"mif1"):
+        if any(b in (b"heic", b"heix", b"mif1") for b in brands):
             return "image/heic", ".heic"
     if kind == "video":
         return "video/mp4", ".mp4"
