@@ -438,3 +438,25 @@ The scratch scripts live in `/tmp` and are not kept.
   They need a known price and an explicit budget, plus a credit check before and after.
 - **Leftovers in the "aistudio" project from these probes:** an empty "Untitled character"
   record and the empty scene.
+
+### Flow plan B: measured costs and result shapes (2026-10-08, approved real runs)
+
+| Action | Model | Credits (before → after) |
+|---|---|---|
+| Character from a description | Nano Banana 2.1 | **0** (1,030 → 1,030) |
+| Extend an 8 s clip by 8 s | Veo 3.1 Lite (`veo_3_1_extension_lite`) | **10** (1,030 → 1,020) |
+
+- **Character.**
+  - `C4BZMd` → `[[project_id, character_id, null, [1, "Untitled character", []], null, null,
+    [created], [updated]]]`.
+  - `ogiZ0b` (BELUGA, the prompt, a reCAPTCHA token) → an image media record with a
+    `flow-content.google/image/…` link and size `[1376, 768]`.
+- **Extend.**
+  - `rqZuUc` `["projects/<id>", [workflow_id], null, null, 2]` creates a **scene** ("Untitled
+    Scene <date>") holding the source clip. `uwAyfb [scene_id, project_id]` reads it back.
+  - `fZytfe` starts the extension:
+    `[[[[null, source_media_id, 169, 192], [null, null, [[[[prompt]]]]], "veo_3_1_extension_lite", …`.
+    Its reply is `[null, <credits left: 1020>, [[workflow "Apple rolls off table" …]], [[media
+    record …]]]`, so the credits are charged at the start.
+  - The result is a new 8 s clip (its own media id), plus the scene joining both clips
+    (downloadable with "Download scene").
