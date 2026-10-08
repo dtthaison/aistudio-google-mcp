@@ -7,7 +7,7 @@ import pytest
 
 from aistudio._app.flow import STATE_FILE, flow_credits, flow_generate
 from aistudio._flow.page import AgentTurn, Defaults, FlowOutcome
-from aistudio._flow.rows import FlowMedia, Quote
+from aistudio._flow.rows import FlowMedia, ProjectContents, Quote
 from aistudio.exceptions import (
     AgentReplyError,
     AIStudioError,
@@ -78,7 +78,12 @@ class FakePage:
             raise self.reject_error
         return self.rejected
 
-    async def approve_and_follow(self, *, count, credits, timeout_s, kind):
+    async def contents(self, pid):
+        self.calls.append(("contents", pid))
+        return ProjectContents({"old1": "an older clip"}, [], {})
+
+    async def approve_and_follow(self, *, count, credits, timeout_s, kind, known=frozenset()):
+        self.known = set(known)
         if self.approve_error:  # refused before pressing Approve
             raise self.approve_error
         self.started = True
@@ -518,3 +523,11 @@ async def test_an_unmeasured_image_model_is_refused(logged_in_profile, tmp_path)
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "Nano Banana Pro" in info.value.message and "nano-banana-2.1" in info.value.hint
     assert not any(c[0] == "submit" for c in pages[0].calls)
+
+
+
+async def test_a_paid_run_ignores_media_that_existed_before_it(logged_in_profile, tmp_path):
+    kw, pages, _ = harness()
+    await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                        duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "old1" in pages[0].known

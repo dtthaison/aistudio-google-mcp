@@ -351,3 +351,15 @@ async def test_credits_wait_for_the_account_menu(fake_ui):
     assert await FlowPage(ui).credits() == 1030
     ui = fake_ui(texts={"body": [""]})
     assert await FlowPage(ui).credits() is None
+
+
+
+async def test_approve_never_takes_a_clip_made_before_the_run(fake_ui):
+    # Two runs back to back: the first clip is inside the 120 s slack of the second.
+    earlier = record(media_id="00000000-0000-0000-0000-00000000aaaa", created=CREATED - 60)
+    ui = fake_ui({"as29s": [poll("as29s", earlier), poll("as29s", record(status=3))]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    outcome = await page.approve_and_follow(count=1, credits=10, timeout_s=60, kind="video",
+                                            known={"00000000-0000-0000-0000-00000000aaaa"})
+    assert [m.media_id for m in outcome.media] == [MEDIA]

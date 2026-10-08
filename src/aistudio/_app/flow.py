@@ -104,7 +104,11 @@ async def flow_generate(
         page = page_factory(ui)
         before = await page.credits()  # free models generate without asking (plan F)
         project_id = await _open(page, profile, project_id)
-        contents = await page.contents(project_id) if attachments or characters else None
+        paid_possible = max_credits is not None
+        contents = (await page.contents(project_id)
+                    if attachments or characters or paid_possible else None)
+        existing = (set(contents.titles) | {m.media_id for m in contents.media}
+                    if contents is not None else set())
         titles, known_ids = _attachment_titles(contents, attachments)
         chosen = _characters(contents, characters or []) if contents is not None else []
         previous = await page.read_defaults(kind)
@@ -209,7 +213,8 @@ async def flow_generate(
                 try:
                     outcome = await page.approve_and_follow(count=wanted.count,
                                                             credits=turn.quote.credits,
-                                                            timeout_s=timeout_s, kind=kind)
+                                                            timeout_s=timeout_s, kind=kind,
+                                                            known=existing)
                 except Exception as exc:
                     if not page.started:  # refused before Approve: decline the waiting request
                         waiting = await _reject_noting(page)

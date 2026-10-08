@@ -317,7 +317,8 @@ class FlowPage:
                            hint="press Reject on it in Flow, never Approve")
 
     async def approve_and_follow(self, *, count: int, credits: int, timeout_s: float,
-                                 kind: str) -> FlowOutcome:
+                                 kind: str, known: set[str] | frozenset[str] = frozenset()
+                                 ) -> FlowOutcome:
         """Approve the one waiting request, only if it shows the cost that was checked."""
         flags = await self._ui.enabled("radio", "Approve")
         waiting = [i for i, ok in enumerate(flags) if ok]
@@ -338,7 +339,9 @@ class FlowPage:
             since = self._clock()
             self.started = True
             await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
-            return await self._follow(log, count, timeout_s, kind, since)
+            # ``known``: media that existed before the run, which a back-to-back run's clip
+            # (inside the creation-time slack) would otherwise be taken for.
+            return await self._follow(log, count, timeout_s, kind, since, exclude=known)
 
     async def projects(self) -> list[FlowProject]:
         async with self._ui.responses(marker=FLOW_RPC) as log:
