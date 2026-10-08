@@ -95,7 +95,10 @@ class FakePage:
 
     async def credits(self):
         self.calls.append(("credits",))
-        return self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
+        value = self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     async def media_details(self, media_id):
         self.calls.append(("details", media_id))
@@ -531,3 +534,75 @@ async def test_a_paid_run_ignores_media_that_existed_before_it(logged_in_profile
     await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                         duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert "old1" in pages[0].known
+
+
+
+def made(*items):
+    from aistudio._flow.rows import Generated
+
+    return tuple(Generated(media_id, "success", "image", model, "16:9")
+                 for media_id, model in items)
+
+
+async def test_an_unverified_model_is_noted(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("done", None, generated=made(("g1", None))),
+                       credit_values=(5, 5))
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert any("did not name the model" in w for w in result["warnings"])
+
+
+async def test_a_free_stream_still_running_is_a_timeout(logged_in_profile, tmp_path):
+    from aistudio.exceptions import WaitTimeoutError
+
+    kw, _, _ = harness(turn=AgentTurn("I'm going to generate", None, generating=True))
+    with pytest.raises(WaitTimeoutError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+    assert "still generating" in info.value.message and "re-running" in info.value.hint
+
+
+async def test_charge_wording_is_neutral(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("done", None, generated=made(("g1", "Nano Banana 2.1"))),
+                       credit_values=(10, 8))
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert any(w.startswith("credits fell by 2 during this run") for w in result["warnings"])
+
+
+async def test_a_failed_credit_read_does_not_block_a_quote(logged_in_profile, tmp_path):
+    kw, _, _ = harness(credit_values=(BrowserError("menu did not open"), 1040))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "quoted"
+    assert any("could not read Flow credits before" in w for w in result["warnings"])
+
+
+async def test_a_hint_never_starts_with_a_separator(logged_in_profile, tmp_path):
+    kw, _, _ = harness(approve_error=BrowserError("found 2 waiting Approve options; nothing was "
+                                                  "spent"), rejected=0)
+    with pytest.raises(BrowserError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert info.value.hint and not info.value.hint.startswith(";")
+
+
+async def test_free_media_beside_a_quote_are_mentioned(logged_in_profile, tmp_path):
+    turn = AgentTurn(TEXT, Quote(1, "video", 10), generated=made(("g7", "Nano Banana 2.1")))
+    kw, _, _ = harness(turn=turn)
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    assert any("g7" in w for w in result["warnings"])
+
+
+async def test_saving_errors_keep_the_free_runs_warnings(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("done", None, generated=made(("g1", "Nano Banana 2.1"))),
+                       credit_values=(5, 5))
+
+    async def broken(url):
+        raise NetworkError("download failed")
+
+    kw["downloader"] = broken
+    with pytest.raises(NetworkError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                            out=tmp_path / "x.png", **kw)
+    assert "without asking" in info.value.hint

@@ -272,20 +272,7 @@ def agent_generated(items: list[Any]) -> list[Generated]:
     """``generate_*`` tool results in StreamChat payloads, joined to their calls by placeholder:
     ``["generate_image", "generate_image", [[["media_id", [None, None, id]], …]], placeholder]``.
     """
-    calls: dict[Any, dict[str, Any]] = {}
-    results: dict[str, tuple[str, dict[str, Any]]] = {}
-    for payload in items:
-        for node in _lists(payload):
-            if (len(node) >= 3 and isinstance(node[0], str) and node[0].startswith("generate_")
-                    and node[1] == node[0] and isinstance(node[2], list)):
-                values = {pair[0]: pair[1][-1] for pair in opt_index(node, 2, 0) or []
-                          if isinstance(pair, list) and len(pair) == 2
-                          and isinstance(pair[0], str) and isinstance(pair[1], list) and pair[1]}
-                media_id = values.get("media_id")
-                if isinstance(media_id, str) and media_id:
-                    results[media_id] = (node[0], values)
-                else:
-                    calls[values.get("placeholder_frontend_id")] = values
+    calls, results = _generate_nodes(items)
     out = []
     for media_id, (name, values) in results.items():
         call = calls.get(values.get("placeholder_frontend_id"), {})
@@ -295,6 +282,35 @@ def agent_generated(items: list[Any]) -> list[Generated]:
                              _plain(model) if isinstance(model, str) else None,
                              _str(call.get("aspect_ratio"))))
     return out
+
+
+def agent_pending(items: list[Any]) -> bool:
+    """A ``generate_*`` call with no result yet: Flow is still making it (free models)."""
+    calls, results = _generate_nodes(items)
+    done = {values.get("placeholder_frontend_id") for _, values in results.values()}
+    return any(placeholder not in done for placeholder in calls)
+
+
+def _generate_nodes(items: list[Any]) -> tuple[dict[Any, dict[str, Any]],
+                                               dict[str, tuple[str, dict[str, Any]]]]:
+    """Calls by placeholder (later nodes add keys, never erase them) and results by media id."""
+    calls: dict[Any, dict[str, Any]] = {}
+    results: dict[str, tuple[str, dict[str, Any]]] = {}
+    for payload in items:
+        for node in _lists(payload):
+            if (len(node) >= 3 and isinstance(node[0], str) and node[0].startswith("generate_")
+                    and node[1] == node[0] and isinstance(node[2], list)):
+                values = {pair[0]: pair[1][-1] for pair in opt_index(node, 2, 0) or []
+                          if isinstance(pair, list) and len(pair) == 2
+                          and isinstance(pair[0], str) and isinstance(pair[1], list) and pair[1]}
+                values.setdefault("placeholder_frontend_id", opt_index(node, 3))
+                media_id = values.get("media_id")
+                if isinstance(media_id, str) and media_id:
+                    results[media_id] = (node[0], values)
+                else:
+                    merged = calls.setdefault(values.get("placeholder_frontend_id"), {})
+                    merged.update({k: v for k, v in values.items() if v is not None})
+    return calls, results
 
 
 def _plain(label: str) -> str:

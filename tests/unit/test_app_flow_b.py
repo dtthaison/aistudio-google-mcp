@@ -239,7 +239,7 @@ async def test_a_cost_different_from_the_table_is_a_warning(logged_in_profile, t
     result = await flow_extend(profile, VID, "rolls off", max_credits=10,
                                out=tmp_path / "x.mp4", **kw)
     assert result["status"] == "done" and result["credits_spent"] == 12
-    assert result["warnings"] == ["Flow charged 12 credits; aistudio's table says 10"]
+    assert result["warnings"] == ["credits fell by 12 during this run; aistudio's table says 10"]
     assert (tmp_path / "x.mp4").exists() and result["files"][0]["media_id"] == "m2"
 
 

@@ -40,6 +40,7 @@ from aistudio.exceptions import (
     SchemaDriftError,
     ServerError,
     ValidationError,
+    WaitTimeoutError,
 )
 from aistudio.paths import Profile
 
@@ -103,7 +104,12 @@ async def flow_generate(
     free: tuple[list[Any], list[str]] | None = None
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await page.credits()  # free models generate without asking (plan F)
+        try:  # free models generate without asking (plan F); a quote does not need this read
+            before = await page.credits()
+        except Exception:  # noqa: BLE001 - only used to report a charge
+            before = None
+        if before is None:
+            warnings.append("could not read Flow credits before the run")
         project_id = await _open(page, profile, project_id)
         paid_possible = max_credits is not None
         contents = (await page.contents(project_id)
@@ -167,6 +173,10 @@ async def flow_generate(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect))
+            if turn.quote is None and not turn.generated and turn.generating:
+                raise WaitTimeoutError("Flow was still generating (free) when aistudio stopped "
+                                       "waiting", hint="nothing was charged by asking; check the "
+                                                       "project in Flow before re-running")
             if turn.quote is None and not turn.generated:
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
@@ -176,23 +186,23 @@ async def flow_generate(
                                        attached_ids, [c.id for c in chosen])
                 waiting = await _reject_noting(page, expect=False)  # a later ask for the rest
                 if waiting:
-                    free[1].append(waiting[2:])
+                    free[1].append(waiting)
             else:
                 if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
                     waiting = await _reject_noting(page)
                     raise PlanMismatchError(
                         f"Flow's request carries media {list(turn.media) or 'none'}, "
                         f"not {attached_ids or 'none'} (in that order)",
-                        hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
-                             f"re-run{waiting}")
+                        hint=_with_note("nothing was spent; check the prompt box's attachments in "
+                                        "Flow, then re-run", waiting))
                 wanted_ids = {c.id for c in chosen}
                 if set(turn.characters) != wanted_ids:
                     waiting = await _reject_noting(page)
                     raise PlanMismatchError(
                         f"Flow's request carries characters {sorted(turn.characters) or 'none'}, "
                         f"not {sorted(wanted_ids) or 'none'}",
-                        hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
-                             f"re-run{waiting}")
+                        hint=_with_note("nothing was spent; check the prompt box's attachments in "
+                                        "Flow, then re-run", waiting))
                 expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
                                 duration)
                 decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
@@ -202,22 +212,24 @@ async def flow_generate(
                     note = await _reject_noting(page)
                     declined = not note
                     if note:
-                        wrong = [*wrong, f"{note[2:]} (the settings were restored)"]
+                        wrong = [*wrong, f"{note} (the settings were restored)"]
+                    wrong = wrong + [f"Flow also made {g.media_id} without asking (free)"
+                                     for g in turn.generated]
                     return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
                             "count": turn.quote.count, "plan": turn.text, "project": project_id,
                             **({"uploads": uploads} if uploads else {}),
-                            **({"warnings": wrong} if wrong else {})}
+                            **({"warnings": warnings + wrong} if warnings or wrong else {})}
                 if decision is Decision.REJECT_MISMATCH:
                     waiting = await _reject_noting(page)
-                    raise PlanMismatchError("; ".join(wrong), hint=f"nothing was spent; adjust "
-                                                                   f"the flags or the prompt"
-                                                                   f"{waiting}")
+                    raise PlanMismatchError("; ".join(wrong), hint=_with_note(
+                        "nothing was spent; adjust the flags or the prompt", waiting))
                 if decision is Decision.REJECT_OVER_BUDGET:
                     waiting = await _reject_noting(page)
                     raise OverBudgetError(f"Flow quotes {turn.quote.credits} credits, over "
                                           f"--max-credits {max_credits}",
-                                          hint=f"nothing was spent; re-run with --max-credits "
-                                               f"{turn.quote.credits} to accept{waiting}")
+                                          hint=_with_note(f"nothing was spent; re-run with "
+                                                          f"--max-credits {turn.quote.credits} "
+                                                          f"to accept", waiting))
                 try:
                     outcome = await page.approve_and_follow(count=wanted.count,
                                                             credits=turn.quote.credits,
@@ -227,7 +239,7 @@ async def flow_generate(
                     if not page.started:  # refused before Approve: decline the waiting request
                         waiting = await _reject_noting(page)
                         if waiting and isinstance(exc, AIStudioError):
-                            exc.hint = f"{exc.hint or ''}{waiting}"
+                            exc.hint = _with_note(exc.hint, waiting)
                         raise
                     # Approve may have spent: name the media, never invite a re-run
                     raise _spent(exc, page.paid_media, project_id) from exc
@@ -246,10 +258,15 @@ async def flow_generate(
         media, notes = free
         notes = free_notes + notes
         spent, charge_notes = _free_charge(before, after)
-        files, saved_notes = await _save_all(kind, media, out=out, overwrite=overwrite,
-                                             downloader=downloader, stamp=now(),
-                                             project_url=project_url)
-        warnings = notes + charge_notes + warnings + saved_notes
+        warnings = notes + charge_notes + warnings
+        try:
+            files, saved_notes = await _save_all(kind, media, out=out, overwrite=overwrite,
+                                                 downloader=downloader, stamp=now(),
+                                                 project_url=project_url)
+        except AIStudioError as exc:  # the run's notes must not be lost with the download
+            exc.hint = _with_note(exc.hint, "; ".join(warnings))
+            raise
+        warnings += saved_notes
         named = next((g.model for g in turn.generated if g.model), None)
         model_id = label_to_id(named or wanted.model)  # the settings' model made it otherwise
         return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
@@ -257,8 +274,8 @@ async def flow_generate(
                 **({"warnings": warnings} if warnings else {})}
     if (before is not None and outcome.credits_left is not None
             and before - outcome.credits_left != turn.quote.credits):
-        warnings.append(f"Flow charged {before - outcome.credits_left} credits; the quote was "
-                        f"{turn.quote.credits}")
+        warnings.append(f"credits fell by {before - outcome.credits_left} during this run; the "
+                        f"quote was {turn.quote.credits}")
     if outcome.timed_out:
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": turn.quote.credits,
@@ -299,6 +316,8 @@ async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any
               for g in turn.generated if g.status != "success"]
     if len(made) != count:
         notes.append(f"Flow made {len(made)} {kind}(s), not {count}")
+    if any(g.model is None for g in made):
+        notes.append("Flow did not name the model it used; it was not checked")
     if flow_model is not None:
         notes += [f"Flow used {g.model}, not {flow_model.label}"
                   for g in made if g.model and g.model != flow_model.label]
@@ -329,7 +348,8 @@ def _free_charge(before: int | None, after: int | None) -> tuple[int | None, lis
     if before is None or after is None:
         return None, ["could not read Flow credits around the run; the charge was not verified"]
     spent = before - after
-    return spent, ([f"Flow charged {spent} credits without asking"] if spent else [])
+    return spent, ([f"credits fell by {spent} during this run, which Flow did not quote"]
+                   if spent else [])
 
 
 _MEDIA_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -410,8 +430,13 @@ async def _reject_noting(page: Any, *, expect: bool = True) -> str:
     try:
         pressed = await page.reject(expect=expect)
     except BrowserError:
-        return f"; {_STILL_WAITING}"
-    return f"; {_STILL_WAITING}" if expect and not pressed else ""
+        return _STILL_WAITING
+    return _STILL_WAITING if expect and not pressed else ""
+
+
+def _with_note(hint: str | None, note: str) -> str | None:
+    """A hint with a note appended ("a; b"), never starting with the separator."""
+    return "; ".join(part for part in (hint, note) if part) or None
 
 
 _NAME_MAX = 100
@@ -552,7 +577,7 @@ def _cost_warning(before: int | None, after: int | None, price: int) -> tuple[in
         return price, [f"could not read Flow credits around the run; the charge (table price "
                        f"{price}) was not verified"]
     spent = before - after
-    note = ([f"Flow charged {spent} credits; aistudio's table says {price}"]
+    note = ([f"credits fell by {spent} during this run; aistudio's table says {price}"]
             if spent != price else [])
     return spent, note
 

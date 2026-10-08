@@ -27,6 +27,7 @@ from aistudio._flow.rows import (
     ProjectContents,
     Quote,
     agent_generated,
+    agent_pending,
     character_id,
     character_name,
     credits_left,
@@ -131,6 +132,7 @@ class AgentTurn:
     characters: tuple[str, ...] = ()  # character ids sent with the request that was quoted
     media: tuple[str, ...] = ()  # attached media ids sent with it
     generated: tuple[Generated, ...] = ()  # made without asking (free models)
+    generating: bool = False  # a free generation was still running when the wait ended
 
 
 @dataclass(frozen=True)
@@ -283,7 +285,8 @@ class FlowPage:
                                      tuple(sent_characters(body)), tuple(sent_media(body)),
                                      tuple(generated))
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
-        return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
+        return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
+                         generating=agent_pending(seen))
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an

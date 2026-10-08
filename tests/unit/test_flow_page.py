@@ -363,3 +363,14 @@ async def test_approve_never_takes_a_clip_made_before_the_run(fake_ui):
     outcome = await page.approve_and_follow(count=1, credits=10, timeout_s=60, kind="video",
                                             known={"00000000-0000-0000-0000-00000000aaaa"})
     assert [m.media_id for m in outcome.media] == [MEDIA]
+
+
+
+async def test_a_turn_notes_a_generation_still_running(fake_ui):
+    # Plan F review M7: a call without a result means Flow is still making it (free).
+    from tests.unit.test_flow_rows import generated_call
+
+    ui = fake_ui({"StreamChat": [chat(stream(generated_call()))]},
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 image."], AGENT_MESSAGE: ["..."]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 image.")
+    assert turn.quote is None and turn.generating

@@ -135,3 +135,19 @@ def test_a_record_names_its_workflow():
 
     (media,) = media_records("as29s", record())
     assert media.workflow_id == "wf"
+
+
+
+def test_a_later_node_does_not_overwrite_the_call():
+    # Plan F review M2: a progress node without media_id must not erase the call's model.
+    from aistudio._flow.rows import agent_generated
+
+    progress = [[None, [["e3", None, None, ["generate_image", "generate_image",
+                                            [[["placeholder_frontend_id", [None, None, "ph1"]],
+                                              ["progress", [None, None, "50%"]]]], "ph1"]]],
+                 "e3"]]
+    result = generated_result()
+    pairs = result[0][1][0][4][2][0]
+    result[0][1][0][4][2][0] = [p for p in pairs if p[0] != "placeholder_frontend_id"]
+    (made,) = agent_generated([generated_call(), progress, result])  # joined by node[3]
+    assert (made.model, made.aspect) == ("Nano Banana 2.1", "16:9")
