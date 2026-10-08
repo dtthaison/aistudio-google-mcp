@@ -77,7 +77,7 @@ ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
 CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
-BODY_MODE = "Clear prompt"  # shown once body mode is on (findings)
+BODY_MODE = "Ingredient"  # shown only in body mode, with or without an earlier body (live)
 EDIT_MODEL_KEY = "abra_edit"  # the model key of a clip an Omni edit makes (live)
 # The clip editor's own box: "Describe how to edit this video… add pen_magic Omni 1.1 Flash →"
 _EDIT_MODEL = re.compile(r"Describe how to edit this video…\s+(?:add\s+)?(?:pen_magic\s+)?"

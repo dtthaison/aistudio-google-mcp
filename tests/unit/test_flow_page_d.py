@@ -171,7 +171,7 @@ async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
     ui = fake_ui({"ogiZ0b": [rpc("ogiZ0b", [[IMAGE_ROW]])]},
                  inner={("button", CHARACTER_MODEL): [picker]},
                  texts={EDITOR_LAST: ["full body on a dock"]},
-                 visible={("button", "Clear prompt"): [True]},
+                 visible={("button", "Ingredient"): [True]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
     page = FlowPage(ui, now=Clock())
     assert await page.open_body(PID, "c1") == "Nano Banana 2.1"

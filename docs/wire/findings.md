@@ -587,7 +587,9 @@ blocked; the RPCs that went through are free.
   when both reads sit right around one action.
 - **Character model picker.** "Select model family" → `menuitem` "🍌 Nano Banana Pro" (or 2 Lite or
   2.1) switches the picker for this character. Start then sends `C4BZMd` + `ogiZ0b` as for 2.1.
-- **Create body.** On a character page, "Create body" switches the prompt box to body mode: Upload,
-  Add from project, an Ingredient chip and Clear prompt. Typing a prompt and pressing Start sent
+- **Create body.** On a character page, "Create body" switches the prompt box to body mode. The
+  first time it shows Upload, Add from project, an Ingredient chip and Clear prompt. For a
+  character that already has a body, only the "Ingredient" button appears, so that is the
+  body-mode marker. Typing a prompt and pressing Start sent
   `WuwhI`, a reCAPTCHA reload and `ogiZ0b`. The reply is the body image (a new media), at 0
   credits on Nano Banana 2.1.
