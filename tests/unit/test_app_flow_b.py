@@ -116,6 +116,9 @@ class FakePage:
         self.calls.append(("character", description))
         return CharacterOutcome("c1", [media("i9", video=False)])
 
+    async def rename_character(self, pid, cid, name):
+        self.calls.append(("rename", cid, name))
+
 
 def harness(**page_kw):
     pages, opened = [], []
@@ -232,12 +235,12 @@ async def test_character_is_free_and_downloads_its_image(logged_in_profile, tmp_
     profile = logged_in_profile()
     store(profile)
     kw, pages, _ = harness(credits=(1020, 1020))
-    result = await flow_character(profile, "a robot", out=tmp_path / "robot.png", **kw)
+    result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "robot.png", **kw)
     assert result["character_id"] == "c1" and result["credits_spent"] == 0
     assert (tmp_path / "robot.png").exists()
     kw, pages, _ = harness(character_model="Nano Banana Pro")
     with pytest.raises(ValidationError):
-        await flow_character(profile, "a robot", out=tmp_path / "r2.png", **kw)
+        await flow_character(profile, "Robot", "a robot", out=tmp_path / "r2.png", **kw)
     assert not any(c[0] == "character" for c in pages[0].calls)
 
 

@@ -23,7 +23,7 @@ from aistudio._flow.models import (
     model_by_label,
 )
 from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
-from aistudio._flow.rows import parse_plan
+from aistudio._flow.rows import FlowCharacter, ProjectContents, parse_plan
 from aistudio._fs import read_json, write_private_json
 from aistudio._media.save import check_folder, free_name, write_file
 from aistudio.exceptions import (
@@ -80,6 +80,7 @@ async def flow_generate(
     end_frame: str | None = None,
     ingredients: list[str] | None = None,
     i_have_rights: bool = False,
+    characters: list[str] | None = None,
 ) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt:
@@ -95,7 +96,9 @@ async def flow_generate(
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         project_id = await _open(page, profile, project_id)
-        titles, known_ids = await _attachment_titles(page, project_id, attachments)
+        contents = await page.contents(project_id) if attachments or characters else None
+        titles, known_ids = _attachment_titles(contents, attachments)
+        chosen = _characters(contents, characters or []) if contents is not None else []
         previous = await page.read_defaults(kind)
         if not previous.asks:
             raise ValidationError(
@@ -118,9 +121,14 @@ async def flow_generate(
                     known_ids.add(media_id)  # its late as29s record is not the next upload
                     uploads.append({"file": value.name, "media_id": media_id})
                 await page.attach(title)
+            for chosen_character in chosen:
+                await page.attach_character(chosen_character.name)
             if attachments:
                 roles = ", ".join(role for role, _ in attachments)
                 prompt = f"Use the attached images, in order, as: {roles}. {prompt}"
+            if chosen:
+                names = ", ".join(c.name for c in chosen)
+                prompt = f"Feature the attached characters: {names}. {prompt}"
             turn = await page.submit_for_quote(instruction(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
@@ -129,6 +137,13 @@ async def flow_generate(
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
                                            "spent")
+            wanted_ids = {c.id for c in chosen}
+            if set(turn.characters) != wanted_ids:
+                waiting = await _reject_noting(page)
+                raise PlanMismatchError(
+                    f"Flow's request carries characters {sorted(turn.characters) or 'none'}, "
+                    f"not {sorted(wanted_ids) or 'none'}",
+                    hint=f"nothing was spent; re-run{waiting}")
             expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
                             duration)
             decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
@@ -223,14 +238,12 @@ def _attachments(start_frame: str | None, end_frame: str | None, ingredients: li
     return out
 
 
-async def _attachment_titles(page: Any, project_id: str,
-                             attachments: list[tuple[str, Path | str]]
-                             ) -> tuple[list[str], set[str]]:
+def _attachment_titles(contents: ProjectContents | None,
+                       attachments: list[tuple[str, Path | str]]) -> tuple[list[str], set[str]]:
     """The grid titles to attach by, checked before anything is uploaded or sent: attach works
     by title, so each title must name exactly one media in the project."""
-    if not attachments:
+    if not attachments or contents is None:
         return [], set()
-    contents = await page.contents(project_id)
     by_title: dict[str, list[str]] = {}
     for media_id, title in contents.titles.items():
         by_title.setdefault(title, []).append(media_id)
@@ -254,6 +267,61 @@ async def _attachment_titles(page: Any, project_id: str,
                                        "nothing was sent")
         titles.append(title)
     return titles, set(contents.titles) | {m.media_id for m in contents.media}
+
+
+async def _reject_noting(page: Any) -> str:
+    """Reject Flow's waiting request; if that fails, the hint must say it is still waiting."""
+    try:
+        await page.reject()
+    except BrowserError:
+        return "; Flow's request is still waiting: press Reject on it in Flow, never Approve"
+    return ""
+
+
+_NAME_MAX = 100
+_CLIP = re.compile(r"^(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+                   r"(?:@(?P<start>\d+)-(?P<end>\d+))?$")
+
+
+def _name(value: str) -> str:
+    name = " ".join(value.split())
+    if not name or len(name) > _NAME_MAX:
+        raise ValidationError(f"a character name needs 1 to {_NAME_MAX} characters")
+    return name
+
+
+def _free_name(contents: ProjectContents, name: str, *, keep: str | None = None) -> None:
+    """Names are unique per project (case-insensitively): Flow attaches characters by name."""
+    taken = [c for c in contents.characters
+             if c.name.casefold() == name.casefold() and c.id != keep]
+    if taken:
+        raise ValidationError(f"character {taken[0].id} is already named {taken[0].name!r}",
+                              hint="choose another name; --character picks characters by name")
+
+
+def _characters(contents: ProjectContents, wanted: list[str]) -> list[FlowCharacter]:
+    """Characters by id or name, checked before anything is sent: each must have an image and
+    a name no other character shares (the + panel lists them by name only)."""
+    out = []
+    for value in wanted:
+        value = " ".join(value.split())
+        found = ([c for c in contents.characters if c.id == value]
+                 or [c for c in contents.characters if c.name.casefold() == value.casefold()])
+        if not found:
+            raise NotFoundError(f"no character {value!r} in this Flow project",
+                                hint='see "aistudio flow character list"; nothing was sent')
+        same = [c for c in contents.characters if c.name.casefold() == found[0].name.casefold()]
+        if len(same) > 1:
+            raise ValidationError(
+                f"{len(same)} characters are named {found[0].name!r}",
+                hint=f'Flow attaches characters by name: rename one with "aistudio flow '
+                     f'character rename {same[0].id} NEW-NAME"; nothing was sent')
+        if found[0].media_id is None:
+            raise ValidationError(f"character {found[0].name!r} has no image yet",
+                                  hint="finish it in Flow first; nothing was sent")
+        if found[0] not in out:
+            out.append(found[0])
+    return out
 
 
 def _spent(exc: Exception, media_ids: list[str], project_id: str) -> AIStudioError:
@@ -385,6 +453,8 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         except Exception as exc:  # the click spent credits; never invite a re-run
             raise _spent(exc, page.paid_media, project_id) from exc
         after, read_notes = await _credits_after(page, outcome.credits_left)
+        new_ids = page.paid_media or [m.media_id for m in outcome.media]
+        scene_id = await _scene_holding(page, project_id, new_ids) or page.last_scene_id
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     project_url = PROJECT_URL.format(id=project_id)
@@ -398,44 +468,238 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
                                          project_url=project_url)
     warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
-            "model": label_to_id(label), "scene_id": page.last_scene_id, "source": media_id,
+            "model": label_to_id(label), "scene_id": scene_id, "source": media_id,
             "project": project_id,
             **({"warnings": warnings} if warnings else {})}
 
 
-async def flow_character(profile: Profile, description: str, *, max_credits: int | None = None,
-                         project: str | None = None, out: Path | None = None,
-                         overwrite: bool = False, visible: bool = False,
+async def flow_character(profile: Profile, name: str, description: str | None = None, *,
+                         photo: str | None = None, i_have_rights: bool = False,
+                         max_credits: int | None = None, project: str | None = None,
+                         out: Path | None = None, overwrite: bool = False, visible: bool = False,
                          browser: Callable[..., Any] = open_browser,
                          downloader: Callable[[str], Any] = download_signed,
                          now: Callable[[], datetime] = datetime.now,
                          page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
-    """Create a character from a description (direct spend: priced from aistudio's table)."""
-    description = " ".join(description.split())
-    if not description:
-        raise ValidationError("nothing to create: the character description is empty")
+    """Create a named character from a description (direct spend, priced from aistudio's table)
+    or from a photo (free: Flow links the photo, nothing is generated)."""
+    name = _name(name)
+    description = " ".join((description or "").split()) or None
+    if (description is None) == (photo is None):
+        raise ValidationError("give the character a DESCRIPTION or a --photo (exactly one)")
+    source = (_attachments(None, None, [photo], i_have_rights)[0][1]
+              if photo is not None else None)
     project_id = _project_id(project) if project else None
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         before = await page.credits()
         project_id = await _open(page, profile, project_id)
-        model = await page.open_character(project_id)
-        price = check_direct_spend("character", model, max_credits)  # refuses before any spend
-        try:
-            outcome = await page.start_character(description)
-        except Exception as exc:
-            raise _spent(exc, page.paid_media, project_id) from exc
+        contents = await page.contents(project_id)
+        _free_name(contents, name)
+        model, notes = None, []
+        if source is not None:
+            price = 0  # measured: linking a photo generates nothing
+            media_id = await _photo_id(page, contents, source)
+            cid = await page.create_character_record(project_id, name)
+            image_id = await page.link_photo(project_id, cid, media_id)  # names cid on failure
+            image = await page.media_details(image_id)
+            media = [image] if image is not None else []
+            if image is None:
+                notes.append(f"Flow gave no link for the character's image {image_id}; "
+                             f"download it with: aistudio flow download {image_id}")
+        else:
+            model = await page.open_character(project_id)
+            price = check_direct_spend("character", model, max_credits)  # before any spend
+            try:
+                outcome = await page.start_character(description or "")
+            except Exception as exc:
+                raise _spent(exc, page.paid_media, project_id) from exc
+            cid, media = outcome.character_id, outcome.media
+            try:
+                await page.rename_character(project_id, cid, name)
+            except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
+                notes.append(f'Flow kept the name "Untitled character"; rename it with: '
+                             f'aistudio flow character rename {cid} "{name}"')
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
-    warnings = read_notes + warnings
-    files, saved_notes = await _save_all("image", outcome.media, out=out, overwrite=overwrite,
+    warnings = read_notes + warnings + notes
+    files, saved_notes = await _save_all("image", media, out=out, overwrite=overwrite,
                                          downloader=downloader, stamp=now(),
                                          project_url=PROJECT_URL.format(id=project_id))
     warnings += saved_notes
-    return {"status": "done", "character_id": outcome.character_id, "files": files,
-            "credits_spent": spent, "credits_left": after, "model": model,
+    return {"status": "done", "character_id": cid, "name": name, "files": files,
+            "credits_spent": spent, "credits_left": after,
+            **({"model": label_to_id(model)} if model else {}), "project": project_id,
+            **({"warnings": warnings} if warnings else {})}
+
+
+async def _photo_id(page: Any, contents: ProjectContents, source: Path | str) -> str:
+    """The project image to link: an existing media id, or a local file uploaded now."""
+    if isinstance(source, Path):  # --i-have-rights was checked before Chrome opened
+        _attachment_titles(contents, [("photo", source)])  # refuses a file already uploaded
+        known = set(contents.titles) | {m.media_id for m in contents.media}
+        return await page.upload(source, known_ids=known)
+    found = next((m for m in contents.media if m.media_id == source), None)
+    if found is None:
+        raise NotFoundError(f"no media {source} in this Flow project",
+                            hint='see "aistudio flow media --type image"; nothing was made')
+    if _media_kind(found) != "image":
+        raise ValidationError(f"media {source} is not an image", hint="nothing was made")
+    return source
+
+
+async def _project_contents(profile: Profile, project: str | None, visible: bool,
+                            browser: Callable[..., Any], page_factory: Callable[[Any], Any]
+                            ) -> tuple[str, ProjectContents]:
+    project_id = _project_id(project) if project else None
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        return project_id, await page.contents(project_id)
+
+
+async def flow_characters(profile: Profile, *, project: str | None = None, visible: bool = False,
+                          browser: Callable[..., Any] = open_browser,
+                          page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    project_id, contents = await _project_contents(profile, project, visible, browser,
+                                                   page_factory)
+    items = [{"id": c.id, "name": c.name, "media_id": c.media_id, "created": _iso(c.created)}
+             for c in contents.characters]
+    return {"characters": items, "count": len(items), "project": project_id}
+
+
+async def flow_rename_character(profile: Profile, character_id: str, name: str, *,
+                                project: str | None = None, visible: bool = False,
+                                browser: Callable[..., Any] = open_browser,
+                                page_factory: Callable[[Any], Any] = FlowPage
+                                ) -> dict[str, Any]:
+    name = _name(name)
+    project_id = _project_id(project) if project else None
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        if not any(c.id == character_id for c in contents.characters):
+            raise NotFoundError(f"no character {character_id} in this Flow project",
+                                hint='see "aistudio flow character list"')
+        _free_name(contents, name, keep=character_id)
+        await page.rename_character(project_id, character_id, name)
+    return {"character_id": character_id, "name": name, "project": project_id}
+
+
+async def flow_scenes(profile: Profile, *, project: str | None = None, visible: bool = False,
+                      browser: Callable[..., Any] = open_browser,
+                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    project_id, contents = await _project_contents(profile, project, visible, browser,
+                                                   page_factory)
+    items = [{"id": scene.id, "title": scene.title, "created": _iso(scene.created),
+              "clips": [{"media_id": c.media_id, "title": c.title, "seconds": c.end - c.start}
+                        for c in scene.clips]}
+             for scene in contents.scenes]
+    return {"scenes": items, "count": len(items), "project": project_id}
+
+
+def _parse_clips(values: list[str]) -> list[tuple[str, int | None, int | None]]:
+    if len(values) < 2:
+        raise ValidationError("stitching needs at least two clips")
+    out = []
+    for value in values:
+        match = _CLIP.match(value.strip())
+        if match is None:
+            raise ValidationError(f"{value!r} is not MEDIA-ID or MEDIA-ID@START-END",
+                                  hint="START and END are whole seconds, e.g. <id>@2-5")
+        out.append((match["id"], int(match["start"]) if match["start"] else None,
+                    int(match["end"]) if match["end"] else None))
+    return out
+
+
+def _clip_args(contents: ProjectContents, wanted: list[tuple[str, int | None, int | None]]
+               ) -> list[list[Any]]:
+    """``[media_id, None, [start], [end]]`` per clip (``[]`` is 0), checked against the project."""
+    by_id = {m.media_id: m for m in contents.media}
+    out = []
+    for media_id, start, end in wanted:
+        media = by_id.get(media_id)
+        if media is None:
+            raise NotFoundError(f"no media {media_id} in this Flow project",
+                                hint='see "aistudio flow media --type video"; nothing was sent')
+        if _media_kind(media) != "video" or media.status != 3 or not media.seconds:
+            raise ValidationError(f"media {media_id} is not a finished video",
+                                  hint="nothing was sent")
+        start, end = start or 0, media.seconds if end is None else end
+        if not 0 <= start < end <= media.seconds:
+            raise ValidationError(f"{media_id}@{start}-{end}: a trim must be within "
+                                  f"0-{media.seconds} seconds, with START before END",
+                                  hint="nothing was sent")
+        out.append([media_id, None, [start] if start else [], [end]])
+    return out
+
+
+async def flow_stitch(profile: Profile, clips: list[str], *, project: str | None = None,
+                      out: Path | None = None, overwrite: bool = False, timeout_s: float = 300.0,
+                      visible: bool = False, browser: Callable[..., Any] = open_browser,
+                      now: Callable[[], datetime] = datetime.now,
+                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Join finished clips, trimmed or whole, into one MP4 (Flow's "Download scene"; free)."""
+    wanted = _parse_clips(clips)
+    project_id = _project_id(project) if project else None
+    _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        args = _clip_args(await page.contents(project_id), wanted)
+        data = await page.stitch(args, timeout_s=timeout_s)
+    return _stitched(data, args, out=out, overwrite=overwrite, stamp=now(), project_id=project_id)
+
+
+async def flow_scene_download(profile: Profile, scene_id: str, *, project: str | None = None,
+                              out: Path | None = None, overwrite: bool = False,
+                              timeout_s: float = 300.0, visible: bool = False,
+                              browser: Callable[..., Any] = open_browser,
+                              now: Callable[[], datetime] = datetime.now,
+                              page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """A scene's clips, in order and with its own trims, as one MP4 (free)."""
+    project_id = _project_id(project) if project else None
+    _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        scene = next((s for s in contents.scenes if s.id == scene_id), None)
+        if scene is None:
+            raise NotFoundError(f"no scene {scene_id} in this Flow project",
+                                hint='see "aistudio flow scene list"')
+        if not scene.clips:
+            raise ValidationError(f"scene {scene_id} has no clips")
+        args = _clip_args(contents, [(c.media_id, c.start, c.end or None) for c in scene.clips])
+        data = await page.stitch(args, timeout_s=timeout_s)
+    return {**_stitched(data, args, out=out, overwrite=overwrite, stamp=now(),
+                        project_id=project_id), "scene_id": scene_id}
+
+
+def _stitched(data: bytes, args: list[list[Any]], *, out: Path | None, overwrite: bool,
+              stamp: datetime, project_id: str) -> dict[str, Any]:
+    mime, ext = _type_of("video", data)
+    path = out if out is not None else free_name(Path(f"flow-scene-{stamp:%Y%m%d-%H%M%S}{ext}"))
+    warnings = ([f"{out} holds {mime} data; its extension says otherwise"]
+                if out is not None and _normal_suffix(out.suffix) != ext else [])
+    saved = write_file(path, data, overwrite=overwrite and path == out)
+    return {"status": "done",
+            "files": [{"path": str(saved), "mime_type": mime, "bytes": len(data)}],
+            "clips": [{"media_id": a[0], "start": (a[2] or [0])[0], "end": a[3][0]}
+                      for a in args],
             "project": project_id, **({"warnings": warnings} if warnings else {})}
+
+
+async def _scene_holding(page: Any, project_id: str, media_ids: list[str]) -> str | None:
+    """The scene an extension landed in, from the project itself (never raises: paid run)."""
+    try:
+        contents = await page.contents(project_id)
+    except Exception:  # noqa: BLE001 - only a reported field; the result stands
+        return None
+    return next((scene.id for scene in contents.scenes
+                 if any(c.media_id in media_ids for c in scene.clips)), None)
 
 
 def _project_id(value: str) -> str:
