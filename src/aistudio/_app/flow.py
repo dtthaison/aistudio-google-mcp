@@ -279,6 +279,7 @@ async def _reject_noting(page: Any) -> str:
 
 
 _NAME_MAX = 100
+_FINISHED = 3
 _CLIP = re.compile(r"^(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
                    r"(?:@(?P<start>\d+)-(?P<end>\d+))?$")
 
@@ -502,8 +503,14 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
             price = 0  # measured: linking a photo generates nothing
             media_id = await _photo_id(page, contents, source)
             cid = await page.create_character_record(project_id, name)
-            image_id = await page.link_photo(project_id, cid, media_id)  # names cid on failure
-            image = await page.media_details(image_id)
+            try:
+                image_id = await page.link_photo(project_id, cid, media_id)
+            except Exception as exc:  # the named character exists now
+                raise _character_made(exc, cid, name) from exc
+            try:
+                image = await page.media_details(image_id)
+            except Exception:  # noqa: BLE001 - the character is complete; only the link is missing
+                image = None
             media = [image] if image is not None else []
             if image is None:
                 notes.append(f"Flow gave no link for the character's image {image_id}; "
@@ -516,6 +523,7 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
             except Exception as exc:
                 raise _spent(exc, page.paid_media, project_id) from exc
             cid, media = outcome.character_id, outcome.media
+            image_id = media[0].media_id if media else None
             try:
                 await page.rename_character(project_id, cid, name)
             except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
@@ -524,11 +532,15 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings + notes
-    files, saved_notes = await _save_all("image", media, out=out, overwrite=overwrite,
-                                         downloader=downloader, stamp=now(),
-                                         project_url=PROJECT_URL.format(id=project_id))
+    try:
+        files, saved_notes = await _save_all("image", media, out=out, overwrite=overwrite,
+                                             downloader=downloader, stamp=now(),
+                                             project_url=PROJECT_URL.format(id=project_id))
+    except Exception as exc:
+        raise _character_made(exc, cid, name) from exc
     warnings += saved_notes
-    return {"status": "done", "character_id": cid, "name": name, "files": files,
+    return {"status": "done", "character_id": cid, "name": name, "media_id": image_id,
+            "files": files,
             "credits_spent": spent, "credits_left": after,
             **({"model": label_to_id(model)} if model else {}), "project": project_id,
             **({"warnings": warnings} if warnings else {})}
@@ -546,7 +558,21 @@ async def _photo_id(page: Any, contents: ProjectContents, source: Path | str) ->
                             hint='see "aistudio flow media --type image"; nothing was made')
     if _media_kind(found) != "image":
         raise ValidationError(f"media {source} is not an image", hint="nothing was made")
+    if found.status not in (None, _FINISHED):  # uploads carry no status; generated images 3
+        raise ValidationError(f"image {source} is not finished (still running or failed)",
+                              hint="nothing was made; check it in Flow")
     return source
+
+
+def _character_made(exc: Exception, cid: str | None, name: str) -> AIStudioError:
+    """An error once Flow holds the new character: name it, and forbid a re-run under another
+    name (that would make a duplicate)."""
+    note = (f"Flow created character {cid or '(id not seen)'} ({name!r}); do not re-run, see "
+            f'"aistudio flow character list"')
+    if not isinstance(exc, AIStudioError):
+        return BrowserError(f"{type(exc).__name__}: {exc}", hint=note)
+    exc.hint = f"{note} ({exc.hint})" if exc.hint else note
+    return exc
 
 
 async def _project_contents(profile: Profile, project: str | None, visible: bool,

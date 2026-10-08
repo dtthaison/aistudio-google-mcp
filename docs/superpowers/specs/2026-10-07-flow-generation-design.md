@@ -321,10 +321,11 @@ character to `flow video`/`flow image`, which keeps the normal quote-and-budget 
      0–3 gave a 6.0 s file.
    - **Checks:** every id must be a finished video in the project, and there must be at least
      two clips.
-   - `scene download` takes the scene's clips from the project contents, in position order and at
-     full length.
-   - A stitch that is still running at `--timeout` (default 300 s) stops with `TIMEOUT`, exit 1.
-     Nothing was spent.
+   - `scene download` takes the scene's clips from the project contents, in position order and
+     with the scene's own trims (`[6]` slots `[2]`/`[3]`), as Flow's "Download scene" sends them
+     (plan D review ruling).
+   - A stitch that is still running at `--timeout` (default 300 s) stops with `TIMEOUT`, exit 2,
+     like every `TIMEOUT` error. Its hint says nothing was spent (plan D review ruling).
    - Any state other than running or done is a `SERVER_ERROR`.
 6. **Lists.**
    - `character list` gives `id`, `name`, `media_id` (null without an image) and `created`.

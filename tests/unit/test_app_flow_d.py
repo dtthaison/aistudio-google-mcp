@@ -19,6 +19,7 @@ from tests.unit.test_app_flow_b import harness as plan_b_harness
 
 VID2 = "5c8f0a1e-1111-4222-8333-944455556666"
 RUN = "7d9e1b2f-1111-4222-8333-944455556666"
+IMG_RUN = "8e0f2c3a-1111-4222-8333-944455556666"
 MP4 = b"\x00\x00\x00\x18ftypisom" + b"x" * 20
 CHARS = [FlowCharacter("c1", "Paper boat", "i1", 100),
          FlowCharacter("c2", "Untitled character", "i2", 90),
@@ -28,15 +29,22 @@ SCENE = FlowScene("s1", "Untitled Scene", 200,
                   [SceneClip(VID2, "the camera pulls back", 0, 8), SceneClip(VID, "apple", 2, 6)])
 FULL = ProjectContents(
     {**CONTENTS.titles, VID2: "the camera pulls back", RUN: "running"},
-    [*CONTENTS.media, listed(media(VID2)), listed(media(RUN, status=2))],
+    [*CONTENTS.media, listed(media(VID2)), listed(media(RUN, status=2)),
+     listed(media(IMG_RUN, video=False, status=2))],
     CONTENTS.workflows, CHARS, [SCENE])
 
 
 class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
-                 after=None, **kw):
+                 after=None, link_error=None, details_error=None, **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
+        self.link_error, self.details_error = link_error, details_error
+
+    async def media_details(self, media_id):
+        if self.details_error:
+            raise self.details_error
+        return await super().media_details(media_id)
 
     async def contents(self, pid):
         if self.after is not None and any(c[0] == "extend" for c in self.calls):
@@ -64,6 +72,8 @@ class FakePage(PlanBPage):
 
     async def link_photo(self, pid, cid, media_id):
         self.calls.append(("link", cid, media_id))
+        if self.link_error:
+            raise self.link_error
         return "i7"
 
     async def stitch(self, clips, *, timeout_s):
@@ -250,3 +260,36 @@ async def test_extend_reports_the_scene_holding_the_new_clip(logged_in_profile, 
     result = await flow_extend(profile, VID, "rolls off", max_credits=10,
                                out=tmp_path / "e2.mp4", **kw)
     assert result["status"] == "done" and result["scene_id"] == "s1"
+
+
+async def test_a_photo_must_be_a_finished_image(logged_in_profile, tmp_path):
+    # Final review I1: a running or failed image would leave a named character without a photo.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness()
+    with pytest.raises(ValidationError) as info:
+        await flow_character(profile, "Apple", photo=IMG_RUN, out=tmp_path / "a.png", **kw)
+    assert "nothing was made" in info.value.hint
+    assert not any(c[0] == "record" for c in pages[0].calls)
+
+
+async def test_failures_after_the_record_name_the_character(logged_in_profile, tmp_path):
+    # Final review I2: once C4BZMd made the character, no error may lose its id or invite a
+    # re-run under another name (a duplicate).
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(credits=(1010, 1010), link_error=BrowserError("closed"))
+    with pytest.raises(BrowserError) as info:
+        await flow_character(profile, "Apple", photo=IMG, out=tmp_path / "a.png", **kw)
+    text = f"{info.value.message} {info.value.hint}"
+    assert "c7" in text and "'Apple'" in text and "do not re-run" in text
+    kw, _, _ = harness(credits=(1010, 1010), details_error=BrowserError("HTTP 500"))
+    result = await flow_character(profile, "Apple", photo=IMG, out=tmp_path / "b.png", **kw)
+    assert result["status"] == "done" and result["character_id"] == "c7"
+    assert result["media_id"] == "i7" and result["files"] == []
+    assert any("i7" in w for w in result["warnings"])
+
+
+async def test_the_result_names_the_characters_image(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(credits=(1010, 1010))
+    result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
+    assert result["media_id"] == "i9"

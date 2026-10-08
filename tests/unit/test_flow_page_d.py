@@ -45,8 +45,9 @@ async def test_a_photo_character_is_created_named_then_linked(fake_ui):
 
 async def test_a_character_flow_did_not_create_is_an_error(fake_ui):
     ui = fake_ui({"C4BZMd": [rpc("C4BZMd", [], status=500)]})
-    with pytest.raises(BrowserError):
+    with pytest.raises(BrowserError) as info:
         await FlowPage(ui).create_character_record(PID, "Apple")
+    assert "character list" in info.value.hint  # it may exist: never re-run under a new name
 
 
 async def test_a_failed_link_names_the_character(fake_ui):

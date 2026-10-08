@@ -357,8 +357,9 @@ class FlowPage:
             "C4BZMd", json.dumps([[project_id, None, None, [1, name, []]]]))
         cid = character_id(decode_batch(text).get("C4BZMd")) if status < 400 else None
         if cid is None:
-            raise BrowserError("Flow did not create the character",
-                               hint="re-run; if it persists, the Flow UI changed")
+            raise BrowserError("Flow did not confirm the new character",
+                               hint='check "aistudio flow character list" for it before '
+                                    're-running (re-run with the same name, never another)')
         return cid
 
     async def link_photo(self, project_id: str, character_id: str, media_id: str) -> str:
