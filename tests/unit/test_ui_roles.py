@@ -100,7 +100,7 @@ async def test_a_missing_control_is_a_browser_error_naming_it():
     with pytest.raises(BrowserError) as info:
         await PlaywrightUi(page).fill("textbox", "Speech block text", "hi")
     assert "Speech block text" in info.value.message
-    assert "AI Studio page changed" in info.value.message
+    assert "page changed" in info.value.message and "AI Studio" not in info.value.message
 
 
 async def test_role_actions_on_a_signed_out_page_are_auth_errors():
@@ -169,3 +169,15 @@ async def test_text_checked_and_url_reads():
         "Omni 1.1 Flash arrow_drop_down")
     assert await ui.checked("radio", "16:9", nth=1) is True
     assert ui.current_url() == page.url
+
+
+async def test_read_errors_say_what_happened():
+    class Slow(Loc):
+        async def count(self):
+            raise TimeoutError("Timeout 30000ms exceeded")
+
+    page = Page({})
+    page.get_by_role = lambda role, name=None, exact=False: Slow([])
+    with pytest.raises(BrowserError) as info:
+        await PlaywrightUi(page).visible("button", "Tova")
+    assert "in time" in info.value.message and "closed" not in info.value.message

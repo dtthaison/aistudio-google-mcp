@@ -131,8 +131,9 @@ async def get_model(
     tz: tzinfo | None = None,
 ) -> dict[str, Any]:
     wanted = normalize_model_id(model_id)
-    models = await catalog_with(client, profile,
-                                lambda ms: any(m.id.startswith(wanted) for m in ms),
+    # Refetch when the cached copy lacks the exact id: a cached prefix match (e.g. a -preview)
+    # must not hide a model released within the cache hour.
+    models = await catalog_with(client, profile, lambda ms: any(m.id == wanted for m in ms),
                                 refresh=refresh, now=now, tz=tz)
     # Spec §2.1: ids may be abbreviated to a unique prefix.
     model = pick(models, lambda m: m.id, wanted, noun="model", hint='see "aistudio models list"')
@@ -150,8 +151,9 @@ async def catalog_with(
 ) -> list[Model]:
     """The catalog, fetched once more when the cached copy lacks what ``found`` looks for
     (e.g. a model released within the cache hour)."""
+    from_cache = not refresh and _read_cache(profile, now()) is not None
     models = await load_catalog(client, profile, refresh=refresh, now=now, tz=tz)
-    if not refresh and not found(models):
+    if from_cache and not found(models):  # a fresh network copy is not fetched twice
         models = await load_catalog(client, profile, refresh=True, now=now, tz=tz)
     return models
 

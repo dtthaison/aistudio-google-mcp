@@ -64,7 +64,7 @@ async def test_fill_first_uses_the_first_visible_element():
 async def test_missing_element_is_a_clear_browser_error():
     with pytest.raises(BrowserError) as info:
         await PlaywrightUi(Page([Element(False)])).fill_first("textarea", "hi", timeout_s=0.1)
-    assert "AI Studio page changed or did not load" in info.value.message
+    assert "The page changed or did not load" in info.value.message
 
 
 async def test_responses_are_logged_per_method_until_the_block_ends():

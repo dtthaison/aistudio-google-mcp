@@ -107,3 +107,9 @@ async def test_app_list_honours_limit_and_reports_skipped_entries(make_client, c
         result = await list_apps(client, limit=1)
     assert result["count"] == 1 and len(result["apps"]) == 1
     assert result["warnings"] == ["skipped 1 app entry AI Studio sent in an unknown shape"]
+
+
+def test_pick_prefers_a_case_sensitive_prefix():
+    from aistudio._app.apps import pick
+
+    assert pick(["Abc-1", "abc-2"], str, "Abc", noun="app", hint="h") == "Abc-1"

@@ -133,7 +133,7 @@ async def _aria_checked(locator: Any) -> bool:
 
 def _window_closed() -> BrowserError:
     return BrowserError(
-        "the AI Studio window was closed before aistudio finished",
+        "the browser window was closed before aistudio finished",
         hint="re-run and leave the (minimized) Chrome window open until aistudio is done",
     )
 
@@ -181,7 +181,7 @@ class PlaywrightUi:
     def _check_signed_in(self) -> None:
         host = urlparse(getattr(self._page, "url", "") or "").hostname or ""
         if host.startswith("accounts."):
-            raise AuthError("Chrome is signed out: AI Studio redirected to Google sign-in",
+            raise AuthError("Chrome is signed out: the site redirected to Google sign-in",
                             hint='run "aistudio login"')
 
     async def goto(self, url: str) -> None:
@@ -202,8 +202,8 @@ class PlaywrightUi:
                     return element
             if loop.time() >= deadline:
                 raise BrowserError(
-                    f"AI Studio page changed or did not load: no visible {selector!r}",
-                    hint="re-run; if it persists, the AI Studio UI changed and aistudio "
+                    f"The page changed or did not load: no visible {selector!r}",
+                    hint="re-run; if it persists, the site's UI changed and aistudio "
                          "needs an update",
                 )
             await asyncio.sleep(0.25)
@@ -232,9 +232,9 @@ class PlaywrightUi:
                     return
             if loop.time() >= deadline:
                 raise BrowserError(
-                    f"AI Studio's {name!r} {role} did not become available "
+                    f"The page's {name!r} {role} did not become available "
                     f"within {timeout_s:.0f}s",
-                    hint="re-run; if it persists, the AI Studio UI changed",
+                    hint="re-run; if it persists, the site's UI changed",
                 )
             await asyncio.sleep(0.25)
 
@@ -247,9 +247,9 @@ class PlaywrightUi:
             await run()
         except Exception as exc:  # playwright timeouts: the control is missing or hidden
             raise BrowserError(
-                f"AI Studio page changed or did not load: {_describe(role, name)} not found "
+                f"The page changed or did not load: {_describe(role, name)} not found "
                 f"({type(exc).__name__})",
-                hint="re-run; if it persists, the AI Studio UI changed and aistudio needs an "
+                hint="re-run; if it persists, the site's UI changed and aistudio needs an "
                      "update",
             ) from exc
 
@@ -298,8 +298,11 @@ class PlaywrightUi:
             return await run()
         except AIStudioError:
             raise
-        except Exception as exc:  # playwright errors once the page or window is gone
-            raise _window_closed() from exc
+        except Exception as exc:  # playwright errors: a closed window, or a slow page
+            if "closed" in str(exc).lower():
+                raise _window_closed() from exc
+            raise BrowserError("the page did not show what aistudio expected in time",
+                               hint="re-run; if it persists, add --visible to watch it") from exc
 
     async def pause(self, ms: int) -> None:
         await self._page.wait_for_timeout(ms)

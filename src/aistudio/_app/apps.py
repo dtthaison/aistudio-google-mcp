@@ -16,7 +16,8 @@ T = TypeVar("T")
 
 def pick(items: Sequence[T], key: Callable[[T], str], wanted: str, *, noun: str,
          hint: str) -> T:
-    """Exact match first, then ignoring case, then a unique prefix ignoring case (spec §2.1)."""
+    """Exact match first, then ignoring case, then a unique prefix (as typed, then ignoring case;
+    spec §2.1)."""
     wanted = wanted.strip()
     if not wanted:
         raise ValidationError(f"give a {noun} id or a unique prefix", hint=hint)
@@ -27,6 +28,9 @@ def pick(items: Sequence[T], key: Callable[[T], str], wanted: str, *, noun: str,
     exact = [item for item in items if key(item).casefold() == folded]
     if len(exact) == 1:
         return exact[0]
+    sensitive = [item for item in items if key(item).startswith(wanted)]
+    if not exact and len(sensitive) == 1:
+        return sensitive[0]
     matches = exact or [item for item in items if key(item).casefold().startswith(folded)]
     if len(matches) == 1:
         return matches[0]

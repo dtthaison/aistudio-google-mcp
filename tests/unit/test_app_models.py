@@ -144,3 +144,22 @@ async def test_a_model_missing_from_a_fresh_cache_is_fetched_once_more(aistudio_
         assert route.call_count == 1
         await get_model(client, profile, "lyria-3.5", now=lambda: T0 + 6)
         assert route.call_count == 1  # the refreshed cache now has it
+
+
+@respx.mock
+async def test_a_cold_cache_miss_fetches_once(aistudio_home, make_client, captured):
+    route = serve_catalog(captured)
+    async with make_client() as client:
+        with pytest.raises(NotFoundError):
+            await get_model(client, get_profile("default"), "no-such-model", now=lambda: T0)
+    assert route.call_count == 1  # the first load already came from the network
+
+
+@respx.mock
+async def test_a_cached_prefix_does_not_hide_a_new_exact_id(aistudio_home, make_client, captured):
+    route = serve_catalog(captured)
+    profile = get_profile("default")
+    cache_without(profile, captured, "gemini-3.1-flash-lite", T0)
+    async with make_client() as client:
+        model = await get_model(client, profile, "gemini-3.1-flash-lite", now=lambda: T0 + 5)
+    assert model["id"] == "gemini-3.1-flash-lite" and route.call_count == 1
