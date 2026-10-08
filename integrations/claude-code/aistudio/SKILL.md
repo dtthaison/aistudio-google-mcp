@@ -69,6 +69,8 @@ quotes and write each `'` as `'\''`.
 | Flow characters: list, rename, personality (free) | `aistudio flow character list --json`, `aistudio flow character rename <id> '<Name>' --json`, `aistudio flow character personality <id> '<notes>' --json` (or `--personality` on create) |
 | Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
+| Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
+| Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
@@ -109,6 +111,8 @@ quotes and write each `'` as `'\''`.
   re-run. A character's image id is not an ingredient: use `--character` instead.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   Stitch trims are whole seconds (`<id>@2-5`).
+- `flow edit` costs 20 credits with no quote: ask the user before passing `--max-credits 20`.
+  Only 8-second clips have a measured price; extend on Veo 3.1 Fast/Quality is not available.
 - `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
   measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
   warning that Flow charged a different amount. "no measured price" is final: do not retry with a
