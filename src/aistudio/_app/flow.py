@@ -11,6 +11,7 @@ from typing import Any
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
 from aistudio._flow.models import (
+    CHARACTER_MODELS,
     EDIT_MEASURED_SECONDS,
     EDIT_MEASURED_SOURCES,
     FREE_WITHOUT_ASKING,
@@ -698,7 +699,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
     description = " ".join((description or "").split()) or None
     if (description is None) == (photo is None):
         raise ValidationError("give the character a DESCRIPTION or a --photo (exactly one)")
-    chosen_model = find_model(model, "image") if model else None
+    chosen_model = CHARACTER_MODELS.get(model.strip().lower()) if model else None
+    if model and chosen_model is None:
+        raise ValidationError(f"{model!r} is not a character model",
+                              hint=f"choose one of: {', '.join(CHARACTER_MODELS)}")
     if chosen_model is not None and photo is not None:
         raise ValidationError("-m applies to a character made from a DESCRIPTION; a --photo "
                               "makes no image")
@@ -734,9 +738,9 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                              f"download it with: aistudio flow download {image_id}")
         else:
             model = await page.open_character(project_id)
-            if chosen_model is not None and model != chosen_model.label:
-                await page.choose_character_model(chosen_model.label)
-                model = chosen_model.label
+            if chosen_model is not None and model != chosen_model:
+                await page.choose_character_model(chosen_model)
+                model = chosen_model
             price = check_direct_spend("character", model, max_credits)  # before any spend
             try:
                 outcome = await page.start_character(description or "")

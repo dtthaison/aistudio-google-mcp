@@ -250,7 +250,7 @@ async def test_character_is_free_and_downloads_its_image(logged_in_profile, tmp_
     result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "robot.png", **kw)
     assert result["character_id"] == "c1" and result["credits_spent"] == 0
     assert (tmp_path / "robot.png").exists()
-    kw, pages, _ = harness(character_model="Nano Banana 2 Lite")  # not measured cleanly
+    kw, pages, _ = harness(character_model="Nano Banana 3")  # a model with no measured price
     with pytest.raises(ValidationError):
         await flow_character(profile, "Robot", "a robot", out=tmp_path / "r2.png", **kw)
     assert not any(c[0] == "character" for c in pages[0].calls)

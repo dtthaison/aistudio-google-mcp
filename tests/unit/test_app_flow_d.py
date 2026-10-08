@@ -587,3 +587,14 @@ async def test_edit_only_on_a_measured_source_model(logged_in_profile, tmp_path)
         await flow_edit(profile, VID, "x", max_credits=100, out=tmp_path / "a.mp4", **kw)
     assert "veo_3_1_t2v_fast" in info.value.message
     assert not any(c[0] in ("edit_label", "edit") for c in pages[0].calls)
+
+
+
+async def test_character_on_nano_banana_2_lite(logged_in_profile, tmp_path):
+    # Measured cleanly at 0 credits; 2 Lite is a character-page model only.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(990, 990))
+    result = await flow_character(profile, "Robot", "a robot", model="nano-banana-2-lite",
+                                  out=tmp_path / "r.png", **kw)
+    assert ("choose", "Nano Banana 2 Lite") in pages[0].calls
+    assert result["model"] == "nano-banana-2-lite" and result["credits_spent"] == 0

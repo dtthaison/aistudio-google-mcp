@@ -38,10 +38,14 @@ def model_by_label(label: str) -> FlowModel | None:
     return next((m for m in MODELS if _norm(m.label) == _norm(label)), None)
 
 
+def _character_id(label: str) -> str | None:
+    return next((cli for cli, shown in CHARACTER_MODELS.items() if shown == label), None)
+
+
 def label_to_id(label: str) -> str:
     """The CLI id for a picker label; the label itself when aistudio does not know it."""
     model = model_by_label(label)
-    return model.id if model else label
+    return model.id if model else (_character_id(label) or label)
 
 
 def find_model(model_id: str, kind: str) -> FlowModel:
@@ -131,9 +135,14 @@ def _norm(label: str | None) -> str:
 # (docs/wire/findings.md, "measured costs"). Add a row only after measuring it.
 # Measured with the user's OK (findings): direct spends Flow does not quote.
 PRICES = {("character", "Nano Banana 2.1"): 0, ("character", "Nano Banana Pro"): 0,
+          ("character", "Nano Banana 2 Lite"): 0,
           ("body", "Nano Banana 2.1"): 0,
           ("extend", "Veo 3.1 - Lite"): 10,
           ("edit", "Omni 1.1 Flash"): 20}  # an 8-second source clip (the only one measured)
+# The character page's "Select model family" (2 Lite is offered there only, not as a Flow
+# image default), by CLI id.
+CHARACTER_MODELS = {"nano-banana-2.1": "Nano Banana 2.1", "nano-banana-pro": "Nano Banana Pro",
+                    "nano-banana-2-lite": "Nano Banana 2 Lite"}
 EDIT_MEASURED_SECONDS = 8  # the edit price above is for clips of this length only
 EDIT_MEASURED_SOURCES = {"veo_3_1_t2v_lite"}  # ...and made by this model (16:9, measured)
 # Image models Flow's agent is known to generate with at once (no quote), and their price.

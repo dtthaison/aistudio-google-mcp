@@ -109,6 +109,7 @@ def test_measured_prices():
     assert check_direct_spend("edit", "Omni 1.1 Flash", 20) == 20
     with pytest.raises(OverBudgetError):
         check_direct_spend("edit", "Omni 1.1 Flash", None)
-    for action, label in (("character", "Nano Banana 2 Lite"), ("body", "Nano Banana Pro")):
+    assert check_direct_spend("character", "Nano Banana 2 Lite", None) == 0
+    for action, label in (("character", "Nano Banana 3"), ("body", "Nano Banana Pro")):
         with pytest.raises(ValidationError):
             check_direct_spend(action, label, 100)

@@ -410,5 +410,7 @@ Evidence: `docs/wire/findings.md`, "Flow paid measurements" (the user approved t
    - It types the instruction and presses Start, then follows the new clip (created after Start).
    - It reads credits before and after, and downloads the result. A failure after Start names the
      clip and forbids a re-run.
-5. **Extend on Veo 3.1 Fast or Quality** stays unmeasured. Flow extends with the source clip's
-   model, so measuring it first needs a Fast or Quality clip. That is pending the user's budget.
+5. **Extend is always Veo 3.1 Lite.** A Fast clip's Extend menu also offered "Extend (Veo 3.1 -
+   Lite)". Flow has no Fast or Quality extend, so none is offered (findings).
+6. **Nano Banana 2 Lite characters** were measured cleanly at 0 credits. `-m nano-banana-2-lite`
+   is a character-only choice, because Flow's image settings do not offer 2 Lite.
