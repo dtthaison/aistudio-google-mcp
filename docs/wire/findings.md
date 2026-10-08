@@ -503,3 +503,14 @@ blocked; the RPCs that went through are free.
   `[[[job]]]` every 3 s: `[2, "", "", 0]` while running, then `[3, "", "", 3, <base64 MP4>]`.
   - Two 8 s clips gave a 14,065,014-byte MP4 in about 15 s; the page saves it from a `blob:` URL.
   - `GjQLTd` needs no scene record: from the project page it accepted any clips by media id.
+
+### Flow plan E discovery: hidden copies and attached media (2026-10-08, free)
+
+- **Character images are hidden copies.** A photo character's image is a copy that `Zzl0ze[1]`
+  lists under the photo's file name. Example: "apple.jpg" appears three times (`91f49a6c`, the
+  upload, plus `1306ca3e` and `938a64f3`, two characters' images). Each title still shows **one**
+  tile in the project grid and one option in every + panel tab (All, Images, Uploads). The extra
+  ids are exactly the characters' `media_id`s (`Zzl0ze[5][4]`).
+- **Attached media in the request.** Attaching "apple-start.jpg" with its tile's "Add to prompt"
+  sent `StreamChat` message `[[[[prompt]]], [["ea396dda…"]]]`: slot 1 lists the attached media
+  ids (the original upload, not the copy). Characters use slot 3 (plan D).

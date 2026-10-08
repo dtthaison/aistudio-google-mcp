@@ -334,3 +334,22 @@ character to `flow video`/`flow image`, which keeps the normal quote-and-budget 
 7. **Extend's `scene_id`** comes from the project's scene clips after the job (the scene holding
    the new clip). The `rqZuUc` reply is used only if the contents do not show it, because that
    reply's shape was never seen live (plan C review M2).
+
+## 12. Amendments from plan E (2026-10-08)
+
+Evidence: `docs/wire/findings.md`, "Flow plan E discovery". The user asked for all the follow-ups
+("go head all").
+
+1. **Hidden copies.** Characters' images (their `media_id`, including the copies Flow makes
+   from photos) are not tiles. They are left out when attachment titles are checked for
+   duplicates, so a photo used for a character can still be a frame or ingredient by id.
+2. **Attachments are verified by id.** After the free quote, the media ids in the `StreamChat`
+   request's slot 1 must be exactly the attached ones (uploads by their new id). Otherwise the
+   request is rejected and the run stops with `PLAN_MISMATCH`, as for characters (§11.4).
+3. **Names compare with spaces collapsed** and case-insensitively. A character listed without a
+   name is shown as "(unnamed)" and can be renamed.
+4. **Stitching gives up** on 5 replies in a row that fail (HTTP ≥ 400 or unreadable), with a
+   `BROWSER_ERROR` naming the last status, rather than waiting for `--timeout`.
+5. **File types.** An image whose bytes are AVIF or HEIC (`ftyp` brands) is saved as `.avif` or
+   `.heic`. Unrecognised image bytes keep the requested name and get a warning, instead of being
+   called JPEG.
