@@ -573,6 +573,8 @@ blocked; the RPCs that went through are free.
 | Character from a description | Nano Banana Pro | **0** (1,030 → 1,030) |
 | Character from a description | Nano Banana 2 Lite | unclear (made; the after-read failed, and credits rose 980 → 1,030 for an unknown reason) |
 | "Create body" for a character | Nano Banana 2.1 | **0** (1,030 → 1,030) |
+| Edit an 8 s clip through `aistudio flow edit` ("old sepia film") | Omni 1.1 Flash | **20** (1,030 → 1,010) |
+| An 8 s video (quoted) | Veo 3.1 Fast | **20** (1,010 → 990) |
 
 - **Omni edit.** The clip editor's box ("Describe how to edit this video…", model chip "Omni 1.1
   Flash") generates **directly**: no permission request, no agent. Start sent `WuwhI`, `jIps6`,
@@ -593,3 +595,10 @@ blocked; the RPCs that went through are free.
   body-mode marker. Typing a prompt and pressing Start sent
   `WuwhI`, a reCAPTCHA reload and `ogiZ0b`. The reply is the body image (a new media), at 0
   credits on Nano Banana 2.1.
+- **Extend is always Veo 3.1 Lite.** On a Lite clip with the default set to Fast, and on a Fast
+  clip (`5f09b8eb`) with the default at Omni, the Extend menu offered "Extend (Veo 3.1 - Lite)"
+  both times. Flow offers no Fast or Quality extension, so neither was measured.
+- **Two uploads in one run.** Right after the second upload, a reload listed the project without
+  it, so its tile caption never appeared and the attach timed out (nothing was sent). aistudio
+  now reloads until every uploaded file's tile is shown. Re-run: both uploaded, attached in
+  order, 10-credit quote, declined.
