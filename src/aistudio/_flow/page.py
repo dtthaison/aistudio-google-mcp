@@ -271,7 +271,7 @@ class FlowPage:
         records = media_records("as29s", decode_batch(text).get("as29s"))
         return records[0] if records else None
 
-    async def upload(self, path: Path) -> str:
+    async def upload(self, path: Path, known_ids: set[str] | frozenset[str] = frozenset()) -> str:
         """Upload a local file (the caller has the person's --i-have-rights)."""
         await self._ui.activate("button", INGREDIENTS, exact=True)
         await self._ui.pause(1500)
@@ -293,6 +293,8 @@ class FlowPage:
                 if response is None:
                     continue
                 for media in media_records("as29s", decode_batch(response.text).get("as29s")):
+                    if media.media_id in known_ids:
+                        continue  # existed before this upload
                     if media.created is not None and media.created >= since - CREATED_SLACK_S:
                         return media.media_id
         raise BrowserError(f"Flow did not report the uploaded {path.name}",
@@ -305,26 +307,26 @@ class FlowPage:
         await self._ui.dispatch_click("menuitem", ADD_TO_PROMPT)
         await self._ui.pause(800)
 
-    async def character_model(self, project_id: str) -> str:
-        """The image model the character page will use (its picker's label)."""
+    async def open_character(self, project_id: str) -> str:
+        """Open the character page and return the image model it will use (its picker)."""
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
         return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
 
-    async def create_character(self, project_id: str, description: str) -> CharacterOutcome:
-        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
-        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+    async def start_character(self, description: str) -> CharacterOutcome:
+        """Call after open_character (same page load). Creating a character may spend."""
         await self._ui.type_text(EDITOR_ANY, description)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             await self._ui.click("button", START, exact=True)
             created = await log.next("C4BZMd", timeout_s=60.0)
+            cid = character_id(decode_batch(created.text).get("C4BZMd")) if created else None
+            self.paid_media = [cid] if cid else []
             image = await log.next("ogiZ0b", timeout_s=180.0)
-        if image is None:
-            raise BrowserError("Flow did not make the character image",
+        media = media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")) if image else []
+        if not media:
+            raise BrowserError(f"Flow created character {cid or '(id not seen)'} but sent no image",
                                hint="check the project's Characters in Flow")
-        return CharacterOutcome(
-            character_id(decode_batch(created.text).get("C4BZMd")) if created else None,
-            media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")))
+        return CharacterOutcome(cid, media)
 
     async def extend_label(self, project_id: str, workflow_id: str) -> str:
         """Open the clip's editor by its workflow id and read the model "Extend (…)" will use."""

@@ -44,16 +44,49 @@ async def test_attach_uses_the_tiles_add_to_prompt(fake_ui):
                           ("dispatch", "menuitem", "Add to prompt")]
 
 
-async def test_create_character_returns_its_id_and_image(fake_ui):
-    image = ["i1", None, "w1", None, None, [[CREATED, 0], "a robot", None, None, None, None,
-                                            None, None, [3], 1,
-                                            "https://flow-content.google/image/i1?S=s"]]
-    ui = fake_ui({"C4BZMd": [CapturedResponse("C4BZMd", 200, batch(
-                      "C4BZMd", [[PID, "c1", None, [1, "Untitled character", []]]]), "")],
-                  "ogiZ0b": [CapturedResponse("ogiZ0b", 200, batch("ogiZ0b", [[image]]), "")]})
-    outcome = await FlowPage(ui, now=Clock()).create_character(PID, "a robot")
+def character_ui(fake_ui, image_payload):
+    responses = {"C4BZMd": [CapturedResponse("C4BZMd", 200, batch(
+        "C4BZMd", [[PID, "c1", None, [1, "Untitled character", []]]]), "")]}
+    if image_payload is not None:
+        responses["ogiZ0b"] = [CapturedResponse("ogiZ0b", 200, batch("ogiZ0b", image_payload), "")]
+    return fake_ui(responses, inner={("button", "Select model family"): [
+        "🍌 Nano Banana 2.1 arrow_drop_down"]})
+
+
+IMAGE_ROW = ["i1", None, "w1", None, None, None,
+             [[None, 1, None, None, None, None, 1, "a robot", 36, None, None, "w1", None,
+               "https://flow-content.google/image/i1?S=s", 3]], None, [1376, 768]]
+
+
+async def test_the_character_page_is_loaded_once(fake_ui):
+    ui = character_ui(fake_ui, [[IMAGE_ROW]])
+    page = FlowPage(ui, now=Clock())
+    assert await page.open_character(PID) == "Nano Banana 2.1"
+    outcome = await page.start_character("a robot")
     assert outcome.character_id == "c1" and outcome.media[0].image_url
+    assert [op for op in ui.ops if op[0] == "goto"] == [
+        ("goto", f"https://flow.google.com/project/{PID}/character")]
     assert ("type", "[contenteditable=true]", "a robot") in ui.ops
+
+
+async def test_the_character_id_survives_a_missing_image(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    page = FlowPage(character_ui(fake_ui, None), now=Clock())
+    await page.open_character(PID)
+    with pytest.raises(BrowserError) as info:
+        await page.start_character("a robot")
+    assert "c1" in info.value.message and page.paid_media == ["c1"]
+
+
+async def test_upload_ignores_media_that_existed_before(fake_ui, tmp_path):
+    image = tmp_path / "b.jpg"
+    image.write_bytes(b"\xff\xd8x")
+    ui = fake_ui({"maseQ": [CapturedResponse("maseQ", 200, ")]}'", "")],
+                  "as29s": [poll("as29s", record(media_id="old1")),
+                            poll("as29s", record(media_id="new3"))]})
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    assert await page.upload(image, known_ids={"old1"}) == "new3"
 
 
 EXTENDING = "Prompt to extend What happens next?"
@@ -114,12 +147,6 @@ async def test_extend_presses_start_only_in_the_extend_panel(fake_ui):
     with pytest.raises(BrowserError):
         await FlowPage(ui, now=Clock()).extend("rolls off", timeout_s=60)
     assert not any(op[0] == "click" for op in ui.ops)
-
-
-async def test_character_model_reads_the_character_pages_picker(fake_ui):
-    ui = fake_ui(inner={("button", "Select model family"): ["🍌 Nano Banana Pro arrow_drop_down"]})
-    assert await FlowPage(ui).character_model(PID) == "Nano Banana Pro"
-    assert ui.ops[0] == ("goto", f"https://flow.google.com/project/{PID}/character")
 
 
 async def test_media_details_fetch_links_from_inside_the_page(fake_ui):

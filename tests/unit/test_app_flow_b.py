@@ -85,7 +85,7 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
-    async def upload(self, path):
+    async def upload(self, path, known_ids=frozenset()):
         self.calls.append(("upload", path.name))
         return "up1"
 
@@ -109,10 +109,10 @@ class FakePage:
         self.paid_media = ["m2"]
         return FlowOutcome([media("m2")], 1021, False)
 
-    async def character_model(self, pid):
+    async def open_character(self, pid):
         return self.character_model_label
 
-    async def create_character(self, pid, description):
+    async def start_character(self, description):
         self.calls.append(("character", description))
         return CharacterOutcome("c1", [media("i9", video=False)])
 

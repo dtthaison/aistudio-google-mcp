@@ -181,3 +181,11 @@ async def test_read_errors_say_what_happened():
     with pytest.raises(BrowserError) as info:
         await PlaywrightUi(page).visible("button", "Tova")
     assert "in time" in info.value.message and "closed" not in info.value.message
+
+
+def test_batched_rpcids_are_split():
+    from aistudio._browser.ui import _methods
+
+    assert _methods("https://flow.google.com/_/X/data/batchexecute?rpcids=jwpduf,ngNC2&bl=1") == [
+        "jwpduf", "ngNC2"]
+    assert _methods("https://a/$rpc/x.MakerSuiteService/GenerateContent") == ["GenerateContent"]

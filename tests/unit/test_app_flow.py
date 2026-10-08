@@ -290,3 +290,19 @@ async def test_an_unexpected_download_error_still_names_the_media(logged_in_prof
         await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                             duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert "m1" in info.value.hint
+
+
+async def test_credits_drift_hint_is_not_dev_capture(logged_in_profile):
+    from aistudio.exceptions import SchemaDriftError
+
+    class NoCredits(FakePage):
+        async def credits(self):
+            return None
+
+    @contextlib.asynccontextmanager
+    async def browser(profile, *, window):
+        yield object()
+
+    with pytest.raises(SchemaDriftError) as info:
+        await flow_credits(logged_in_profile(), browser=browser, page_factory=NoCredits)
+    assert "dev capture" not in (info.value.hint or "")

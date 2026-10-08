@@ -115,11 +115,18 @@ _BATCH_RPC_JS = """async ([rpcid, args]) => {
 }"""
 
 
-def _method(url: str) -> str:
-    """The RPC a response answers: batchexecute's ``rpcids``, else the URL's last segment."""
+def _methods(url: str) -> list[str]:
+    """The RPCs a response answers: batchexecute's ``rpcids`` (comma-separated when batched),
+    else the URL's last segment."""
     parsed = urlparse(url)
     rpc = parse_qs(parsed.query).get("rpcids")
-    return rpc[0] if rpc else parsed.path.rsplit("/", 1)[-1]
+    if rpc:
+        return [name for name in rpc[0].split(",") if name]
+    return [parsed.path.rsplit("/", 1)[-1]]
+
+
+def _method(url: str) -> str:
+    return _methods(url)[0]
 
 
 async def _collapsed(locator: Any) -> str:
@@ -406,9 +413,9 @@ class PlaywrightUi:
                 text = await response.text()  # a streamed response resolves when it ends
             except Exception:
                 text = ""
-            method = _method(response.url)
-            log.put(CapturedResponse(method, response.status, text,
-                                     response.request.post_data or ""))
+            for method in _methods(response.url):
+                log.put(CapturedResponse(method, response.status, text,
+                                         response.request.post_data or ""))
 
         def on_response(response: Any) -> None:
             if marker in response.url:

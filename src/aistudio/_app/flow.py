@@ -47,7 +47,9 @@ async def flow_credits(profile: Profile, *, visible: bool = False,
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         credits = await page_factory(ui).credits()
     if credits is None:
-        raise SchemaDriftError("Flow account menu", (), "a credits count")
+        err = SchemaDriftError("Flow account menu", (), "a credits count")
+        err.hint = "re-run; if it persists, the Flow UI changed"
+        raise err
     return {"credits": credits}
 
 
@@ -89,7 +91,7 @@ async def flow_generate(
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         project_id = await _open(page, profile, project_id)
-        titles = await _attachment_titles(page, project_id, attachments)
+        titles, known_ids = await _attachment_titles(page, project_id, attachments)
         previous = await page.read_defaults(kind)
         if not previous.asks:
             raise ValidationError(
@@ -106,7 +108,8 @@ async def flow_generate(
             await page.new_session()
             for (_, value), title in zip(attachments, titles, strict=True):
                 if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
-                    uploads.append({"file": value.name, "media_id": await page.upload(value)})
+                    media_id = await page.upload(value, known_ids=known_ids)
+                    uploads.append({"file": value.name, "media_id": media_id})
                 await page.attach(title)
             if attachments:
                 roles = ", ".join(role for role, _ in attachments)
@@ -199,11 +202,12 @@ def _attachments(start_frame: str | None, end_frame: str | None, ingredients: li
 
 
 async def _attachment_titles(page: Any, project_id: str,
-                             attachments: list[tuple[str, Path | str]]) -> list[str]:
+                             attachments: list[tuple[str, Path | str]]
+                             ) -> tuple[list[str], set[str]]:
     """The grid titles to attach by, checked before anything is uploaded or sent: attach works
     by title, so each title must name exactly one media in the project."""
     if not attachments:
-        return []
+        return [], set()
     contents = await page.contents(project_id)
     by_title: dict[str, list[str]] = {}
     for media_id, title in contents.titles.items():
@@ -227,7 +231,7 @@ async def _attachment_titles(page: Any, project_id: str,
                                   hint="rename one in Flow so aistudio can attach the right one; "
                                        "nothing was sent")
         titles.append(title)
-    return titles
+    return titles, set(contents.titles) | {m.media_id for m in contents.media}
 
 
 def _spent(exc: Exception, media_ids: list[str], project_id: str) -> AIStudioError:
@@ -389,10 +393,10 @@ async def flow_character(profile: Profile, description: str, *, max_credits: int
         page = page_factory(ui)
         before = await page.credits()
         project_id = await _open(page, profile, project_id)
-        model = await page.character_model(project_id)
+        model = await page.open_character(project_id)
         price = check_direct_spend("character", model, max_credits)  # refuses before any spend
         try:
-            outcome = await page.create_character(project_id, description)
+            outcome = await page.start_character(description)
         except Exception as exc:
             raise _spent(exc, page.paid_media, project_id) from exc
         after, read_notes = await _credits_after(page, None)
