@@ -102,6 +102,7 @@ CHARACTERS_TAB = re.compile(r"Characters$")  # the + panel's tab (mat-list-item,
 SEARCH_ASSETS = 'input[placeholder="Search assets"]'  # the + panel's search box
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
+CREDIT_POLLS = 8  # x 800 ms for the account menu to show the credits
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
@@ -632,8 +633,12 @@ class FlowPage:
     async def credits(self) -> int | None:
         await self._ui.goto(HOME_URL)
         await self._ui.activate("button", ACCOUNT, exact=True)
-        await self._ui.pause(1200)
-        match = _CREDITS.search(await self._ui.text_of("body"))
+        match = None
+        for _ in range(CREDIT_POLLS):  # the menu can open before it shows the count (live)
+            await self._ui.pause(800)
+            match = _CREDITS.search(await self._ui.text_of("body"))
+            if match:
+                break
         await self._ui.key("Escape")
         return int(match.group(1).replace(",", "")) if match else None
 

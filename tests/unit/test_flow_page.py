@@ -343,3 +343,11 @@ async def test_the_last_permission_in_a_stream_is_the_quote(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert turn.quote.credits == 20
+
+
+async def test_credits_wait_for_the_account_menu(fake_ui):
+    # Live: one read found the menu still empty; the next run read 1,030.
+    ui = fake_ui(texts={"body": ["", "Loading", "movie 1,030 Google Flow credits Upgrade"]})
+    assert await FlowPage(ui).credits() == 1030
+    ui = fake_ui(texts={"body": [""]})
+    assert await FlowPage(ui).credits() is None
