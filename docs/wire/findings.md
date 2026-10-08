@@ -520,3 +520,8 @@ blocked; the RPCs that went through are free.
 - **Tiles below the window.** Once the project held more media, those two tiles sat at
   y = 1,290 and 1,667 in a 1,000 px viewport. A mouse hover at their box never reached them, so
   their ⋮ menus never opened. Scrolling the caption into view first fixes it.
+- **The Characters tab acts on its highlighted item.** The first option is highlighted
+  (`asset-item-active`). A dispatched click on the third option ("Paper boat") attached nothing,
+  and focus plus Enter on it attached the **first** character (`21f9fe8d`, caught by the slot-3
+  check). Typing the name into "Search assets" leaves it as the only, highlighted option, and the
+  click then attaches it (slot 3 carried `5f54e5a5`; quote 10 credits, rejected).

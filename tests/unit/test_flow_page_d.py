@@ -88,12 +88,16 @@ async def test_a_slow_stitch_times_out(fake_ui):
         await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=5)
 
 
-async def test_attach_character_uses_the_characters_tab(fake_ui):
+async def test_attach_character_searches_then_picks_it(fake_ui):
+    # Live: the panel acts on its highlighted item (the first), not the one clicked, so the
+    # name is searched first; the search leaves it as the only, highlighted option.
+    from aistudio._flow.page import SEARCH_ASSETS
+
     ui = fake_ui()
     await FlowPage(ui).attach_character("Paper boat")
-    assert [op for op in ui.ops if op[0] in ("activate", "dispatch")] == [
+    assert [op for op in ui.ops if op[0] in ("activate", "dispatch", "type")] == [
         ("activate", "button", INGREDIENTS, 0), ("dispatch", "tab", CHARACTERS_TAB.pattern),
-        ("dispatch", "option", "Paper boat")]
+        ("type", SEARCH_ASSETS, "Paper boat"), ("dispatch", "option", "Paper boat")]
 
 
 async def test_the_quote_reports_the_characters_it_was_sent_with(fake_ui):

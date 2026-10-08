@@ -84,6 +84,7 @@ SAVE_METHOD = "Kcr7Ub"  # the save call Save sends
 SAVE_TIMEOUT_S = 10.0
 MEDIA_METHODS = ("as29s", "jwpduf", "bOKtO")
 CHARACTERS_TAB = re.compile(r"Characters$")  # the + panel's tab (mat-list-item, role=tab)
+SEARCH_ASSETS = 'input[placeholder="Search assets"]'  # the + panel's search box
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
@@ -343,11 +344,17 @@ class FlowPage:
         await self._ui.pause(800)
 
     async def attach_character(self, name: str) -> None:
-        """Attach a character from the + panel's Characters tab (Flow lists them by name only)."""
+        """Attach a character from the + panel's Characters tab (Flow lists them by name only).
+
+        The panel acts on its highlighted item, which is the first one, not on the item clicked
+        (live: clicking the third attached nothing, Enter attached the first). Searching for the
+        name leaves it as the only, highlighted option. The quote's request is checked by id."""
         await self._ui.activate("button", INGREDIENTS, exact=True)
         await self._ui.pause(1500)
         await self._ui.dispatch_click("tab", CHARACTERS_TAB)
         await self._ui.pause(1500)
+        await self._ui.type_text(SEARCH_ASSETS, name)
+        await self._ui.pause(2000)
         await self._ui.dispatch_click("option", name, exact=True)  # attaches and closes (live)
         await self._ui.pause(800)
 
