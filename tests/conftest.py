@@ -179,6 +179,12 @@ class FakeUi:
     def current_url(self):
         return self.url
 
+    async def batch_rpc(self, rpcid, args_json):
+        self.ops.append(("batch_rpc", rpcid, args_json))
+        queue = self._responses.get(rpcid) or []
+        response = queue.pop(0) if queue else None
+        return (response.status, response.text) if response else (404, "")
+
     async def dispatch_click(self, role, name, *, exact=False):
         self.ops.append(("dispatch", role, self._key(name)))
 

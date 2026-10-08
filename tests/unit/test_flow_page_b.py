@@ -1,4 +1,6 @@
 
+import pytest
+
 from aistudio._browser.ui import CapturedResponse
 from aistudio._flow.page import FlowPage
 from tests.unit.test_flow_page import PID, Clock, poll
@@ -53,21 +55,75 @@ async def test_create_character_returns_its_id_and_image(fake_ui):
     assert ("type", "[contenteditable=true]", "a robot") in ui.ops
 
 
-async def test_extend_reads_the_model_and_follows_the_new_clip(fake_ui):
-    started = [None, 1020, [["w2"]], [record(status=2, with_links=False, media_id="m2")]]
-    ui = fake_ui({"fZytfe": [CapturedResponse("fZytfe", 200, batch("fZytfe", started), "")],
-                  "as29s": [poll("as29s", record(media_id="m2"))]},
-                 inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
-                                                  "Lite)"]},
-                 url=f"https://flow.google.com/project/{PID}")
+EXTENDING = "Prompt to extend What happens next?"
+
+
+def extend_ui(fake_ui, *responses, url_workflow="w1", texts=EXTENDING):
+    started = {"fZytfe": [CapturedResponse("fZytfe", 200, batch("fZytfe", [
+        None, 1020, [["w2"]], [record(status=2, with_links=False, media_id="m2")]]), "")]}
+    scripted = {**started, **dict(responses)}
+    return fake_ui(scripted,
+                   inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
+                                                    "Lite)"]},
+                   texts={"body": [texts]},
+                   url=f"https://flow.google.com/project/{PID}/edit/{url_workflow}")
+
+
+async def test_extend_opens_the_clip_by_its_workflow_and_reads_the_model(fake_ui):
+    # Review I1: never pick a clip by its title text.
+    ui = extend_ui(fake_ui)
+    assert await FlowPage(ui).extend_label(PID, "w1") == "Veo 3.1 - Lite"
+    assert ui.ops[0] == ("goto", f"https://flow.google.com/project/{PID}/edit/w1")
+
+
+async def test_extend_refuses_when_the_editor_opened_another_clip(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = extend_ui(fake_ui, url_workflow="other")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui).extend_label(PID, "w1")
+    assert not any(op[0] == "dispatch" for op in ui.ops)
+
+
+async def test_extend_follows_only_the_clip_flow_says_it_started(fake_ui):
+    # Review I3: a recent record of the source clip is never taken for the extension.
+    ui = extend_ui(fake_ui, ("as29s", [poll("as29s", record(media_id=MEDIA)),
+                                       poll("as29s", record(media_id="m2"))]))
     page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
-    await page.open_project(PID)
-    assert await page.extend_label("Red apple") == "Veo 3.1 - Lite"
-    outcome = await page.extend("Red apple", "rolls off", timeout_s=60)
+    outcome = await page.extend("rolls off", timeout_s=60)
     assert [m.media_id for m in outcome.media] == ["m2"] and outcome.credits_left == 1020
+    assert page.paid_media == ["m2"]
+
+
+async def test_a_refused_extension_fails_fast(fake_ui):
+    # Review I4: no 10-minute wait for a job that never started.
+    from aistudio.exceptions import BrowserError
+
+    ui = extend_ui(fake_ui, ("fZytfe", [CapturedResponse("fZytfe", 500, "", "")]))
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).extend("rolls off", timeout_s=600)
+    assert "may still be charged" in info.value.hint
+
+
+async def test_extend_presses_start_only_in_the_extend_panel(fake_ui):
+    # Review I5: the edit page also has an Omni edit prompt with its own Start button.
+    from aistudio.exceptions import BrowserError
+
+    ui = extend_ui(fake_ui, texts="Describe how to edit this video…")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui, now=Clock()).extend("rolls off", timeout_s=60)
+    assert not any(op[0] == "click" for op in ui.ops)
 
 
 async def test_character_model_reads_the_character_pages_picker(fake_ui):
     ui = fake_ui(inner={("button", "Select model family"): ["🍌 Nano Banana Pro arrow_drop_down"]})
     assert await FlowPage(ui).character_model(PID) == "Nano Banana Pro"
     assert ui.ops[0] == ("goto", f"https://flow.google.com/project/{PID}/character")
+
+
+async def test_media_details_fetch_links_from_inside_the_page(fake_ui):
+    # Live: the project list (Zzl0ze) carries no links; as29s, asked from the page, does.
+    ui = fake_ui({"as29s": [poll("as29s", record())]})
+    media = await FlowPage(ui).media_details(MEDIA)
+    assert media.video_url and media.status == 3
+    assert ("batch_rpc", "as29s", f'["{MEDIA}"]') in ui.ops

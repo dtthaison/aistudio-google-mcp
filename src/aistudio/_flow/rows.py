@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from aistudio._rpc.wire import opt_index
@@ -53,6 +53,7 @@ class FlowProject:
 class ProjectContents:
     titles: dict[str, str]  # media_id -> its workflow title (what the grid shows)
     media: list[FlowMedia]
+    workflows: dict[str, str] = field(default_factory=dict)  # media_id -> workflow id (editor)
 
 
 def decode_projects(payload: Any) -> list[FlowProject]:
@@ -68,12 +69,15 @@ def decode_projects(payload: Any) -> list[FlowProject]:
 
 def decode_contents(payload: Any) -> ProjectContents:
     titles: dict[str, str] = {}
+    workflows: dict[str, str] = {}
     for workflow in opt_index(payload, 1) or []:
         title, media_id = opt_index(workflow, 3, 0), opt_index(workflow, 3, 4)
         if isinstance(title, str) and isinstance(media_id, str):
             titles[media_id] = title
+            if isinstance(opt_index(workflow, 0), str):
+                workflows[media_id] = workflow[0]
     media = [m for m in (_record(r) for r in opt_index(payload, 2) or []) if m is not None]
-    return ProjectContents(titles, media)
+    return ProjectContents(titles, media, workflows)
 
 
 def character_id(payload: Any) -> str | None:

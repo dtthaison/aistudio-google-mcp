@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import json
 from datetime import datetime
 
@@ -25,20 +26,28 @@ NOW = datetime(2026, 10, 8, 9, 0, 0)
 
 def media(media_id, *, video=True, status=3, seconds=8):
     base = f"https://flow-content.google/{{}}/{media_id}?Signature=s"
-    return FlowMedia(media_id=media_id, project_id=PID, prompt="p", model_key="veo_3_1_t2v_lite",
+    return FlowMedia(media_id=media_id, project_id=PID, prompt="p",
+                     model_key="veo_3_1_t2v_lite" if video else None,  # live: images have none
                      status=status, created=1791420849, seconds=seconds if video else None,
                      size=3, video_url=base.format("video") if video and status == 3 else None,
                      image_url=base.format("image") if status == 3 else None)
 
 
+def listed(m):
+    """As the project list sends it (live): no links."""
+    return dataclasses.replace(m, video_url=None, image_url=None)
+
+
 CONTENTS = ProjectContents({VID: "Red apple rolling on table", IMG: "apple.jpg"},
-                           [media(VID), media(IMG, video=False)])
+                           [listed(media(VID)), listed(media(IMG, video=False))],
+                           {VID: "w1", IMG: "w9"})
 
 
 class FakePage:
     def __init__(self, ui, *, contents=CONTENTS, credits=(1030, 1020), label="Veo 3.1 - Lite",
-                 character_model="Nano Banana 2.1"):
+                 character_model="Nano Banana 2.1", details=None):
         self.calls, self.contents_value, self.label = [], contents, label
+        self.details = details
         self.credit_values, self.character_model_label = list(credits), character_model
         self.paid_media = []
 
@@ -48,6 +57,12 @@ class FakePage:
     async def create_project(self, title):
         return PID
 
+    async def media_details(self, media_id):
+        self.calls.append(("details", media_id))
+        if self.details is not None:
+            return self.details
+        return media(media_id, video=media_id != IMG)
+
     async def projects(self):
         return [FlowProject(PID, "aistudio", 1791371089)]
 
@@ -56,7 +71,10 @@ class FakePage:
         return self.contents_value
 
     async def credits(self):
-        return self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
+        value = self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     async def read_defaults(self, kind):
         return Defaults("Omni 1.1 Flash", "16:9", 1, asks=True)
@@ -82,13 +100,14 @@ class FakePage:
     async def reject(self):
         self.calls.append(("reject",))
 
-    async def extend_label(self, title):
-        self.calls.append(("extend_label", title))
+    async def extend_label(self, pid, workflow_id):
+        self.calls.append(("extend_label", workflow_id))
         return self.label
 
-    async def extend(self, title, prompt, *, timeout_s):
-        self.calls.append(("extend", title, prompt))
-        return FlowOutcome([media("m2")], None, False)
+    async def extend(self, prompt, *, timeout_s):
+        self.calls.append(("extend", prompt))
+        self.paid_media = ["m2"]
+        return FlowOutcome([media("m2")], 1021, False)
 
     async def character_model(self, pid):
         return self.character_model_label
@@ -137,8 +156,8 @@ async def test_projects_and_media_lists(logged_in_profile):
 async def test_download_needs_a_finished_media(logged_in_profile, tmp_path):
     profile = logged_in_profile()
     store(profile)
-    running = ProjectContents({VID: "Red apple"}, [media(VID, status=2)])
-    kw, _, _ = harness(contents=running)
+    running = ProjectContents({VID: "Red apple"}, [listed(media(VID, status=2))], {VID: "w1"})
+    kw, _, _ = harness(contents=running, details=media(VID, status=2))
     with pytest.raises(ValidationError) as info:
         await flow_download(profile, VID, out=tmp_path / "a.mp4", **kw)
     assert "no download yet" in info.value.message
@@ -219,3 +238,66 @@ async def test_character_is_free_and_downloads_its_image(logged_in_profile, tmp_
     with pytest.raises(ValidationError):
         await flow_character(profile, "a robot", out=tmp_path / "r2.png", **kw)
     assert not any(c[0] == "character" for c in pages[0].calls)
+
+
+async def test_a_failed_credit_read_after_extend_is_a_warning_not_an_error(logged_in_profile,
+                                                                           tmp_path):
+    # Review C1: after the spend, nothing may turn into "re-run".
+    from aistudio.exceptions import BrowserError
+
+    profile = logged_in_profile()
+    store(profile)
+    kw, _, _ = harness(credits=(1030, BrowserError("network blip")))
+    result = await flow_extend(profile, VID, "rolls off", max_credits=10,
+                               out=tmp_path / "x.mp4", **kw)
+    assert result["status"] == "done" and (tmp_path / "x.mp4").exists()
+    assert result["credits_left"] == 1021  # from Flow's own reply
+    assert any("not verified" in w for w in result["warnings"])
+
+
+async def test_extend_opens_the_clip_by_its_workflow_id(logged_in_profile, tmp_path):
+    profile = logged_in_profile()
+    store(profile)
+    kw, pages, _ = harness()
+    await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "x.mp4", **kw)
+    assert ("extend_label", "w1") in pages[0].calls
+
+
+async def test_duplicate_titles_are_refused_before_anything_is_sent(logged_in_profile, tmp_path):
+    # Review I2: attach works by title, so a title must name exactly one media.
+    profile = logged_in_profile()
+    store(profile)
+    twins = ProjectContents({IMG: "apple.jpg", "a2b3c4d5-0000-0000-0000-000000000000": "apple.jpg"},
+                            [media(IMG, video=False)], {IMG: "w9"})
+    kw, pages, _ = harness(contents=twins)
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(profile, "video", "an apple", ingredients=[IMG],
+                            out=tmp_path / "a.mp4", **kw)
+    assert "same title" in info.value.message
+    assert not any(c[0] in ("attach", "submit") for c in pages[0].calls)
+
+
+async def test_a_file_already_in_the_project_is_used_by_id_not_uploaded_again(logged_in_profile,
+                                                                             tmp_path):
+    profile = logged_in_profile()
+    store(profile)
+    photo = tmp_path / "apple.jpg"  # already uploaded (title "apple.jpg", id IMG)
+    photo.write_bytes(b"\xff\xd8x")
+    kw, pages, _ = harness()
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(profile, "video", "an apple", start_frame=str(photo),
+                            i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    assert IMG in info.value.hint
+    assert not any(c[0] == "upload" for c in pages[0].calls)
+
+
+async def test_uploads_are_reported_so_the_paid_run_can_reuse_them(logged_in_profile, tmp_path):
+    profile = logged_in_profile()
+    store(profile)
+    photo = tmp_path / "me.jpg"
+    photo.write_bytes(b"\xff\xd8x")
+    kw, _, _ = harness()
+    result = await flow_generate(profile, "video", "an apple", start_frame=str(photo),
+                                 i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "quoted"
+    assert result["uploads"] == [{"file": "me.jpg", "media_id": "up1"}]

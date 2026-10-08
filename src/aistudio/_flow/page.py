@@ -8,6 +8,7 @@ out in a minimized window.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable
@@ -54,6 +55,7 @@ START = "Start generation"
 ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
+EXTEND_PANEL = "What happens next?"  # the Extend box's placeholder (the edit box differs)
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
 MODEL_BUTTON = {"video": "Video generation default model",
@@ -261,6 +263,15 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
         return decode_contents(decode_batch(response.text).get("Zzl0ze"))
 
+    async def media_details(self, media_id: str) -> FlowMedia | None:
+        """One media with its signed links (the project list leaves them out)."""
+        status, text = await self._ui.batch_rpc("as29s", json.dumps([media_id]))
+        if status >= 400:
+            raise BrowserError(f"Flow did not return media {media_id} (HTTP {status})",
+                               hint="re-run; if it persists, the Flow UI changed")
+        records = media_records("as29s", decode_batch(text).get("as29s"))
+        return records[0] if records else None
+
     async def upload(self, path: Path) -> str:
         """Upload a local file (the caller has the person's --i-have-rights)."""
         await self._ui.activate("button", INGREDIENTS, exact=True)
@@ -312,9 +323,13 @@ class FlowPage:
             character_id(decode_batch(created.text).get("C4BZMd")) if created else None,
             media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")))
 
-    async def extend_label(self, title: str) -> str:
-        await self._ui.click_text(title)
+    async def extend_label(self, project_id: str, workflow_id: str) -> str:
+        """Open the clip's editor by its workflow id and read the model "Extend (…)" will use."""
+        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/edit/{workflow_id}")
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        if not self._ui.current_url().split("?", 1)[0].endswith(f"/edit/{workflow_id}"):
+            raise BrowserError("Flow opened a different clip; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
         await self._ui.dispatch_click("button", ADD_CLIP)
         await self._ui.pause(1200)
         text = await self._ui.inner_text("menuitem", EXTEND)
@@ -324,21 +339,27 @@ class FlowPage:
                                hint="only Veo clips can be extended")
         return match.group(1).strip()
 
-    async def extend(self, title: str, prompt: str, *, timeout_s: float) -> FlowOutcome:
+    async def extend(self, prompt: str, *, timeout_s: float) -> FlowOutcome:
         """Call after extend_label (the Add clip menu is open). Spends credits."""
         await self._ui.dispatch_click("menuitem", EXTEND)
         await self._ui.pause(1500)
+        if EXTEND_PANEL not in await self._ui.text_of("body"):
+            raise BrowserError("Flow's Extend panel did not open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
         await self._ui.type_text(EDITOR_LAST, prompt)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             await self._ui.click("button", START, exact=True, nth=-1)
             started = await log.next("fZytfe", timeout_s=60.0)
-            if started is None:
-                raise BrowserError("Flow did not start the extension; it may still be charged",
-                                   hint="check the project in Flow before re-running")
-            credits, media = extend_started(decode_batch(started.text).get("fZytfe"))
+            credits, media = (extend_started(decode_batch(started.text).get("fZytfe"))
+                              if started is not None and started.status < 400 else (None, []))
+            if not media:
+                raise BrowserError("Flow did not start the extension",
+                                   hint="it may still be charged: check the project in Flow "
+                                        "before re-running")
             self.paid_media = [m.media_id for m in media]
-            outcome = await self._follow(log, 1, timeout_s, "video", since)
+            outcome = await self._follow(log, 1, timeout_s, "video", since,
+                                         only=set(self.paid_media))
         return FlowOutcome(outcome.media, credits if outcome.credits_left is None
                            else outcome.credits_left, outcome.timed_out)
 
@@ -351,7 +372,7 @@ class FlowPage:
         return int(match.group(1).replace(",", "")) if match else None
 
     async def _follow(self, log: ResponseLog, count: int, timeout_s: float, kind: str,
-                      since: float) -> FlowOutcome:
+                      since: float, only: set[str] | None = None) -> FlowOutcome:
         """Follow only media created by this job: the reused project lists older media too."""
         seen: dict[str, FlowMedia] = {}
         credits = None
@@ -365,7 +386,10 @@ class FlowPage:
                 if method == "jwpduf" and credits_left(payload) is not None:
                     credits = credits_left(payload)
                 for media in media_records(method, payload):
-                    if media.media_id not in seen and (
+                    if only is not None:
+                        if media.media_id not in only:
+                            continue  # Flow named this job's media: nothing else counts
+                    elif media.media_id not in seen and (
                             media.created is None or media.created < since - CREATED_SLACK_S):
                         continue  # older media in the project, not this job
                     old = seen.get(media.media_id)

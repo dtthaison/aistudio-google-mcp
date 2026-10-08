@@ -90,6 +90,8 @@ class Ui(Protocol):
 
     async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None: ...
 
+    async def batch_rpc(self, rpcid: str, args_json: str) -> tuple[int, str]: ...
+
     async def choose_file(self, role: str, name: Name, path: Any) -> None: ...
 
     async def hover_text(self, text: str) -> None: ...
@@ -97,6 +99,20 @@ class Ui(Protocol):
     async def click_text(self, text: str) -> None: ...
 
     async def dispatch_click_near(self, role: str, name: Name, text: str) -> None: ...
+
+
+_BATCH_RPC_JS = """async ([rpcid, args]) => {
+  const g = window.WIZ_global_data || {};
+  const params = new URLSearchParams({
+    rpcids: rpcid, 'source-path': location.pathname, bl: g.cfb2h || '', 'f.sid': g.FdrFJe || '',
+    hl: 'en', rt: 'c'});
+  const body = new URLSearchParams({'f.req': JSON.stringify([[[rpcid, args, null, 'generic']]]),
+                                    at: g.SNlM0e || ''});
+  const r = await fetch('/_/AiSandboxAngularFrontend/data/batchexecute?' + params, {
+    method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'},
+    body});
+  return [r.status, await r.text()];
+}"""
 
 
 def _method(url: str) -> str:
@@ -323,6 +339,11 @@ class PlaywrightUi:
     def current_url(self) -> str:
         return str(getattr(self._page, "url", "") or "")
 
+    async def batch_rpc(self, rpcid: str, args_json: str) -> tuple[int, str]:
+        """A read-only batchexecute call made by the page itself, with the page's own session
+        token (Flow's as29s carries the signed links its project list leaves out)."""
+        return await self._read(lambda: self._page.evaluate(_BATCH_RPC_JS, [rpcid, args_json]))
+
     async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None:
         """A click event on the control itself: some Flow controls ignore keyboard activation."""
         locator = self._role(role, name, exact).first
@@ -341,7 +362,8 @@ class PlaywrightUi:
         await self._act(role, name, run)
 
     async def _tile_point(self, text: str, dx: float, dy: float) -> tuple[float, float]:
-        box = await self._page.get_by_text(text).first.bounding_box(timeout=CONTROL_TIMEOUT_MS)
+        box = await self._page.get_by_text(text, exact=True).first.bounding_box(
+            timeout=CONTROL_TIMEOUT_MS)
         if box is None:
             raise RuntimeError(f"{text!r} is not on screen")
         return box["x"] + dx, box["y"] + dy
@@ -361,20 +383,13 @@ class PlaywrightUi:
         await self._act("text", text, run)
 
     async def dispatch_click_near(self, role: str, name: Name, text: str) -> None:
-        """Click the matching control closest to ``text`` (a tile's own ⋮ menu)."""
+        """Click the control inside the tile captioned exactly ``text`` (the tile's own ⋮)."""
+        caption = self._page.get_by_text(text, exact=True).first
+        tile = caption.locator("xpath=ancestor::*[.//button[@aria-label]][1]")
+
         async def run() -> None:
-            anchor = await self._page.get_by_text(text).first.bounding_box()
-            best, best_distance = None, None
-            for element in await self._role(role, name, True).all():
-                box = await element.bounding_box()
-                if anchor is None or box is None:
-                    continue
-                distance = abs(box["x"] - anchor["x"]) + abs(box["y"] - anchor["y"])
-                if best_distance is None or distance < best_distance:
-                    best, best_distance = element, distance
-            if best is None:
-                raise RuntimeError(f"no {role} near {text!r}")
-            await best.dispatch_event("click")
+            await tile.get_by_role(role, name=name, exact=True).first.dispatch_event(
+                "click", timeout=CONTROL_TIMEOUT_MS)
 
         await self._act(role, name, run)
 

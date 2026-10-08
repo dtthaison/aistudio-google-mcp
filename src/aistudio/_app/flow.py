@@ -99,13 +99,15 @@ async def flow_generate(
         wanted = Defaults(flow_model.label if flow_model else previous.model,
                           aspect or previous.aspect, count or previous.count)
         _check_output(out, wanted.count, overwrite)  # the count may come from Flow's defaults
+        uploads: list[dict[str, str]] = []
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
             await page.new_session()
             for (_, value), title in zip(attachments, titles, strict=True):
-                await page.attach(title if not isinstance(value, Path)
-                                  else await _upload(page, value))
+                if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
+                    uploads.append({"file": value.name, "media_id": await page.upload(value)})
+                await page.attach(title)
             if attachments:
                 roles = ", ".join(role for role, _ in attachments)
                 prompt = f"Use the attached images, in order, as: {roles}. {prompt}"
@@ -123,6 +125,7 @@ async def flow_generate(
             if decision is Decision.QUOTE_ONLY:
                 return {"status": "quoted", "credits": turn.quote.credits,
                         "count": turn.quote.count, "plan": turn.text, "project": project_id,
+                        **({"uploads": uploads} if uploads else {}),
                         **({"warnings": wrong} if wrong else {})}
             if decision is Decision.REJECT_MISMATCH:
                 await page.reject()
@@ -197,26 +200,34 @@ def _attachments(start_frame: str | None, end_frame: str | None, ingredients: li
 
 async def _attachment_titles(page: Any, project_id: str,
                              attachments: list[tuple[str, Path | str]]) -> list[str]:
-    """The grid titles of attached media ids, checked before anything is sent."""
-    if not any(isinstance(value, str) for _, value in attachments):
-        return [value.name if isinstance(value, Path) else "" for _, value in attachments]
+    """The grid titles to attach by, checked before anything is uploaded or sent: attach works
+    by title, so each title must name exactly one media in the project."""
+    if not attachments:
+        return []
     contents = await page.contents(project_id)
+    by_title: dict[str, list[str]] = {}
+    for media_id, title in contents.titles.items():
+        by_title.setdefault(title, []).append(media_id)
     titles = []
     for _, value in attachments:
         if isinstance(value, Path):
+            existing = by_title.get(value.name)
+            if existing:
+                raise ValidationError(f"{value.name} is already in this Flow project",
+                                      hint=f"pass its media id instead: {', '.join(existing)}; "
+                                           "nothing was uploaded")
             titles.append(value.name)
-        elif value in contents.titles:
-            titles.append(contents.titles[value])
-        else:
+            continue
+        title = contents.titles.get(value)
+        if title is None:
             raise NotFoundError(f"no media {value} in this Flow project",
                                 hint='see "aistudio flow media"; nothing was sent')
+        if len(by_title.get(title, [])) > 1:
+            raise ValidationError(f"several media share the same title {title!r}",
+                                  hint="rename one in Flow so aistudio can attach the right one; "
+                                       "nothing was sent")
+        titles.append(title)
     return titles
-
-
-async def _upload(page: Any, path: Path) -> str:
-    """Upload a local image; its tile is titled with the file name."""
-    await page.upload(path)
-    return path.name
 
 
 def _spent(exc: Exception, media_ids: list[str], project_id: str) -> AIStudioError:
@@ -235,7 +246,9 @@ def _iso(epoch: int | None) -> str | None:
 
 
 def _media_kind(media: Any) -> str:
-    return "video" if media.video_url or media.seconds else "image"
+    """Flow's project list carries no links (live), so judge by length and model too."""
+    veo = bool(media.model_key) and "veo" in media.model_key
+    return "video" if media.video_url or media.seconds or veo else "image"
 
 
 async def flow_projects(profile: Profile, *, visible: bool = False,
@@ -256,8 +269,9 @@ async def flow_media(profile: Profile, *, project: str | None = None, kind: str 
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
     items = [{"media_id": m.media_id, "title": contents.titles.get(m.media_id),
-              "kind": _media_kind(m), "status": {2: "running", 3: "done"}.get(m.status or 0,
-                                                                          f"status:{m.status}"),
+              "kind": _media_kind(m),
+              "status": {None: "ready", 1: "running", 2: "running", 3: "done"}.get(
+                  m.status, f"status:{m.status}"),
               "model": m.model_key, "seconds": m.seconds, "created": _iso(m.created)}
              for m in contents.media]
     if kind:
@@ -277,11 +291,12 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
         page = page_factory(ui)
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
-    found = next((m for m in contents.media if m.media_id == media_id), None)
-    if found is None:
-        raise NotFoundError(f"no media {media_id} in this Flow project",
-                            hint='see "aistudio flow media"')
-    kind = _media_kind(found)
+        listed = next((m for m in contents.media if m.media_id == media_id), None)
+        if listed is None:
+            raise NotFoundError(f"no media {media_id} in this Flow project",
+                                hint='see "aistudio flow media"')
+        found = await page.media_details(media_id) or listed  # the list has no links
+    kind = _media_kind(listed)
     if not (found.video_url if kind == "video" else found.image_url):
         raise ValidationError(f"media {media_id} has no download yet (still running or failed)",
                               hint="check it in Flow, then retry")
@@ -291,10 +306,23 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
 
 
 def _cost_warning(before: int | None, after: int | None, price: int) -> tuple[int, list[str]]:
-    spent = before - after if before is not None and after is not None else price
+    if before is None or after is None:
+        return price, [f"could not read Flow credits around the run; the charge (table price "
+                       f"{price}) was not verified"]
+    spent = before - after
     note = ([f"Flow charged {spent} credits; aistudio's table says {price}"]
             if spent != price else [])
     return spent, note
+
+
+async def _credits_after(page: Any, fallback: int | None) -> tuple[int | None, list[str]]:
+    """Credits after a spend; never raises, so a paid result is never turned into "re-run"."""
+    try:
+        return await page.credits(), []
+    except Exception:  # noqa: BLE001 - the run already spent; report, don't fail
+        source = f"Flow's own reply ({fallback})" if fallback is not None else "nothing"
+        return fallback, [f"could not read Flow credits after the run; the charge was not "
+                          f"verified (using {source})"]
 
 
 async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
@@ -316,23 +344,25 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
-        title = contents.titles.get(media_id)
-        if source is None or title is None:
+        workflow_id = contents.workflows.get(media_id)
+        if source is None or workflow_id is None:
             raise NotFoundError(f"no media {media_id} in this Flow project",
                                 hint='see "aistudio flow media"')
-        if not source.video_url:
+        if _media_kind(source) != "video" or source.status != 3:
             raise ValidationError(f"media {media_id} is not a finished video")
-        label = await page.extend_label(title)
+        label = await page.extend_label(project_id, workflow_id)  # opens that exact clip
         price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
         try:
-            outcome = await page.extend(title, prompt, timeout_s=timeout_s)
+            outcome = await page.extend(prompt, timeout_s=timeout_s)
         except Exception as exc:  # the click spent credits; never invite a re-run
             raise _spent(exc, page.paid_media, project_id) from exc
-        after = await page.credits()
+        after, read_notes = await _credits_after(page, outcome.credits_left)
     spent, warnings = _cost_warning(before, after, price)
+    warnings = read_notes + warnings
     project_url = PROJECT_URL.format(id=project_id)
     if outcome.timed_out:
-        return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
+        return {"status": "timeout",
+                "media_ids": page.paid_media or [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": spent,
                 **({"warnings": warnings} if warnings else {})}
     files = await _save_all("video", outcome.media, out=out, overwrite=overwrite,
@@ -365,8 +395,9 @@ async def flow_character(profile: Profile, description: str, *, max_credits: int
             outcome = await page.create_character(project_id, description)
         except Exception as exc:
             raise _spent(exc, page.paid_media, project_id) from exc
-        after = await page.credits()
+        after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
+    warnings = read_notes + warnings
     files = await _save_all("image", outcome.media, out=out, overwrite=overwrite,
                             downloader=downloader, stamp=now(),
                             project_url=PROJECT_URL.format(id=project_id))
