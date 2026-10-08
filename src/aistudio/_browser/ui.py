@@ -73,6 +73,8 @@ class Ui(Protocol):
 
     async def enabled(self, role: str, name: Name) -> list[bool]: ...
 
+    async def has_text(self, text: str) -> bool: ...
+
     async def pause(self, ms: int) -> None: ...
 
     def responses(self, marker: str = ...) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
@@ -286,6 +288,10 @@ class PlaywrightUi:
             return await locator.count() > 0 and await locator.first.is_visible()
 
         return await self._read(read)
+
+    async def has_text(self, text: str) -> bool:
+        """Whether an element with exactly this text is on the page (e.g. a tile's caption)."""
+        return await self._read(lambda: self._page.get_by_text(text, exact=True).count()) > 0
 
     async def enabled(self, role: str, name: Name) -> list[bool]:
         """For each control with exactly this name, in page order (the order ``nth`` uses):

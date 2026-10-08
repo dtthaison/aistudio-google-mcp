@@ -87,6 +87,9 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
+    async def show_tiles(self, pid, titles):
+        self.calls.append(("show_tiles", tuple(titles)))
+
     async def upload(self, path, known_ids=frozenset()):
         self.calls.append(("upload", path.name, frozenset(known_ids)))
         self.uploaded[path.name] = f"up{len([c for c in self.calls if c[0] == 'upload'])}"
@@ -492,3 +495,18 @@ async def test_each_upload_is_followed_by_a_reload(logged_in_profile, tmp_path):
     names = [c[0] for c in pages[0].calls]
     uploads = [i for i, n in enumerate(names) if n == "upload"]
     assert names[uploads[0] + 1] == "open" and names[uploads[1] + 1] == "open"
+
+
+
+async def test_uploaded_tiles_are_shown_before_attaching(logged_in_profile, tmp_path):
+    profile = logged_in_profile()
+    store(profile)
+    first, second = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    first.write_bytes(b"\xff\xd8x")
+    second.write_bytes(b"\xff\xd8y")
+    kw, pages, _ = harness()
+    await flow_generate(profile, "video", "an apple", start_frame=str(first),
+                        end_frame=str(second), i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    calls = pages[0].calls
+    shown = calls.index(("show_tiles", ("a.jpg", "b.jpg")))
+    assert shown < next(i for i, c in enumerate(calls) if c[0] == "attach")

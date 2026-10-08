@@ -99,7 +99,7 @@ class FakeUi:
 
     def __init__(self, responses=None, labels=None, visible=None, record_pauses=False,
                  texts=None, checks=None, inner=None, url="https://flow.google.com/",
-                 missing=(), enabled=None):
+                 missing=(), enabled=None, texts_shown=None):
         self.ops = []
         self.waits = []  # (method, timeout_s) of every ResponseLog.next
         self._record_pauses = record_pauses
@@ -112,6 +112,7 @@ class FakeUi:
         self._labels = {k: list(v) for k, v in (labels or {}).items()}
         self._visible = {k: list(v) for k, v in (visible or {}).items()}
         self._enabled = {k: list(v) for k, v in (enabled or {}).items()}
+        self._shown = {k: list(v) for k, v in (texts_shown or {}).items()}
 
     async def goto(self, url):
         self.ops.append(("goto", url))
@@ -156,6 +157,9 @@ class FakeUi:
 
     async def labels(self, role, name):
         return self._answer(self._labels, (role, self._key(name)), [])
+
+    async def has_text(self, text):
+        return self._answer(self._shown, text, True)
 
     async def enabled(self, role, name):
         """Scripted per (role, name); otherwise one control, disabled once it was activated."""

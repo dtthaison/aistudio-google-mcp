@@ -311,3 +311,21 @@ async def test_edit_never_takes_the_source_or_another_jobs_clip(fake_ui):
     page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
     outcome = await page.edit("make it black and white", timeout_s=60, known={MEDIA})
     assert [m.media_id for m in outcome.media] == ["m3"] and page.paid_media == ["m3"]
+
+
+
+async def test_new_upload_tiles_are_waited_for_with_reloads(fake_ui):
+    # Live: right after an upload, a reload can list the project without it.
+    ui = fake_ui(texts_shown={"b.png": [False, False, False, True]},
+                 url=f"https://flow.google.com/project/{PID}")
+    await FlowPage(ui, now=Clock()).show_tiles(PID, ["a.png", "b.png"])
+    assert len([op for op in ui.ops if op[0] == "goto"]) >= 1
+
+
+async def test_tiles_that_never_show_are_an_error_before_anything_is_sent(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(texts_shown={"b.png": [False]}, url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).show_tiles(PID, ["b.png"])
+    assert "nothing was sent" in info.value.message

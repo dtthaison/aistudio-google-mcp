@@ -105,6 +105,8 @@ SEARCH_ASSETS = 'input[placeholder="Search assets"]'  # the + panel's search box
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
 CREDIT_POLLS = 8  # x 800 ms for the account menu to show the credits
+TILE_RELOADS = 4  # reloads to wait for a new upload's tile (the list can lag the upload)
+TILE_POLLS = 8  # x 1 s per reload
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
@@ -398,6 +400,19 @@ class FlowPage:
                         return media.media_id
         raise BrowserError(f"Flow did not report the uploaded {path.name}",
                            hint="check the project's Uploads in Flow")
+
+    async def show_tiles(self, project_id: str, titles: list[str]) -> None:
+        """Reload until every title has its tile: right after an upload, a reload can list the
+        project without it (live), and attach works by the tile."""
+        for _ in range(TILE_RELOADS):
+            await self.open_project(project_id)
+            for _ in range(TILE_POLLS):
+                missing = [t for t in titles if not await self._ui.has_text(t)]
+                if not missing:
+                    return
+                await self._ui.pause(1000)
+        raise BrowserError(f"Flow does not show {', '.join(missing)} yet; nothing was sent",
+                           hint="re-run in a minute, passing the reported uploads' media ids")
 
     async def attach(self, title: str) -> None:
         await self._ui.hover_text(title)

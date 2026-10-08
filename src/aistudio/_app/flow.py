@@ -144,6 +144,13 @@ async def flow_generate(
                     await page.open_project(project_id)  # the + panel stays open (live)
                 else:
                     attached_ids.append(value)
+            if uploads:  # a reload can list the project without the newest upload (live)
+                try:
+                    await page.show_tiles(project_id, [u["file"] for u in uploads])
+                except AIStudioError as exc:
+                    ids = ", ".join(u["media_id"] for u in uploads)
+                    exc.hint = f"{exc.hint}: {ids}" if exc.hint else ids
+                    raise
             await page.new_session()
             for title in titles:
                 await page.attach(title)
