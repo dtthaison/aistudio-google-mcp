@@ -106,7 +106,7 @@ class FakePage:
 
     async def extend(self, prompt, *, timeout_s):
         self.calls.append(("extend", prompt))
-        self.paid_media = ["m2"]
+        self.paid_media, self.last_scene_id = ["m2"], "s1"
         return FlowOutcome([media("m2")], 1021, False)
 
     async def open_character(self, pid):
@@ -151,6 +151,7 @@ async def test_projects_and_media_lists(logged_in_profile):
     videos = await flow_media(profile, kind="video", **kw)
     assert [(m["media_id"], m["title"], m["kind"]) for m in videos["media"]] == [
         (VID, "Red apple rolling on table", "video")]
+    assert videos["media"][0]["prompt"] == "p"
 
 
 async def test_download_needs_a_finished_media(logged_in_profile, tmp_path):
@@ -301,3 +302,12 @@ async def test_uploads_are_reported_so_the_paid_run_can_reuse_them(logged_in_pro
                                  i_have_rights=True, out=tmp_path / "a.mp4", **kw)
     assert result["status"] == "quoted"
     assert result["uploads"] == [{"file": "me.jpg", "media_id": "up1"}]
+
+
+async def test_extend_reports_the_scene_and_the_cli_model_id(logged_in_profile, tmp_path):
+    profile = logged_in_profile()
+    store(profile)
+    kw, _, _ = harness()
+    result = await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "x.mp4",
+                               **kw)
+    assert result["scene_id"] == "s1" and result["model"] == "veo-3.1-lite"

@@ -119,3 +119,17 @@ def test_flow_character_and_extend(logged_in_profile, monkeypatch):
                                    "--json"])
     assert res.exit_code == 2 and calls[-1][0] == ("m1", "rolls off")
     assert calls[-1][1]["max_credits"] == 10
+
+
+def test_flow_image_has_no_frames(logged_in_profile):
+    logged_in_profile()
+    res = CliRunner().invoke(cli, ["flow", "image", "x", "--start-frame", "a.jpg"])
+    assert res.exit_code == 2  # no such option on images
+
+
+def test_unknown_credits_say_unknown(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate",
+                        fake({**DONE, "credits_left": None}, []))
+    res = CliRunner().invoke(cli, ["flow", "video", "x", "--max-credits", "10"])
+    assert "credits left unknown" in res.stdout and "None" not in res.stdout

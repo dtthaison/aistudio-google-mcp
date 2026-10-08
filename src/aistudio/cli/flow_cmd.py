@@ -42,20 +42,24 @@ def credits_cmd(state: CliState, visible: bool, json_output: bool) -> None:
          render=lambda d: stdout.print(f"{d['credits']} Flow credits left", markup=False))
 
 
+def _left(data: dict[str, Any]) -> str:
+    left = data.get("credits_left")
+    return "credits left unknown" if left is None else f"{left} left"
+
+
 def _render(data: dict[str, Any]) -> None:
     if data["status"] == "quoted":
         stdout.print(f"Flow quotes {data['credits']} credits for {data['count']} output(s): "
                      f"{data['plan']}", markup=False)
-        stdout.print(f"Nothing was spent. Re-run with --max-credits {data['credits']} to "
-                     "generate.", markup=False)
+        stdout.print(f"Nothing was spent (Flow's request was declined). Re-run with "
+                     f"--max-credits {data['credits']} to generate.", markup=False)
     elif data["status"] == "timeout":
         stdout.print(f"Still running in Flow ({data['credits_spent']} credits spent): "
                      f"{data['project_url']}", markup=False)
     else:
         for file in data["files"]:
             stdout.print(f"Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
-        stdout.print(f"Spent {data['credits_spent']} credits; {data['credits_left']} left",
-                     markup=False)
+        stdout.print(f"Spent {data['credits_spent']} credits; {_left(data)}", markup=False)
     for warning in data.get("warnings", []):
         stderr.print(f"Warning: {warning}", markup=False)
 
@@ -79,8 +83,6 @@ def _command(kind: str) -> click.Command:
     @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
     @click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
                   help="Seconds to wait for Flow to finish after approving.")
-    @click.option("--start-frame", help="Start frame: an image file or a Flow media id.")
-    @click.option("--end-frame", help="End frame: an image file or a Flow media id.")
     @click.option("--ingredient", multiple=True,
                   help="Reference image: a file or a Flow media id (repeatable).")
     @click.option("--i-have-rights", is_flag=True,
@@ -106,7 +108,11 @@ def _command(kind: str) -> click.Command:
         if result["status"] == "timeout":
             raise SystemExit(2)
 
-    if kind == "video":
+    if kind == "video":  # frames and length are video-only (spec §3)
+        command = click.option("--end-frame",
+                               help="End frame: an image file or a Flow media id.")(command)
+        command = click.option("--start-frame",
+                               help="Start frame: an image file or a Flow media id.")(command)
         command = click.option("--duration", type=int, help="Seconds (per the model: Veo "
                                "3.1 Lite/Fast 4/6/8, Quality 8, Omni 4/6/8/10).")(command)
     help_text = (f"Generate {kind}s with Google Flow. Without --max-credits it only shows "
@@ -125,8 +131,7 @@ def _render_files(data: dict[str, Any]) -> None:
     for file in data.get("files", []):
         stdout.print(f"Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
     if "credits_spent" in data and data.get("status") == "done":
-        stdout.print(f"Spent {data['credits_spent']} credits; {data['credits_left']} left",
-                     markup=False)
+        stdout.print(f"Spent {data['credits_spent']} credits; {_left(data)}", markup=False)
     for warning in data.get("warnings", []):
         stderr.print(f"Warning: {warning}", markup=False)
 

@@ -175,3 +175,12 @@ async def test_upload_without_a_rights_dialog_still_completes(fake_ui, tmp_path)
                   "as29s": [poll("as29s", record(media_id="new2"))]})
     assert await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).upload(image) == "new2"
     assert ("dispatch", "button", "I agree") not in ui.ops
+
+
+async def test_extend_reads_the_scene_flow_creates(fake_ui):
+    scene = [["s1", "Untitled Scene", None, [1, 0], [1, 0], 2, None, []]]
+    made = CapturedResponse("rqZuUc", 200, batch("rqZuUc", scene), "")
+    ui = extend_ui(fake_ui, ("rqZuUc", [made]), ("as29s", [poll("as29s", record(media_id="m2"))]))
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    await page.extend("rolls off", timeout_s=60)
+    assert page.last_scene_id == "s1"

@@ -31,6 +31,7 @@ from aistudio._flow.rows import (
     parse_permission,
 )
 from aistudio._flow.wire import decode_batch, payloads
+from aistudio._rpc.wire import opt_index
 from aistudio.exceptions import BrowserError, NotFoundError
 
 HOME_URL = "https://flow.google.com/"
@@ -67,6 +68,7 @@ CHAT_METHOD = "StreamChat"
 ASKS_FIRST = re.compile(r"^Always\b.*ask for confirmation")  # "Confirm before generating"
 CREATED_SLACK_S = 120  # clock skew allowed when matching job records to this run
 REPLY_GRACE_S = 10.0  # after a reply without a permission request, wait this long for one
+PROMPT_POLLS = 20  # x 250 ms for the editor to show a typed or inserted prompt
 SAVE = "Save"  # the tune panel keeps changes only after Save (live probe)
 SAVE_METHOD = "Kcr7Ub"  # the save call Save sends
 SAVE_TIMEOUT_S = 10.0
@@ -135,6 +137,7 @@ class FlowPage:
         self._clock = clock  # wall clock, compared with Flow's job creation times
         self._poll_s = poll_s
         self.paid_media: list[str] = []  # media ids of the approved job, as soon as seen
+        self.last_scene_id: str | None = None  # the scene an extension creates
 
     async def open_project(self, project_id: str) -> None:
         await self._ui.goto(PROJECT_URL.format(id=project_id))
@@ -217,6 +220,7 @@ class FlowPage:
         """
         async with self._ui.responses(marker=CHAT_RPC) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
+            await self._wait_for_prompt(text)
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             while self._now() < deadline:
@@ -229,6 +233,17 @@ class FlowPage:
                         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote)
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
+
+    async def _wait_for_prompt(self, text: str) -> None:
+        """Enter only once the editor shows the prompt: a long prompt is inserted at once, and an
+        immediate Enter sent an empty box (live)."""
+        want = int(len(" ".join(text.split())) * 0.9)
+        for _ in range(PROMPT_POLLS):
+            if len(await self._ui.text_of(PROMPT_EDITOR)) >= want:
+                return
+            await self._ui.pause(250)
+        raise BrowserError("the prompt did not reach Flow's editor; nothing was sent",
+                           hint="re-run; if it persists, add --visible to watch it")
 
     async def reject(self) -> None:
         await self._ui.activate("radio", "Reject", exact=True)
@@ -355,6 +370,10 @@ class FlowPage:
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             await self._ui.click("button", START, exact=True, nth=-1)
+            scene = await log.next("rqZuUc", timeout_s=15.0)  # Flow wraps the clips in a scene
+            if scene is not None:
+                scene_id = opt_index(decode_batch(scene.text).get("rqZuUc"), 0, 0)
+                self.last_scene_id = scene_id if isinstance(scene_id, str) else None
             started = await log.next("fZytfe", timeout_s=60.0)
             credits, media = (extend_started(decode_batch(started.text).get("fZytfe"))
                               if started is not None and started.status < 400 else (None, []))

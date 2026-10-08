@@ -30,6 +30,20 @@ MODELS = (
 )
 
 
+# Flow's internal model keys seen in job records (findings), mapped to CLI ids.
+MODEL_KEYS = {"veo_3_1_t2v_lite": "veo-3.1-lite", "veo_3_1_extension_lite": "veo-3.1-lite"}
+
+
+def model_by_label(label: str) -> FlowModel | None:
+    return next((m for m in MODELS if _norm(m.label) == _norm(label)), None)
+
+
+def label_to_id(label: str) -> str:
+    """The CLI id for a picker label; the label itself when aistudio does not know it."""
+    model = model_by_label(label)
+    return model.id if model else label
+
+
 def find_model(model_id: str, kind: str) -> FlowModel:
     wanted = model_id.strip().lower()
     for model in MODELS:

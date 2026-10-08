@@ -11,6 +11,7 @@ from typing import Any
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
 from aistudio._flow.models import (
+    MODEL_KEYS,
     Decision,
     Expect,
     check_direct_spend,
@@ -18,6 +19,8 @@ from aistudio._flow.models import (
     decide,
     find_model,
     instruction,
+    label_to_id,
+    model_by_label,
 )
 from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
 from aistudio._flow.rows import parse_plan
@@ -101,6 +104,8 @@ async def flow_generate(
         wanted = Defaults(flow_model.label if flow_model else previous.model,
                           aspect or previous.aspect, count or previous.count)
         _check_output(out, wanted.count, overwrite)  # the count may come from Flow's defaults
+        if duration is not None and flow_model is None:  # check against the default model
+            check_options(kind, model_by_label(previous.model), None, None, duration)
         uploads: list[dict[str, str]] = []
         try:
             if wanted != previous:
@@ -126,7 +131,10 @@ async def flow_generate(
                             duration)
             decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
             if decision is Decision.QUOTE_ONLY:
-                return {"status": "quoted", "credits": turn.quote.credits,
+                # Declined in Flow too: a waiting request could later be approved there with
+                # the restored settings, not the quoted ones.
+                await page.reject()
+                return {"status": "quoted", "declined": True, "credits": turn.quote.credits,
                         "count": turn.quote.count, "plan": turn.text, "project": project_id,
                         **({"uploads": uploads} if uploads else {}),
                         **({"warnings": wrong} if wrong else {})}
@@ -158,15 +166,21 @@ async def flow_generate(
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": turn.quote.credits,
                 **({"warnings": warnings} if warnings else {})}
+    expected_id = flow_model.id if flow_model else label_to_id(wanted.model)
+    made = {MODEL_KEYS[m.model_key] for m in outcome.media if m.model_key in MODEL_KEYS}
+    warnings += [f"Flow made the {kind} with {got}, not {expected_id}"
+                 for got in sorted(made) if got != expected_id]
     if duration is not None:
         lengths = {m.seconds for m in outcome.media if m.seconds is not None}
         warnings += [f"Flow made a {n}-second video, not the {duration} seconds asked for"
                      for n in sorted(lengths) if n != duration]
-    files = await _save_all(kind, outcome.media, out=out, overwrite=overwrite,
-                            downloader=downloader, stamp=now(), project_url=project_url)
+    files, saved_notes = await _save_all(kind, outcome.media, out=out, overwrite=overwrite,
+                                         downloader=downloader, stamp=now(),
+                                         project_url=project_url)
+    warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": turn.quote.credits,
             "credits_left": outcome.credits_left,
-            "model": flow_model.id if flow_model else wanted.model, "project": project_id,
+            "model": expected_id, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
 
 
@@ -273,6 +287,7 @@ async def flow_media(profile: Profile, *, project: str | None = None, kind: str 
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
     items = [{"media_id": m.media_id, "title": contents.titles.get(m.media_id),
+              "prompt": m.prompt,
               "kind": _media_kind(m),
               "status": {None: "ready", 1: "running", 2: "running", 3: "done"}.get(
                   m.status, f"status:{m.status}"),
@@ -304,9 +319,10 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
     if not (found.video_url if kind == "video" else found.image_url):
         raise ValidationError(f"media {media_id} has no download yet (still running or failed)",
                               hint="check it in Flow, then retry")
-    files = await _save_all(kind, [found], out=out, overwrite=overwrite, downloader=downloader,
-                            stamp=now(), project_url=PROJECT_URL.format(id=project_id))
-    return {"files": files, "project": project_id}
+    files, warnings = await _save_all(kind, [found], out=out, overwrite=overwrite,
+                                      downloader=downloader, stamp=now(),
+                                      project_url=PROJECT_URL.format(id=project_id))
+    return {"files": files, "project": project_id, **({"warnings": warnings} if warnings else {})}
 
 
 def _cost_warning(before: int | None, after: int | None, price: int) -> tuple[int, list[str]]:
@@ -369,10 +385,13 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
                 "media_ids": page.paid_media or [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": spent,
                 **({"warnings": warnings} if warnings else {})}
-    files = await _save_all("video", outcome.media, out=out, overwrite=overwrite,
-                            downloader=downloader, stamp=now(), project_url=project_url)
+    files, saved_notes = await _save_all("video", outcome.media, out=out, overwrite=overwrite,
+                                         downloader=downloader, stamp=now(),
+                                         project_url=project_url)
+    warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
-            "model": label, "source": media_id, "project": project_id,
+            "model": label_to_id(label), "scene_id": page.last_scene_id, "source": media_id,
+            "project": project_id,
             **({"warnings": warnings} if warnings else {})}
 
 
@@ -402,16 +421,17 @@ async def flow_character(profile: Profile, description: str, *, max_credits: int
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
-    files = await _save_all("image", outcome.media, out=out, overwrite=overwrite,
-                            downloader=downloader, stamp=now(),
-                            project_url=PROJECT_URL.format(id=project_id))
+    files, saved_notes = await _save_all("image", outcome.media, out=out, overwrite=overwrite,
+                                         downloader=downloader, stamp=now(),
+                                         project_url=PROJECT_URL.format(id=project_id))
+    warnings += saved_notes
     return {"status": "done", "character_id": outcome.character_id, "files": files,
             "credits_spent": spent, "credits_left": after, "model": model,
             "project": project_id, **({"warnings": warnings} if warnings else {})}
 
 
 def _project_id(value: str) -> str:
-    match = _PROJECT.search(value.strip())
+    match = _PROJECT.search(value.strip().split("#", 1)[0].split("?", 1)[0])
     if match is None:
         raise ValidationError(f"{value!r} is not a Flow project id or link",
                               hint="copy the id from https://flow.google.com/project/<id>")
@@ -451,10 +471,11 @@ async def _open(page: Any, profile: Profile, project_id: str | None) -> str:
 
 async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite: bool,
                     downloader: Callable[[str], Any], stamp: datetime,
-                    project_url: str) -> list[dict[str, Any]]:
+                    project_url: str) -> tuple[list[dict[str, Any]], list[str]]:
     ids = ", ".join(m.media_id for m in media)
     folder = out if out is not None and out.is_dir() else Path(".")
-    files = []
+    files: list[dict[str, Any]] = []
+    warnings: list[str] = []
     try:
         for i, item in enumerate(media):
             url = item.video_url if kind == "video" else item.image_url
@@ -464,6 +485,8 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
             mime, ext = _type_of(kind, data)
             if out is not None and not out.is_dir() and len(media) == 1:
                 path = out
+                if _normal_suffix(out.suffix) != ext:
+                    warnings.append(f"{out} holds {mime} data; its extension says otherwise")
             else:
                 suffix = f"-{i + 1}" if len(media) > 1 else ""
                 path = free_name(folder / f"flow-{kind}-{stamp:%Y%m%d-%H%M%S}{suffix}{ext}")
@@ -477,12 +500,22 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
                               hint=note) from exc
         exc.hint = f"{note} ({exc.hint})" if exc.hint else note
         raise
-    return files
+    return files, warnings
 
 
 def _type_of(kind: str, data: bytes) -> tuple[str, str]:
-    if kind == "video":
-        return "video/mp4", ".mp4"
+    """The real type from the bytes (Flow returns JPEG images even for a .png name)."""
     if data.startswith(b"\x89PNG"):
         return "image/png", ".png"
+    if data.startswith(b"\xff\xd8"):
+        return "image/jpeg", ".jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", ".webp"
+    if data[4:8] == b"ftyp" or kind == "video":
+        return "video/mp4", ".mp4"
     return "image/jpeg", ".jpg"
+
+
+def _normal_suffix(suffix: str) -> str:
+    lowered = suffix.lower()
+    return ".jpg" if lowered == ".jpeg" else lowered

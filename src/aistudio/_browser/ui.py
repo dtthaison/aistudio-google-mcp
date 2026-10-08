@@ -21,6 +21,7 @@ from aistudio._auth.login import default_playwright_factory, launch_persistent
 from aistudio.exceptions import AIStudioError, AuthError, BrowserError
 from aistudio.paths import Profile
 
+TYPE_LIMIT = 200  # longer text is inserted at once (typing 2 KB at 10 ms/key is slow)
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
 RUN_SHORTCUT = "Meta+Enter" if sys.platform == "darwin" else "Control+Enter"
 RPC_MARKER = "MakerSuiteService/"
@@ -319,7 +320,10 @@ class PlaywrightUi:
         element = await self._first_visible(selector, 30.0)
         try:
             await element.focus()
-            await self._page.keyboard.type(text, delay=10)
+            if len(text) > TYPE_LIMIT:  # long prompts: one input event, not one per key
+                await self._page.keyboard.insert_text(text)
+            else:
+                await self._page.keyboard.type(text, delay=10)
         except Exception as exc:
             raise BrowserError(f"could not type into {selector!r}: {exc}") from exc
 

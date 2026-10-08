@@ -87,7 +87,8 @@ def chat(text):
 
 async def test_the_quote_comes_from_flows_structured_request(fake_ui):
     ui = fake_ui({"StreamChat": [chat(stream(permission(cost=10)))]},
-                 texts={AGENT_MESSAGE: ["Would you like me to kick off this 1 video generation, "
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 video."],
+                        AGENT_MESSAGE: ["Would you like me to kick off this 1 video generation, "
                                         "costing 1 credit? (echoed prompt text)"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert ui.ops == [("type", PROMPT_EDITOR, "Generate exactly 1 video."), ("key", "Enter")]
@@ -96,7 +97,7 @@ async def test_the_quote_comes_from_flows_structured_request(fake_ui):
 
 async def test_a_reply_without_a_permission_request_has_no_quote(fake_ui):
     ui = fake_ui({"StreamChat": [chat(stream([[None, [["c", None, None, ["open_chat_panel"]]]]]))]},
-                 texts={AGENT_MESSAGE: ["Which style would you like?"]})
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["Which style would you like?"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60)
     assert turn.quote is None and turn.text == "Which style would you like?"
 
@@ -212,3 +213,22 @@ async def test_new_session_expands_a_compact_prompt_box_first(fake_ui):
     await FlowPage(ui).new_session()
     assert ui.ops == [("activate", "button", "Expand", 0),
                       ("activate", "button", NEW_SESSION, 0)]
+
+
+async def test_enter_waits_until_the_editor_shows_the_prompt(fake_ui):
+    # Live: a 2 KB prompt is inserted at once; Enter pressed immediately sent an empty box.
+    ui = fake_ui({"StreamChat": [chat(stream(permission(cost=10)))]},
+                 texts={PROMPT_EDITOR: ["", "", "Generate exactly 1 video."],
+                        AGENT_MESSAGE: ["quote"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
+    assert turn.quote is not None and ("key", "Enter") in ui.ops
+
+
+async def test_a_prompt_that_never_reaches_the_editor_is_not_sent(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(texts={PROMPT_EDITOR: [""]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
+    assert "nothing was sent" in info.value.message
+    assert ("key", "Enter") not in ui.ops

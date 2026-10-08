@@ -54,10 +54,16 @@ class Loc:
 
 class Keyboard:
     def __init__(self):
-        self.pressed = []
+        self.pressed, self.typed, self.inserted = [], [], []
 
     async def press(self, key):
         self.pressed.append(key)
+
+    async def type(self, text, delay=None):
+        self.typed.append(text)
+
+    async def insert_text(self, text):
+        self.inserted.append(text)
 
 
 class Page:
@@ -189,3 +195,17 @@ def test_batched_rpcids_are_split():
     assert _methods("https://flow.google.com/_/X/data/batchexecute?rpcids=jwpduf,ngNC2&bl=1") == [
         "jwpduf", "ngNC2"]
     assert _methods("https://a/$rpc/x.MakerSuiteService/GenerateContent") == ["GenerateContent"]
+
+
+async def test_long_prompts_are_inserted_not_typed():
+    class Editor(El):
+        async def focus(self):
+            self.actions.append("focus")
+
+    editor = Editor()
+    page = Page({})
+    page.locator = lambda selector: Loc([editor])
+    ui = PlaywrightUi(page)
+    await ui.type_text(".ProseMirror", "short")
+    await ui.type_text(".ProseMirror", "x" * 2000)
+    assert page.keyboard.typed == ["short"] and page.keyboard.inserted == ["x" * 2000]

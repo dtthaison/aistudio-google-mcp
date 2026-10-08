@@ -105,12 +105,13 @@ def store(profile, pid):
     (profile.root / STATE_FILE).write_text(json.dumps({"project_id": pid}))
 
 
-async def test_quote_only_without_a_budget_spends_nothing(logged_in_profile, tmp_path):
+async def test_quote_only_rejects_flows_request(logged_in_profile, tmp_path):
+    # Plan C: a quote left waiting could later be approved in Flow with restored settings.
     kw, pages, opened = harness()
     result = await flow_generate(logged_in_profile(), "video", "an apple",
                                  model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
-    assert result["status"] == "quoted" and result["credits"] == 10
-    assert ("approve", 1) not in pages[0].calls and ("reject",) not in pages[0].calls
+    assert result["status"] == "quoted" and result["credits"] == 10 and result["declined"]
+    assert ("reject",) in pages[0].calls and ("approve", 1) not in pages[0].calls
     assert opened == ["minimized"]
 
 
@@ -306,3 +307,50 @@ async def test_credits_drift_hint_is_not_dev_capture(logged_in_profile):
     with pytest.raises(SchemaDriftError) as info:
         await flow_credits(logged_in_profile(), browser=browser, page_factory=NoCredits)
     assert "dev capture" not in (info.value.hint or "")
+
+
+async def test_flow_files_warn_on_an_extension_mismatch(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("kick off this 1 image generation, costing 2 credits?",
+                                      Quote(1, "image", 2)))
+
+    async def jpeg(url):
+        return b"\xff\xd8\xff\xe0 jpeg"
+
+    kw["downloader"] = jpeg
+    out = tmp_path / "x.png"
+    result = await flow_generate(logged_in_profile(), "image", "an apple", max_credits=2,
+                                 out=out, **kw)
+    assert result["files"][0]["mime_type"] == "image/jpeg" and out.exists()
+    assert f"{out} holds image/jpeg data; its extension says otherwise" in result["warnings"]
+
+
+async def test_model_is_reported_as_the_cli_id(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("kick off this 1 video generation, costing 10 credits?",
+                                      Quote(1, "video", 10)))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", max_credits=10,
+                                 out=tmp_path / "a.mp4", **kw)
+    assert result["model"] == "omni-1.1-flash"
+
+
+async def test_project_links_with_a_query_string(logged_in_profile, tmp_path):
+    kw, pages, _ = harness()
+    await flow_generate(logged_in_profile(), "video", "an apple",
+                        project=f"https://flow.google.com/project/{PID}?pli=1#x",
+                        out=tmp_path / "a.mp4", **kw)
+    assert ("open", PID) in pages[0].calls
+
+
+async def test_duration_is_checked_against_the_default_model(logged_in_profile, tmp_path):
+    kw, pages, _ = harness(defaults=Defaults("Veo 3.1 - Quality", "16:9", 1, asks=True))
+    with pytest.raises(ValidationError):
+        await flow_generate(logged_in_profile(), "video", "an apple", duration=6,
+                            out=tmp_path / "a.mp4", **kw)
+    assert not any(c[0] == "submit" for c in pages[0].calls)
+
+
+async def test_a_different_model_after_the_job_is_a_warning(logged_in_profile, tmp_path):
+    kw, _, _ = harness(turn=AgentTurn("kick off this 1 video generation, costing 20 credits?",
+                                      Quote(1, "video", 20)))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-fast",
+                                 max_credits=20, out=tmp_path / "a.mp4", **kw)
+    assert "Flow made the video with veo-3.1-lite, not veo-3.1-fast" in result["warnings"]
