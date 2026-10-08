@@ -96,7 +96,7 @@ async def flow_generate(
     warnings: list[str] = []
     if on_start:
         on_start()
-    free: tuple[list[Any], list[str], int | None] | None = None
+    free: tuple[list[Any], list[str]] | None = None
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         before = await page.credits()  # free models generate without asking (plan F)
@@ -212,9 +212,12 @@ async def flow_generate(
                     warnings.append(f"could not restore Flow's {kind} defaults "
                                     f"({previous.model}, {previous.aspect}, x{previous.count}); "
                                     "set them in Flow's settings")
+        if free is not None:  # after the restore: reading credits leaves the project page
+            after, free_notes = await _credits_after(page, None)
     project_url = PROJECT_URL.format(id=project_id)
     if free is not None:
-        media, notes, after = free
+        media, notes = free
+        notes = free_notes + notes
         spent, charge_notes = _free_charge(before, after)
         files, saved_notes = await _save_all(kind, media, out=out, overwrite=overwrite,
                                              downloader=downloader, stamp=now(),
@@ -252,8 +255,9 @@ async def flow_generate(
 
 async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any,
                     aspect: str | None, attached_ids: list[str], character_ids: list[str]
-                    ) -> tuple[list[Any], list[str], int | None]:
-    """What Flow made without asking: the media with links, notes, and credits after."""
+                    ) -> tuple[list[Any], list[str]]:
+    """What Flow made without asking: the media with links, and notes. Credits are read later,
+    after the settings are restored (reading them leaves the project page)."""
     notes = ["Flow generated without asking (free model), so there was no quote to check"]
     made = [g for g in turn.generated if g.status == "success"]
     notes += [f"Flow reported {g.media_id} as {g.status or 'unknown'}, not made"
@@ -283,8 +287,7 @@ async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any
                          f"aistudio flow download {generated.media_id}")
         else:
             media.append(found)
-    after, read_notes = await _credits_after(page, None)
-    return media, read_notes + notes, after
+    return media, notes
 
 
 def _free_charge(before: int | None, after: int | None) -> tuple[int | None, list[str]]:

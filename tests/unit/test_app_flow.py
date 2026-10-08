@@ -86,6 +86,7 @@ class FakePage:
         return self.outcome
 
     async def credits(self):
+        self.calls.append(("credits",))
         return self.credit_values.pop(0) if len(self.credit_values) > 1 else self.credit_values[0]
 
     async def media_details(self, media_id):
@@ -442,3 +443,18 @@ async def test_flow_generate_calls_on_start_before_the_browser(logged_in_profile
                             model="veo-3.1-lite", out=tmp_path / "b.mp4",
                             on_start=lambda: seen.append("late"), **kw)
     assert "late" not in seen
+
+
+
+async def test_a_free_run_restores_the_settings_before_leaving_the_project(logged_in_profile,
+                                                                         tmp_path):
+    # Live: reading credits opens Flow's home page, and restoring the settings needs the
+    # project page, so the restore failed and left the user's default changed.
+    from aistudio._flow.rows import Generated
+
+    made = (Generated("g1", "success", "image", "Nano Banana 2.1", "16:9"),)
+    kw, pages, _ = harness(turn=AgentTurn("done", None, generated=made), credit_values=(5, 5))
+    await flow_generate(logged_in_profile(), "image", "a lemon", count=2, out=tmp_path, **kw)
+    calls = pages[0].calls
+    restore = max(i for i, c in enumerate(calls) if c == ("apply", OMNI))
+    assert restore < max(i for i, c in enumerate(calls) if c == ("credits",))
