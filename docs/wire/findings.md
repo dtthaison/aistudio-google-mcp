@@ -359,3 +359,19 @@ The scratch scripts live in `/tmp` and are not kept.
   - kind, count and cost from the quote;
   - model, aspect and outputs from the saved and re-read settings;
   - the length after the job, as a warning.
+
+### Flow plan B discovery: lists (2026-10-08, free)
+
+- **Projects:** `UpteDb` is loaded by `flow.google.com/`. Its payload `[0]` is a list of
+  `[project_id, [title, null, [created_s, ns], thumbnail_url?, thumbnail_media_id?]]`, with titles
+  such as "aistudio" and "Oct 07 - 13:57".
+- **Project contents:** `Zzl0ze` is loaded by `/project/<id>`.
+  - `[1]` holds workflows: `[workflow_id, null, null, [title, [created], null, null, media_id, …,
+    [updated]], project_id]`.
+  - `[2]` holds **media records**, in the same shape as `as29s`, including the signed
+    `flow-content.google` links.
+  - `[3]` holds **voices**, e.g.
+    `["achernar", 3, "Achernar", ["achernar", …, [["Achernar", "Female, soft, high pitch", true, <sample url>]]]]`.
+  - `ngNC2` repeats the project title and its thumbnail media id.
+- **Paid check (CLI, approved):** `flow video -m veo-3.1-lite --duration 8 --max-credits 10`
+  finished in 96 s. Credits went 1,040 → 1,030 and the downloaded MP4 was 2,286,873 bytes.
