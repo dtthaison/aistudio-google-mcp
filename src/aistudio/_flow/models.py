@@ -6,7 +6,7 @@ import enum
 from dataclasses import dataclass
 
 from aistudio._flow.rows import Plan, Quote
-from aistudio.exceptions import ValidationError
+from aistudio.exceptions import OverBudgetError, ValidationError
 
 ASPECTS = {"video": ("16:9", "9:16"), "image": ("16:9", "4:3", "1:1", "3:4", "9:16")}
 COUNTS = (1, 2, 3, 4)
@@ -111,3 +111,20 @@ def decide(quote: Quote, plan: Plan, expect: Expect,
 
 def _norm(label: str | None) -> str:
     return "".join(ch for ch in (label or "").lower() if ch.isalnum())
+
+
+# Direct-spend actions: Flow charges without a quote, so aistudio keeps measured prices
+# (docs/wire/findings.md, "measured costs"). Add a row only after measuring it.
+PRICES = {("character", "Nano Banana 2.1"): 0, ("extend", "Veo 3.1 - Lite"): 10}
+
+
+def check_direct_spend(action: str, model_label: str, max_credits: int | None) -> int:
+    price = PRICES.get((action, model_label))
+    if price is None:
+        raise ValidationError(f"aistudio has no measured price for {action} with {model_label}",
+                              hint="Flow does not quote this action; it needs a measured price "
+                                   "in aistudio's table before it can be used")
+    if price > 0 and (max_credits is None or max_credits < price):
+        raise OverBudgetError(f"{action} with {model_label} costs {price} credits",
+                              hint=f"nothing was spent; pass --max-credits {price} to accept")
+    return price

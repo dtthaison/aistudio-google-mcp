@@ -75,3 +75,24 @@ def test_instruction_has_no_newlines_since_enter_submits():
                        seconds=None, aspect=None)
     assert "\n" not in text and "\r" not in text
     assert text.endswith("Prompt: para one para two three")
+
+
+def test_priced_actions_need_a_budget_that_covers_them():
+    from aistudio._flow.models import check_direct_spend
+    from aistudio.exceptions import OverBudgetError
+
+    assert check_direct_spend("character", "Nano Banana 2.1", None) == 0
+    assert check_direct_spend("extend", "Veo 3.1 - Lite", 10) == 10
+    with pytest.raises(OverBudgetError) as info:
+        check_direct_spend("extend", "Veo 3.1 - Lite", None)
+    assert "--max-credits 10" in info.value.hint
+    with pytest.raises(OverBudgetError):
+        check_direct_spend("extend", "Veo 3.1 - Lite", 9)
+
+
+def test_unpriced_actions_are_refused():
+    from aistudio._flow.models import check_direct_spend
+
+    with pytest.raises(ValidationError) as info:
+        check_direct_spend("extend", "Veo 3.1 - Fast", 100)
+    assert "price" in info.value.message
