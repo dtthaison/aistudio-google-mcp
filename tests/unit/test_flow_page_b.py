@@ -329,3 +329,10 @@ async def test_tiles_that_never_show_are_an_error_before_anything_is_sent(fake_u
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui, now=Clock()).show_tiles(PID, ["b.png"])
     assert "nothing was sent" in info.value.message
+
+
+
+async def test_media_details_returns_the_record_asked_for(fake_ui):
+    ui = fake_ui({"as29s": [poll("as29s", [[record(media_id="other"), record(media_id=MEDIA)]])]})
+    media = await FlowPage(ui).media_details(MEDIA)
+    assert media.media_id == MEDIA

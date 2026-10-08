@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -440,6 +441,7 @@ def _with_note(hint: str | None, note: str) -> str | None:
 
 
 _NAME_MAX = 100
+_HINT_TEXT_MAX = 200  # longer texts are not repeated inside a suggested command
 UNTITLED = "Untitled character"  # Flow's name for a character made from a description
 _FINISHED = 3
 _CLIP = re.compile(r"^(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
@@ -495,9 +497,13 @@ def _characters(contents: ProjectContents, wanted: list[str]) -> list[FlowCharac
     return out
 
 
-def _spent(exc: Exception, media_ids: list[str], project_id: str) -> AIStudioError:
-    """An error after Approve: credits may be spent, so name the media and forbid a re-run."""
-    note = (f"credits were spent: Flow made media {', '.join(media_ids) or '(not seen yet)'} in "
+def _spent(exc: Exception, media_ids: list[str], project_id: str, *, about: str | None = None,
+           paid: bool = True) -> AIStudioError:
+    """An error after Approve or Start: credits may be spent, so name the media (and what they
+    were for) and forbid a re-run."""
+    made = ", ".join(media_ids) or "(not seen yet)"
+    lead = "credits were spent: Flow made" if paid else "Flow may have made"
+    note = (f"{lead} media {made}{f' ({about})' if about else ''} in "
             f"{PROJECT_URL.format(id=project_id)}; do not re-run, check the project in Flow")
     if isinstance(exc, AIStudioError):
         exc.hint = note
@@ -611,12 +617,12 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
-        workflow_id = await _workflow_of(page, contents, media_id) if source else None
-        if source is None or workflow_id is None:
+        if source is None:
             raise NotFoundError(f"no media {media_id} in this Flow project",
                                 hint='see "aistudio flow media"')
         if _media_kind(source) != "video" or source.status != 3:
             raise ValidationError(f"media {media_id} is not a finished video")
+        workflow_id = await _workflow_of(page, contents, media_id)
         label = await page.extend_label(project_id, workflow_id)  # opens that exact clip
         price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
         try:
@@ -646,7 +652,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
             **({"warnings": warnings} if warnings else {})}
 
 
-async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
+async def flow_edit(profile: Profile, media_id: str, text: str, *,
                     max_credits: int | None = None, project: str | None = None,
                     out: Path | None = None, overwrite: bool = False, timeout_s: float = 600.0,
                     visible: bool = False, browser: Callable[..., Any] = open_browser,
@@ -654,8 +660,8 @@ async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
                     now: Callable[[], datetime] = datetime.now,
                     page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
     """Edit a clip with the editor's box (Omni; a direct spend priced from the table)."""
-    instruction = " ".join(instruction.split())
-    if not instruction:
+    text = " ".join(text.split())
+    if not text:
         raise ValidationError("nothing to do: the edit instruction is empty")
     project_id = _project_id(project) if project else None
     _check_output(out, 1, overwrite)
@@ -665,8 +671,7 @@ async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
-        workflow_id = await _workflow_of(page, contents, media_id) if source else None
-        if source is None or workflow_id is None:
+        if source is None:
             raise NotFoundError(f"no media {media_id} in this Flow project",
                                 hint='see "aistudio flow media"')
         if _media_kind(source) != "video" or source.status != 3:
@@ -682,15 +687,17 @@ async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
                                   f"{source.model_key or 'unknown'} clip",
                                   hint="only Veo 3.1 Lite clips are measured (20 credits); "
                                        "nothing was spent")
+        workflow_id = await _workflow_of(page, contents, media_id)
         label = await page.edit_label(project_id, workflow_id)  # opens that exact clip
         price = check_direct_spend("edit", label, max_credits)  # refuses before any spend
         known = {m.media_id for m in contents.media} | set(contents.titles) | {media_id}
         try:
-            outcome = await page.edit(instruction, timeout_s=timeout_s, known=known)
+            outcome = await page.edit(text, timeout_s=timeout_s, known=known)
         except Exception as exc:
             if not page.started:  # a check before Start: its own "nothing was spent" stands
                 raise
-            raise _spent(exc, page.paid_media, project_id) from exc  # Start may have spent
+            raise _spent(exc, page.paid_media, project_id,  # Start may have spent
+                         about=f"editing {media_id}") from exc
         after, read_notes = await _credits_after(page, outcome.credits_left)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
@@ -793,8 +800,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
             try:
                 await page.set_personality(project_id, cid, personality)
             except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
-                notes.append(f'Flow did not save the personality; set it with: aistudio flow '
-                             f'character personality {cid} "{personality}"')
+                again = (shlex.quote(personality) if len(personality) <= _HINT_TEXT_MAX
+                         else "TEXT")
+                notes.append(f"Flow did not save the personality; set it with: aistudio flow "
+                             f"character personality {cid} {again}")
                 personality = None
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
@@ -909,7 +918,8 @@ async def flow_character_body(profile: Profile, character_id: str, prompt: str, 
         except Exception as exc:
             if not page.started:  # a check before Start: nothing was made
                 raise
-            raise _spent(exc, page.paid_media, project_id) from exc
+            raise _spent(exc, page.paid_media, project_id, paid=price > 0,
+                         about=f"the body of character {character_id}") from exc
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
@@ -1054,13 +1064,16 @@ async def _scene_holding(page: Any, project_id: str, media_ids: list[str]) -> st
                  if any(c.media_id in media_ids for c in scene.clips)), None)
 
 
-async def _workflow_of(page: Any, contents: ProjectContents, media_id: str) -> str | None:
+async def _workflow_of(page: Any, contents: ProjectContents, media_id: str) -> str:
     """A clip's editor id: the project lists only its newest workflows (live), so older clips
     take it from their own record."""
     if media_id in contents.workflows:
         return contents.workflows[media_id]
     details = await page.media_details(media_id)
-    return details.workflow_id if details is not None else None
+    if details is None or not details.workflow_id:
+        raise BrowserError(f"Flow did not name the editor for media {media_id}; nothing was spent",
+                           hint="re-run; if it persists, open the clip in Flow once")
+    return details.workflow_id
 
 
 def _project_id(value: str) -> str:

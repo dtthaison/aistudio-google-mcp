@@ -373,7 +373,7 @@ class FlowPage:
             raise BrowserError(f"Flow did not return media {media_id} (HTTP {status})",
                                hint="re-run; if it persists, the Flow UI changed")
         records = media_records("as29s", decode_batch(text).get("as29s"))
-        return records[0] if records else None
+        return next((r for r in records if r.media_id == media_id), None)
 
     async def upload(self, path: Path, known_ids: set[str] | frozenset[str] = frozenset()) -> str:
         """Upload a local file (the caller has the person's --i-have-rights)."""

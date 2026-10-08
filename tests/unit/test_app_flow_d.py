@@ -48,13 +48,13 @@ class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
                  after=None, link_error=None, details_error=None, stored_name=None,
                  outcome_id="c1", personality_error=None, edit_model="Omni 1.1 Flash",
-                 edit_error=None, edit_timeout=False, **kw):
+                 edit_error=None, edit_timeout=False, body_error=None, **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
         self.stored_name, self.outcome_id = stored_name, outcome_id
         self.personality_error, self.edit_model = personality_error, edit_model
-        self.edit_error, self.edit_timeout = edit_error, edit_timeout
+        self.edit_error, self.edit_timeout, self.body_error = edit_error, edit_timeout, body_error
 
     async def start_character(self, description):
         self.calls.append(("character", description))
@@ -97,6 +97,8 @@ class FakePage(PlanBPage):
     async def start_body(self, prompt):
         self.calls.append(("body", prompt))
         self.started, self.paid_media = True, ["b1"]
+        if self.body_error:
+            raise self.body_error
         return [media("b1", video=False)]
 
     async def choose_character_model(self, label):
@@ -598,3 +600,47 @@ async def test_character_on_nano_banana_2_lite(logged_in_profile, tmp_path):
                                   out=tmp_path / "r.png", **kw)
     assert ("choose", "Nano Banana 2 Lite") in pages[0].calls
     assert result["model"] == "nano-banana-2-lite" and result["credits_spent"] == 0
+
+
+
+async def test_personality_hint_is_shell_safe(logged_in_profile, tmp_path):
+    import shlex
+
+    profile = profile_with_project(logged_in_profile)
+    text = 'Calm "brave" $(touch x) and kind'
+    kw, _, _ = harness(credits=(1010, 1010), personality_error=BrowserError("no"))
+    result = await flow_character(profile, "Apple", photo=IMG, personality=text,
+                                  out=tmp_path / "a.png", **kw)
+    assert any(f"personality c7 {shlex.quote(text)}" in w for w in result["warnings"])
+    kw, _, _ = harness(credits=(1010, 1010), personality_error=BrowserError("no"))
+    result = await flow_character(profile, "Apple 2", photo=IMG, personality="x" * 500,
+                                  out=tmp_path / "b.png", **kw)
+    assert not any("x" * 300 in w for w in result["warnings"])
+
+
+async def test_after_start_failures_name_the_subject(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(edit_error=(True, BrowserError("window closed")))
+    with pytest.raises(BrowserError) as info:
+        await flow_edit(profile, VID, "x", max_credits=20, out=tmp_path / "a.mp4", **kw)
+    assert f"editing {VID}" in info.value.hint
+    kw, _, _ = harness(body_error=BrowserError("window closed"))
+    with pytest.raises(BrowserError) as info:
+        await flow_character_body(profile, "c1", "x", out=tmp_path / "b.png", **kw)
+    assert "character c1" in info.value.hint and "credits were spent" not in info.value.hint
+
+
+async def test_a_record_without_a_workflow_is_named_as_such(logged_in_profile, tmp_path):
+    import dataclasses
+
+    profile = profile_with_project(logged_in_profile)
+    bare = ProjectContents(FULL.titles, FULL.media, {}, CHARS, [SCENE])
+    kw, _, _ = harness(contents=bare, details=dataclasses.replace(media(VID), workflow_id=None))
+    with pytest.raises(BrowserError) as info:
+        await flow_edit(profile, VID, "x", max_credits=20, out=tmp_path / "a.mp4", **kw)
+    assert "did not name the editor" in info.value.message
+    kw, pages, _ = harness(contents=bare)
+    with pytest.raises(ValidationError) as info:
+        await flow_edit(profile, IMG, "x", max_credits=20, out=tmp_path / "b.mp4", **kw)
+    assert "not a finished video" in info.value.message
+    assert not any(c[0] == "details" for c in pages[0].calls)
