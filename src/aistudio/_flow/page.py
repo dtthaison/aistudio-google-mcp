@@ -21,9 +21,11 @@ from aistudio._flow.rows import (
     FlowProject,
     ProjectContents,
     Quote,
+    character_id,
     credits_left,
     decode_contents,
     decode_projects,
+    extend_started,
     media_records,
     parse_permission,
 )
@@ -85,6 +87,12 @@ class Defaults:
 class AgentTurn:
     text: str
     quote: Quote | None
+
+
+@dataclass(frozen=True)
+class CharacterOutcome:
+    character_id: str | None
+    media: list[FlowMedia]
 
 
 @dataclass(frozen=True)
@@ -281,6 +289,51 @@ class FlowPage:
         await self._ui.pause(800)
         await self._ui.dispatch_click("menuitem", ADD_TO_PROMPT)
         await self._ui.pause(800)
+
+    async def create_character(self, project_id: str, description: str) -> CharacterOutcome:
+        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
+        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        await self._ui.type_text(EDITOR_ANY, description)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            await self._ui.click("button", START, exact=True)
+            created = await log.next("C4BZMd", timeout_s=60.0)
+            image = await log.next("ogiZ0b", timeout_s=180.0)
+        if image is None:
+            raise BrowserError("Flow did not make the character image",
+                               hint="check the project's Characters in Flow")
+        return CharacterOutcome(
+            character_id(decode_batch(created.text).get("C4BZMd")) if created else None,
+            media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")))
+
+    async def extend_label(self, title: str) -> str:
+        await self._ui.click_text(title)
+        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        await self._ui.dispatch_click("button", ADD_CLIP)
+        await self._ui.pause(1200)
+        text = await self._ui.inner_text("menuitem", EXTEND)
+        match = re.search(r"Extend \((.+)\)", text)
+        if match is None:
+            raise BrowserError("Flow offered no Extend for this clip",
+                               hint="only Veo clips can be extended")
+        return match.group(1).strip()
+
+    async def extend(self, title: str, prompt: str, *, timeout_s: float) -> FlowOutcome:
+        """Call after extend_label (the Add clip menu is open). Spends credits."""
+        await self._ui.dispatch_click("menuitem", EXTEND)
+        await self._ui.pause(1500)
+        await self._ui.type_text(EDITOR_LAST, prompt)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            since = self._clock()
+            await self._ui.click("button", START, exact=True, nth=-1)
+            started = await log.next("fZytfe", timeout_s=60.0)
+            if started is None:
+                raise BrowserError("Flow did not start the extension; it may still be charged",
+                                   hint="check the project in Flow before re-running")
+            credits, media = extend_started(decode_batch(started.text).get("fZytfe"))
+            self.paid_media = [m.media_id for m in media]
+            outcome = await self._follow(log, 1, timeout_s, "video", since)
+        return FlowOutcome(outcome.media, credits if outcome.credits_left is None
+                           else outcome.credits_left, outcome.timed_out)
 
     async def credits(self) -> int | None:
         await self._ui.goto(HOME_URL)

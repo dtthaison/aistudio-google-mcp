@@ -39,3 +39,29 @@ async def test_attach_uses_the_tiles_add_to_prompt(fake_ui):
     assert ui.ops[:3] == [("hover", "Red apple"),
                           ("dispatch_near", "button", "More options", "Red apple"),
                           ("dispatch", "menuitem", "Add to prompt")]
+
+
+async def test_create_character_returns_its_id_and_image(fake_ui):
+    image = ["i1", None, "w1", None, None, [[CREATED, 0], "a robot", None, None, None, None,
+                                            None, None, [3], 1,
+                                            "https://flow-content.google/image/i1?S=s"]]
+    ui = fake_ui({"C4BZMd": [CapturedResponse("C4BZMd", 200, batch(
+                      "C4BZMd", [[PID, "c1", None, [1, "Untitled character", []]]]), "")],
+                  "ogiZ0b": [CapturedResponse("ogiZ0b", 200, batch("ogiZ0b", [[image]]), "")]})
+    outcome = await FlowPage(ui, now=Clock()).create_character(PID, "a robot")
+    assert outcome.character_id == "c1" and outcome.media[0].image_url
+    assert ("type", "[contenteditable=true]", "a robot") in ui.ops
+
+
+async def test_extend_reads_the_model_and_follows_the_new_clip(fake_ui):
+    started = [None, 1020, [["w2"]], [record(status=2, with_links=False, media_id="m2")]]
+    ui = fake_ui({"fZytfe": [CapturedResponse("fZytfe", 200, batch("fZytfe", started), "")],
+                  "as29s": [poll("as29s", record(media_id="m2"))]},
+                 inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
+                                                  "Lite)"]},
+                 url=f"https://flow.google.com/project/{PID}")
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    await page.open_project(PID)
+    assert await page.extend_label("Red apple") == "Veo 3.1 - Lite"
+    outcome = await page.extend("Red apple", "rolls off", timeout_s=60)
+    assert [m.media_id for m in outcome.media] == ["m2"] and outcome.credits_left == 1020
