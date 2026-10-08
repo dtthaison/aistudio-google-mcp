@@ -532,3 +532,17 @@ async def test_edit_is_priced_by_model_and_length(logged_in_profile, tmp_path):
         await flow_edit(profile, SIX, "x", max_credits=100, out=tmp_path / "h.mp4", **kw)
     assert "6-second" in info.value.message
     assert not any(c[0] in ("edit_label", "edit") for c in pages[0].calls)
+
+
+
+async def test_an_older_clip_finds_its_workflow_from_its_record(logged_in_profile, tmp_path):
+    # Live: the clip was in the project, but not among the newest workflows Zzl0ze lists.
+    import dataclasses
+
+    profile = profile_with_project(logged_in_profile)
+    no_workflow = ProjectContents(FULL.titles, FULL.media, {}, CHARS, [SCENE])
+    kw, pages, _ = harness(contents=no_workflow, credits=(1000, 980),
+                           details=dataclasses.replace(media(VID), workflow_id="w-old"))
+    await flow_edit(profile, VID, "make it black and white", max_credits=20,
+                    out=tmp_path / "e.mp4", **kw)
+    assert ("edit_label", "w-old") in pages[0].calls

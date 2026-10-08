@@ -125,3 +125,13 @@ def test_generated_results_are_read_from_the_stream():
         ("g1", "success", "image", "Nano Banana 2.1", "16:9"),
         ("g2", "failed", "image", "Nano Banana 2.1", "16:9")]
     assert agent_generated([permission()]) == []
+
+
+
+def test_a_record_names_its_workflow():
+    # Live (plan G): the project's workflow list holds only the newest few; each media record
+    # carries its own workflow id.
+    from aistudio._flow.rows import media_records
+
+    (media,) = media_records("as29s", record())
+    assert media.workflow_id == "wf"

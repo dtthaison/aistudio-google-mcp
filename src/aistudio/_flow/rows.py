@@ -29,6 +29,7 @@ class FlowMedia:
     size: int | None
     video_url: str | None
     image_url: str | None
+    workflow_id: str | None = None  # the clip's editor id ([2] of its record)
 
 
 @dataclass(frozen=True)
@@ -331,6 +332,7 @@ def _record(row: Any) -> FlowMedia | None:
         size=size if isinstance(size, int) else None,
         video_url=next((s for s in links if s.startswith(_VIDEO)), None),
         image_url=next((s for s in links if s.startswith(_IMAGE)), None),
+        workflow_id=_str(opt_index(row, 2)),
     )
 
 

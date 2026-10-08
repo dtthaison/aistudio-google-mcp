@@ -571,7 +571,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
-        workflow_id = contents.workflows.get(media_id)
+        workflow_id = await _workflow_of(page, contents, media_id) if source else None
         if source is None or workflow_id is None:
             raise NotFoundError(f"no media {media_id} in this Flow project",
                                 hint='see "aistudio flow media"')
@@ -625,7 +625,7 @@ async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
-        workflow_id = contents.workflows.get(media_id)
+        workflow_id = await _workflow_of(page, contents, media_id) if source else None
         if source is None or workflow_id is None:
             raise NotFoundError(f"no media {media_id} in this Flow project",
                                 hint='see "aistudio flow media"')
@@ -1002,6 +1002,15 @@ async def _scene_holding(page: Any, project_id: str, media_ids: list[str]) -> st
         return None
     return next((scene.id for scene in contents.scenes
                  if any(c.media_id in media_ids for c in scene.clips)), None)
+
+
+async def _workflow_of(page: Any, contents: ProjectContents, media_id: str) -> str | None:
+    """A clip's editor id: the project lists only its newest workflows (live), so older clips
+    take it from their own record."""
+    if media_id in contents.workflows:
+        return contents.workflows[media_id]
+    details = await page.media_details(media_id)
+    return details.workflow_id if details is not None else None
 
 
 def _project_id(value: str) -> str:
