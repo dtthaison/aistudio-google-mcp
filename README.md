@@ -41,7 +41,12 @@ uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --du
 uv run aistudio flow media --type video                  # media ids in the "aistudio" project
 uv run aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
 uv run aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
-uv run aistudio flow character create "a friendly cartoon robot with round blue eyes" -o robot.png
+uv run aistudio flow character create Robo "a friendly cartoon robot with round blue eyes" -o robot.png
+uv run aistudio flow character create Apple --photo <image-media-id>    # free: the photo becomes the character
+uv run aistudio flow character list                     # ids and names; rename with "character rename ID NAME"
+uv run aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
+uv run aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
+uv run aistudio flow scene download <scene-id> -o scene.mp4              # e.g. the scene "flow extend" reports
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 
@@ -59,6 +64,10 @@ and its counts match your options (model, aspect and outputs are set in Flow's o
 first), aistudio approves it and downloads the result. Results go
 to a Flow project named "aistudio", unless you pass `--project`. Your Flow default settings are
 restored after each run.
+
+Characters have names that are unique in their project, because Flow attaches them by name;
+`--character` checks that Flow's request carries exactly the characters asked for before anything
+can be approved. A character from a photo, renaming, listing and stitching clips are free.
 
 Design: `docs/superpowers/specs/2026-10-06-aistudio-cli-design.md`
 

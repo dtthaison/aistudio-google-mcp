@@ -328,7 +328,7 @@ def scene_stitch(state: CliState, clips: tuple[str, ...], project: str | None, o
 @handle_errors
 def scene_download(state: CliState, scene_id: str, project: str | None, out: Path | None,
                    force: bool, timeout: int, visible: bool, json_output: bool) -> None:
-    """Download a scene (e.g. the one "flow extend" reports) as one MP4 (free)."""
+    """Download a scene as one MP4, such as the scene "flow extend" reports (free)."""
     state.require_browser()
     _finish(asyncio.run(flow_scene_download(state.profile(), scene_id, project=project, out=out,
                                             overwrite=force, timeout_s=float(timeout),

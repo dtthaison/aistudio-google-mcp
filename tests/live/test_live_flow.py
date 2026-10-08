@@ -1,21 +1,25 @@
 """Opt-in checks against the real Google Flow (needs the saved session).
 
-`uv run pytest -m live tests/live/test_live_flow.py` is free: it reads credits and gets a quote
-that is then rejected. `-m live_slow` makes one Veo 3.1 Lite video (about 10 credits); run it
-only with the user's OK.
+`uv run pytest -m live tests/live/test_live_flow.py` is free: it reads credits, lists, stitches
+two clips and gets quotes that are then rejected. `-m live_slow` makes one Veo 3.1 Lite video and
+one extension (about 10 credits each) and two characters (free); run it only with the user's OK.
 """
 
 import os
+from datetime import datetime
 
 import pytest
 
 from aistudio._app.flow import (
     flow_character,
+    flow_characters,
     flow_credits,
     flow_extend,
     flow_generate,
     flow_media,
     flow_projects,
+    flow_scenes,
+    flow_stitch,
 )
 from aistudio.exceptions import OverBudgetError
 from aistudio.paths import get_profile, resolve_profile_name
@@ -63,8 +67,8 @@ async def test_live_projects_and_media(profile):
 @pytest.mark.live_slow
 async def test_live_character_costs_nothing(profile, tmp_path):
     # 0 credits, but it creates a real character in the "aistudio" project.
-    result = await flow_character(profile, "a small paper boat with a red sail",
-                                  out=tmp_path / "boat.png")
+    result = await flow_character(profile, f"Paper boat {datetime.now():%m%d-%H%M%S}",
+                                  "a small paper boat with a red sail", out=tmp_path / "boat.png")
     assert result["credits_spent"] == 0 and (tmp_path / "boat.png").stat().st_size > 1000
 
 
@@ -77,3 +81,49 @@ async def test_live_extend_one_clip(profile, tmp_path):
     result = await flow_extend(profile, videos[0]["media_id"], "the camera slowly pulls back",
                                max_credits=10, out=tmp_path / "next.mp4")
     assert result["status"] == "done" and (tmp_path / "next.mp4").stat().st_size > 100_000
+
+
+@pytest.mark.live
+async def test_live_character_and_scene_lists(profile):
+    characters = (await flow_characters(profile))["characters"]
+    assert characters and all(c["id"] and c["name"] for c in characters)
+    scenes = (await flow_scenes(profile))["scenes"]
+    assert all(s["id"] for s in scenes)
+
+
+@pytest.mark.live
+async def test_live_stitch_is_free(profile, tmp_path):
+    videos = [m for m in (await flow_media(profile, kind="video"))["media"]
+              if m["status"] == "done" and m["seconds"]]
+    if len(videos) < 2:
+        pytest.skip("needs two finished videos")
+    before = (await flow_credits(profile))["credits"]
+    first, second = videos[0], videos[1]
+    result = await flow_stitch(profile, [first["media_id"], f"{second['media_id']}@0-3"],
+                               out=tmp_path / "joined.mp4")
+    assert result["files"][0]["bytes"] > 100_000
+    assert (await flow_credits(profile))["credits"] == before
+
+
+@pytest.mark.live
+async def test_live_quote_with_a_character_carries_it(profile, tmp_path):
+    characters = (await flow_characters(profile))["characters"]
+    names = [c["name"].casefold() for c in characters]
+    unique = [c for c in characters if c["media_id"] and names.count(c["name"].casefold()) == 1]
+    if not unique:
+        pytest.skip("no uniquely named character with an image")
+    result = await flow_generate(profile, "video", "the character waves at the camera",
+                                 characters=[unique[0]["name"]], out=tmp_path / "x.mp4")
+    assert result["status"] == "quoted" and result["declined"] is True
+
+
+@pytest.mark.live_slow
+async def test_live_character_from_a_photo_is_free(profile, tmp_path):
+    # Free, but it creates a real character in the "aistudio" project.
+    images = [m for m in (await flow_media(profile, kind="image"))["media"]
+              if m["status"] in ("done", "ready")]
+    if not images:
+        pytest.skip("no image in the project")
+    result = await flow_character(profile, f"Photo {datetime.now():%m%d-%H%M%S}",
+                                  photo=images[0]["media_id"], out=tmp_path / "photo.png")
+    assert result["credits_spent"] == 0 and (tmp_path / "photo.png").stat().st_size > 1000

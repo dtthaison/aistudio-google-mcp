@@ -64,7 +64,11 @@ quotes and write each `'` as `'\''`.
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
-| Flow character (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<description>' -o robot.png --json` |
+| Flow character from a description (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<Name>' '<description>' -o robot.png --json` |
+| Flow character from a photo (free; nothing is generated) | `aistudio flow character create '<Name>' --photo <image media id> --json` (a local file also needs `--i-have-rights`) |
+| Flow characters: list, rename (free) | `aistudio flow character list --json`, `aistudio flow character rename <id> '<Name>' --json` |
+| Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
+| Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
@@ -92,6 +96,12 @@ quotes and write each `'` as `'\''`.
   generating" is set to Never. Tell the user; aistudio will not change it.
 - **Never pass `--i-have-rights`** unless the user confirmed they have the rights to that exact
   file. It answers Flow's "Rights to use this image" question for them.
+- Flow character names are unique per project (Flow attaches characters by name). If
+  `--character` says several characters share a name, show the user `flow character list` and ask
+  which one to rename; never pick one yourself. A `PLAN_MISMATCH` about characters means Flow's
+  request carried other characters: it was rejected and nothing was spent.
+- After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
+  Stitch trims are whole seconds (`<id>@2-5`).
 - `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
   measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
   warning that Flow charged a different amount. "no measured price" is final: do not retry with a
