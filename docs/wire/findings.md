@@ -380,8 +380,20 @@ The scratch scripts live in `/tmp` and are not kept.
 - **Attachments are media ids.** The `StreamChat` request lists attached media next to the prompt:
   `[[[[prompt]]], [[media_id, …]]], ["projects/<id>", null, [<token>, 1], …]`. Frames and
   ingredients are therefore referenced by Flow media id.
-- **Upload not automatable yet.** "Add media → Upload" and the ingredients panel's "Upload media"
-  open no file picker, minimized or visible. There is no `<input type=file>` (shadow DOM
-  included), no `showOpenFilePicker` call, and a synthetic drop on the page does nothing. Local
-  files can't be used until the upload path is found.
+- **Upload.** The working route was pointed out by the user. One test upload was made with their
+  OK.
+  1. Open the prompt box's **+** ("Add ingredients to the prompt box") and choose **Upload media**.
+     Only a dispatched `click` event opens the file chooser; Enter and Space do nothing. Neither
+     "Add media → Upload" nor a drop does.
+  2. Set the file. A dialog appears: **"Rights to use this image: Make sure you have the necessary
+     rights to any content or files that you upload, including content of minors…"** with
+     **Cancel** and **I agree**.
+  3. After **I agree**, the page refreshes its reCAPTCHA token (`/recaptcha/enterprise/reload`),
+     then uploads with batchexecute **`maseQ`** (about 640 KB for a 450 KB JPEG, so base64), then
+     calls `as29s` for the new media.
+  4. The upload becomes a workflow titled with the file name ("apple.jpg") and a media record in
+     `Zzl0ze[2]` (here `91f49a6c…`).
+
+  The CLI may press "I agree" only with an explicit `--i-have-rights` for that run (user
+  decision).
 - **Expiry.** A banner reads: "Your oldest creations will expire soon. Opt-in to keep them around."
