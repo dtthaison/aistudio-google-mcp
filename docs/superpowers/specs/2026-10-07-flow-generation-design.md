@@ -228,3 +228,31 @@ Every error uses the existing JSON envelope. Nothing is spent unless noted.
 
   Until an item is mapped, its command is not shipped. Each plan task ends with that command
   working against real evidence.
+
+## 10. Amendments from plan A and plan B discovery (2026-10-08)
+
+Evidence: `docs/wire/findings.md`, Flow sections dated 2026-10-07 and 2026-10-08. The user's
+decisions are recorded in the conversation.
+
+1. **Checking the plan (§3.1).** Flow's permission request carries only counts and cost. The
+   model, aspect and outputs are guaranteed by the saved and re-read tune settings, a plan the
+   agent *states* must match, and a different length is reported after the job.
+2. **Direct-spend actions.** Character creation (`C4BZMd` + `ogiZ0b`) and Extend (`rqZuUc` +
+   `fZytfe`) spend without a Flow quote. They use a **measured price table** kept in
+   `_flow/models.py`. The table holds: character on Nano Banana 2.1, 0 credits; extend with
+   Veo 3.1 Lite, 10 credits.
+   - The command refuses unless `--max-credits` covers the table price. With a price of 0,
+     `--max-credits` is not needed.
+   - Credits are read before and after. A difference from the table price is reported as a
+     warning.
+   - An action with no table price (e.g. extend on Veo 3.1 Fast) is refused until it has been
+     measured.
+3. **Uploads.** A local file for `--start-frame`, `--end-frame`, `--ingredient` or `--photo` is
+   uploaded through **+ → Upload media**. Flow's "Rights to use this image" dialog is accepted
+   only with `--i-have-rights` for that run; without it the command stops before uploading. The
+   Claude Code skill tells agents to ask the user first.
+4. **Attachments** are Flow media ids. They are attached with a tile's "Add to prompt" (or as the
+   upload's result), and the instruction names their role (start frame, end frame, ingredient).
+5. **Extend** produces a new clip and a scene joining the source and the extension. `flow
+   extend` downloads the new clip and reports both ids. Stitching scenes (`flow scene`) moves to
+   a later plan; its "Download scene" output has not been mapped yet.
