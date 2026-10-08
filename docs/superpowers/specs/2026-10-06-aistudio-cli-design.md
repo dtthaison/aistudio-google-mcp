@@ -405,6 +405,17 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 
 ### 6.4 Media (images, video, audio, music)
 
+> **As shipped (2026-10-08).**
+> - `generate image "…" [--prompt-file F] [-m] [-o FILE] [--force] [--visible]` uses Gemini image
+>   models (Imagen refuses this session).
+> - `generate music "…" [--prompt-file F] [-m] [-o FILE] [--force] [--visible]` uses Lyria and is
+>   synchronous. It returns `text` with the lyrics or `<instrumental>`.
+> - Both return `{files: [{path, mime_type, bytes}], model, text?, warnings?}`.
+> - Video comes from Google Flow (`aistudio flow video`, see `2026-10-07-flow-generation-design.md`),
+>   because AI Studio's Veo page asks for a paid upgrade.
+> - The table below is the original plan. `--count`, `--aspect`, `--image`, `--lyrics`,
+>   `--duration` and job commands were not built.
+
 | Command | Behaviour | JSON |
 |---|---|---|
 | `generate image "…" [-m] [--count N] [--aspect R] [--image IN ...] -o DIR` | synchronous. Each `--image` (repeatable) supplies an input image to edit or compose. | `{files: [{path, mime_type}], model}` |
@@ -489,7 +500,8 @@ AI Studio's "Build with Agents" section lists agents in the picker's `agents` ca
 - Exit codes:
   - `0`: success
   - `1`: handled error
-  - `2`: unexpected error, or a wait timeout
+  - `2`: unexpected error, or a wait timeout (including a Flow job still running at `--timeout`)
+  - `3`: `status --fail-if-active` found an active incident
   - `130`: interrupt
 
 ## 7. MCP server

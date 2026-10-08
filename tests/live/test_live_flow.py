@@ -71,9 +71,9 @@ async def test_live_character_costs_nothing(profile, tmp_path):
 @pytest.mark.live_slow
 async def test_live_extend_one_clip(profile, tmp_path):
     videos = [m for m in (await flow_media(profile, kind="video"))["media"]
-              if m["status"] == "done"]
+              if m["status"] == "done" and m["model"] == "veo_3_1_t2v_lite"]
     if not videos:
-        pytest.skip("no finished video to extend")
+        pytest.skip("no finished Veo 3.1 Lite video to extend (only Lite is priced)")
     result = await flow_extend(profile, videos[0]["media_id"], "the camera slowly pulls back",
                                max_credits=10, out=tmp_path / "next.mp4")
     assert result["status"] == "done" and (tmp_path / "next.mp4").stat().st_size > 100_000

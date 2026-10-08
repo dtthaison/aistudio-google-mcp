@@ -90,8 +90,8 @@ decide(quote, plan, flags, max_credits) -> QUOTE_ONLY | APPROVE | REJECT_OVER_BU
 
 | Condition | Action | Result |
 |---|---|---|
-| `max_credits` is None | leave the request waiting in Flow | `status: "quoted"`, exit 0 |
-| `plan` differs from `flags` (model, count, length, kind) | press Reject | `PLAN_MISMATCH`, exit 1 |
+| `max_credits` is None | press Reject (amended, §10.6) | `status: "quoted"`, `declined: true`, exit 0 |
+| the quoted count/kind, or a plan the agent states, differs from `flags` (§10.1) | press Reject | `PLAN_MISMATCH`, exit 1 |
 | `quote.credits > max_credits` | press Reject | `OVER_BUDGET`, exit 1 |
 | otherwise | press Approve | continue to the job |
 
@@ -256,3 +256,11 @@ decisions are recorded in the conversation.
 5. **Extend** produces a new clip and a scene joining the source and the extension. `flow
    extend` downloads the new clip and reports both ids. Stitching scenes (`flow scene`) moves to
    a later plan; its "Download scene" output has not been mapped yet.
+6. **Quote-only runs decline Flow's request** (plan C). A request left waiting could later be
+   approved in Flow with the restored settings rather than the quoted ones. The result is
+   unchanged, plus `"declined": true`.
+7. **Result fields** (plan C):
+   - `model` is the CLI id (e.g. `veo-3.1-lite`) whenever aistudio knows the label;
+   - `flow extend` adds `scene_id`;
+   - `flow media` items carry `prompt`;
+   - `flow projects` reports `created`, because Flow lists no update time.

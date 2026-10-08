@@ -63,7 +63,7 @@ quotes and write each `'` as `'\''`.
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
-| Frames / reference images on flow video or image | `--start-frame X`, `--end-frame X`, `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
+| Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
 | Flow character (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<description>' -o robot.png --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 
@@ -74,11 +74,16 @@ quotes and write each `'` as `'\''`.
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
-  1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`.
+  1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
+     request is declined (nothing waits in Flow).
   2. Show the user the cost and ask.
   3. Re-run with `--max-credits <credits>`.
 
-  `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected and nothing was spent.
+  For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
+  and nothing was spent. For `flow extend`/`flow character create`, `OVER_BUDGET` is aistudio's own
+  refusal before anything was sent.
+  A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
+  `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
   `"status": "timeout"` means credits were spent: give the user `project_url`.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
@@ -88,11 +93,13 @@ quotes and write each `'` as `'\''`.
   file. It answers Flow's "Rights to use this image" question for them.
 - `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
   measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
-  warning that Flow charged a different amount.
+  warning that Flow charged a different amount. "no measured price" is final: do not retry with a
+  higher `--max-credits`.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
-- Browser commands (`app create/prompt`, `generate …`, `voices list`) share one Chrome
+- Browser commands (`app create/prompt`, `generate …`, `voices list`, every `flow …`) share one
+  Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;
   wait for it rather than retrying in a loop.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
