@@ -25,6 +25,7 @@ from aistudio.exceptions import (
     BotGuardError,
     BrowserError,
     NotFoundError,
+    QuotaExceededError,
     SchemaDriftError,
     ValidationError,
 )
@@ -78,6 +79,7 @@ async def generate_speech(
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], datetime] = datetime.now,
+    on_start: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not text.strip():
         raise ValidationError("nothing to speak: the text is empty")
@@ -87,6 +89,8 @@ async def generate_speech(
     _check_folder(path.parent if str(path.parent) else Path("."))
     async with client_factory(profile) as client:
         model_id = await check_speech_model(client, profile, model)
+    if on_start:
+        on_start()
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = SpeechPage(ui)
         await page.open()
@@ -162,6 +166,7 @@ async def _generate_media(
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], datetime] = datetime.now,
+    on_start: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     prompt = prompt.strip()  # e.g. a --prompt-file's trailing newline
     if not prompt:
@@ -172,6 +177,8 @@ async def _generate_media(
     async with client_factory(profile) as client:
         model_id = await check_model(client, profile, model, command=command, what=what,
                                      hint=hint)
+    if on_start:
+        on_start()
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_class(ui)
         await page.open(model_id)
@@ -201,7 +208,8 @@ async def _generate_media(
                 warnings.append(f"{path} appeared while generating; saved to {saved} instead")
             first = saved
         else:  # extra images never clobber anything, so nothing fails after a paid run
-            saved = _write(_free_name(first, start=2), part.data, overwrite=False)
+            saved = _write(_free_name(first.with_suffix(ext), start=2), part.data,
+                           overwrite=False)
         files.append({"path": str(saved), "mime_type": part.mime_type, "bytes": len(part.data)})
     return {
         "files": files,
@@ -217,7 +225,7 @@ def _refused(status: int, text: str, name: str) -> AIStudioError:
         return BotGuardError(f"Google refused the {name} request: {err.message}",
                              hint="re-run with --visible; a paid model may also need a "
                                   "paid tier")
-    if err.hint is None:
+    if err.hint is None and isinstance(err, (ValidationError, QuotaExceededError)):
         err.hint = _TIER_HINT
     return err
 

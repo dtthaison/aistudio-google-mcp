@@ -21,7 +21,7 @@ def read_text(text: str | None, text_file: Path | None, *, arg: str, option: str
         if max_bytes is not None and text_file.stat().st_size > max_bytes:
             raise ValidationError(f"{text_file} is larger than {max_bytes // 1024 // 1024} MB",
                                   hint="pass a shorter text file")
-        return text_file.read_text(encoding="utf-8")
+        return text_file.read_text(encoding="utf-8-sig")  # a BOM is not text
     except UnicodeDecodeError as exc:
         raise ValidationError(f"{text_file} is not UTF-8 text",
                               hint="save the file as UTF-8 text") from exc

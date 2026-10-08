@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -55,18 +56,19 @@ def speech(state: CliState, text: str | None, text_file: Path | None, model: str
     """Turn TEXT into speech. Put expression tags such as <laugh> inside the text."""
     state.require_browser()
     content = read_text(text, text_file, arg="TEXT", option="--text-file")
-    _notice("speech", visible, json_output)
     result = asyncio.run(generate_speech(
         state.profile(), content, model=model, voice=voice, style=style, out=out,
-        overwrite=force, visible=visible,
+        overwrite=force, visible=visible, on_start=_notice_for("speech", visible, json_output),
     ))
     emit(result, json_output=json_output, render=_render_speech)
 
 
-def _notice(what: str, visible: bool, json_output: bool) -> None:
-    if not json_output:
-        window = "visible" if visible else "minimized"
-        stderr.print(f"Generating {what} in a {window} Chrome window…", markup=False)
+def _notice_for(what: str, visible: bool, json_output: bool) -> Callable[[], None] | None:
+    """The "Generating…" line, printed by the use case once validation has passed."""
+    if json_output:
+        return None
+    window = "visible" if visible else "minimized"
+    return lambda: stderr.print(f"Generating {what} in a {window} Chrome window…", markup=False)
 
 
 def _render_media(data: dict[str, Any]) -> None:
@@ -97,10 +99,10 @@ def _media_command(name: str, category: str, default_model: str, help_text: str,
                 out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
         state.require_browser()
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
-        _notice(name, visible, json_output)
         run = generate_image if name == "image" else generate_music
         result = asyncio.run(run(state.profile(), content, model=model, out=out,
-                                 overwrite=force, visible=visible))
+                                 overwrite=force, visible=visible,
+                                 on_start=_notice_for(name, visible, json_output)))
         emit(result, json_output=json_output, render=_render_media)
 
     return command

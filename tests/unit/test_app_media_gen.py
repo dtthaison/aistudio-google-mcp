@@ -256,3 +256,36 @@ async def test_a_trailing_newline_from_a_prompt_file_is_not_sent(logged_in_profi
                        out=tmp_path / "x.jpg")
     assert ("fill", "textbox", IMAGE_PROMPT, "A red apple on a white table, studio photo") in ui.ops
     assert "warnings" not in result
+
+
+@respx.mock
+async def test_extra_parts_take_their_own_extension(logged_in_profile, make_client, fake_ui,
+                                                    captured, tmp_path):
+    serve_catalog(captured)
+    response = json.loads(captured("GenerateContent", 4).raw["response"]["body"])
+    first, finish = response[0]
+    png = json.loads(json.dumps(first))
+    png[0][0][0][0][0][2] = ["image/png", base64.b64encode(b"\x89PNG second").decode()]
+    body = json.dumps([[first, png, finish]])
+    result = await run(generate_image, logged_in_profile(),
+                       "A red apple on a white table, studio photo",
+                       media_ui(fake_ui, captured, 4, body=body), [], make_client,
+                       out=tmp_path / "x.jpg")
+    assert [Path(f["path"]).name for f in result["files"]] == ["x.jpg", "x-2.png"]
+
+
+async def test_paid_tier_hint_only_for_invalid_or_quota():
+    from aistudio._app.media import _refused
+
+    assert "paid tier" in _refused(400, '[3,"Request contains an invalid argument."]',
+                                   "image").hint
+    assert _refused(500, '[13,"internal"]', "image").hint is None
+
+
+async def test_on_start_runs_only_after_validation(logged_in_profile, fake_ui, tmp_path):
+    started = []
+    with pytest.raises(ValidationError):
+        await generate_image(logged_in_profile(), "  ", out=tmp_path / "x.jpg",
+                             browser=browser_with(fake_ui(), []),
+                             on_start=lambda: started.append(1))
+    assert started == []

@@ -6,7 +6,9 @@ from aistudio.cli.main import cli
 
 
 def fake(result, calls):
-    async def run(profile, *args, **kwargs):
+    async def run(profile, *args, on_start=None, **kwargs):
+        if on_start:
+            on_start()  # the use case prints the notice once validation passes
         calls.append((profile.name, args, kwargs))
         return result
 
@@ -141,3 +143,28 @@ def test_binary_or_huge_text_files_are_validation_errors(logged_in_profile, tmp_
         res = CliRunner().invoke(cli, ["generate", *args, "--json"])
         assert res.exit_code == 1, res.output
         assert json.loads(res.stdout)["code"] == "VALIDATION_ERROR"
+
+
+def test_a_bom_is_not_part_of_the_text(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.generate_cmd.generate_music", fake(MUSIC, calls))
+    prompt = tmp_path / "p.txt"
+    prompt.write_bytes("﻿calm piano".encode())
+    res = CliRunner().invoke(cli, ["generate", "music", "--prompt-file", str(prompt), "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[0][1] == ("calm piano",)
+
+
+def test_no_notice_when_validation_fails(logged_in_profile, monkeypatch):
+    logged_in_profile()
+
+    async def refuse(profile, *args, **kwargs):
+        from aistudio.exceptions import ValidationError
+
+        raise ValidationError("bad model")  # fails before any browser: on_start never runs
+
+    monkeypatch.setattr("aistudio.cli.generate_cmd.generate_image", refuse)
+    res = CliRunner().invoke(cli, ["generate", "image", "x", "-m", "nope"])
+    assert res.exit_code == 1
+    assert "Generating" not in res.stderr
