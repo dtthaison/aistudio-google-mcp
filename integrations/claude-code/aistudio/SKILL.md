@@ -66,7 +66,7 @@ quotes and write each `'` as `'\''`.
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
 | Flow character from a description (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<Name>' '<description>' -o robot.png --json` |
 | Flow character from a photo (free; nothing is generated) | `aistudio flow character create '<Name>' --photo <image media id> --json` (a local file also needs `--i-have-rights`) |
-| Flow characters: list, rename (free) | `aistudio flow character list --json`, `aistudio flow character rename <id> '<Name>' --json` |
+| Flow characters: list, rename, personality (free) | `aistudio flow character list --json`, `aistudio flow character rename <id> '<Name>' --json`, `aistudio flow character personality <id> '<notes>' --json` (or `--personality` on create) |
 | Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
@@ -77,6 +77,10 @@ quotes and write each `'` as `'\''`.
 - Speech: expression tags such as `<laugh>` go inside the text.
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
+- **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow
+  does not ask, so `flow image` without `--max-credits` already makes and downloads the images
+  (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
+  the user wants the images. Paid models (all video models, Nano Banana Pro) still quote first.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
      request is declined (nothing waits in Flow). If `"declined": false`, Flow's request is still

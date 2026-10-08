@@ -44,6 +44,7 @@ uv run aistudio flow extend <media-id> "the apple rolls off the table" --max-cre
 uv run aistudio flow character create Robo "a friendly cartoon robot with round blue eyes" -o robot.png
 uv run aistudio flow character create Apple --photo <image-media-id>    # free: the photo becomes the character
 uv run aistudio flow character list                     # ids and names; rename with "character rename ID NAME"
+uv run aistudio flow character personality <id> "calm and curious"     # free
 uv run aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
 uv run aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 uv run aistudio flow scene download <scene-id> -o scene.mp4              # e.g. the scene "flow extend" reports
@@ -64,6 +65,11 @@ and its counts match your options (model, aspect and outputs are set in Flow's o
 first), aistudio approves it and downloads the result. Results go
 to a Flow project named "aistudio", unless you pass `--project`. Your Flow default settings are
 restored after each run.
+
+Free models (Nano Banana 2.1 images) are generated at once: Flow does not ask, so there is no
+quote, and aistudio downloads the result and reports the credits read before and after (0).
+Avatars (a recorded selfie video), Flow Music (a separate site) and Tools (a builder) are not
+offered.
 
 Characters have names that are unique in their project, because Flow attaches them by name;
 `--character` checks that Flow's request carries exactly the characters asked for before anything
