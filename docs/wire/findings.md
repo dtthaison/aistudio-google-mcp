@@ -460,3 +460,46 @@ The scratch scripts live in `/tmp` and are not kept.
     record …]]]`, so the credits are charged at the start.
   - The result is a new 8 s clip (its own media id), plus the scene joining both clips
     (downloadable with "Download scene").
+
+### Flow plan D discovery: names, photos, character attachments, scenes (2026-10-08, free)
+
+Every probe here spent nothing (credits 1,010 before and after). Requests that would generate were
+blocked; the RPCs that went through are free.
+
+- **Project contents, more slots.** `Zzl0ze` (8 entries) also holds:
+  - `[4]` **scenes**: `[scene_id, title, null, [created], [updated], 2, null, []]`.
+  - `[5]` **characters**: `[project_id, character_id, null, [1, name, [[[ref_workflow_id]]]],
+    image_media_id, [w, h], [created], [updated]]`. A character never given an image has
+    `[1, name, []]`, `null`, `null`.
+  - `[6]` **scene clips**: `[[workflow_id, null, null, [title, [created], null, null, media_id,
+    …], project_id], scene_id, [position, [seconds], [], [seconds], [1]]]`, where `position` is
+    `null` for the first clip and `1` for the second.
+- **Rename a character.** The "Character name" input (or "Edit name") sends `rzMKMb`:
+  `[[project_id, character_id, null, [1, name]], [["entity_info.display_name"]]]` (a field
+  mask). It returns the character record. Sent from the page with its own session (a no-op
+  rename to the same name), it returned 200 and the record with a new update time.
+- **Character from a photo.** On the character page, "Add from project" opens a picker (Images /
+  Uploads tabs, options by file name, "Add media").
+  - On a new character page, "Add media" sends `C4BZMd` (create, as for a description), then
+    `Sc7aEb`: `[photo_media_id, null, null, project_id, null, null, null, [null, null,
+    [character_id, [0]]], null, <client UUID>, <client UUID>]`.
+  - `Sc7aEb` copies the photo into a new workflow (titled with the file name) and media, and
+    makes it the character's image. No generation runs, and it is free. Afterwards the page shows
+    "Portrait" in place of Upload / Add from project.
+  - The probe linked `apple.jpg` to the empty leftover character `88c8e5c5`, which now has an image.
+  - Typing a description and "Start generation" then sends `ogiZ0b` (a Nano Banana generation from
+    the description), which was blocked.
+- **Characters as ingredients.** The prompt box's + panel has a **Characters** tab
+  (`mat-list-item`, `role=tab`). Characters are `role=option` buttons named by the character name
+  only, and the thumbnails are opaque `lh3.googleusercontent.com` links (no ids). Clicking an option
+  attaches it at once and closes the panel (there is no "Add to prompt").
+  - `StreamChat` then carries the character **by id in its own slot**: `[session, [[[[prompt]]],
+    null, null, [[character_id]]], ["projects/<id>", null, [<token>, 1], null, null, 3]]` (media
+    attachments use slot 1).
+  - A quote with a character attached (Omni 1.1 Flash default) was 15 credits; it was rejected.
+- **Stitching ("Download scene").** The scene editor's "Download scene" sends `GjQLTd`
+  `[[[media_id, null, [], [seconds]], …]]` (the clips in order), which returns a job name
+  `[null, [["projects/<n>/locations/<region>/jobs/<uuid>"]]]`. The page then polls `IxdSwd`
+  `[[[job]]]` every 3 s: `[2, "", "", 0]` while running, then `[3, "", "", 3, <base64 MP4>]`.
+  - Two 8 s clips gave a 14,065,014-byte MP4 in about 15 s; the page saves it from a `blob:` URL.
+  - `GjQLTd` needs no scene record: from the project page it accepted any clips by media id.
