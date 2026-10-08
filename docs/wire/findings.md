@@ -416,3 +416,25 @@ The scratch scripts live in `/tmp` and are not kept.
   - The page also has "Upload" and "Add from project".
   - A dispatched click on "Start generation" (with every request blocked) sent nothing. The real
     trigger and its cost prompt are still unknown.
+
+### Flow plan B discovery: characters and extend spend directly (2026-10-08, free, blocked)
+
+- **Tile ⋮ menu** (on a hovered media tile): Favorite, Reuse prompt (the ⟲ icon), Add to scene,
+  Add to prompt, Download, Copy, Rename, Share, Publish to YouTube, Set project cover, Flag
+  output, Move to trash. There is no Extend here.
+- **Video editor.** A real mouse click on a video tile opens `/project/<id>/edit/<workflow_id>`.
+  - Controls: Save frame, Download, Save to projects, Reuse prompt, the timeline's **Add clip**,
+    and a prompt "Describe how to edit this video…" whose model is Omni 1.1 Flash (an edit).
+  - **Add clip** opens a menu with "Add clip" and **"Extend (Veo 3.1 - Lite)"**; the model
+    follows the video default. Extend shows "Prompt to extend: What happens next?" and the
+    timeline previews 8 → 16 s.
+  - "Start generation" sends `rqZuUc` = `["projects/<id>", [workflow_id], null, null, 2]`, then
+    (blocked here) the generation. **No credit quote is shown.**
+- **Characters.** "Start generation" sends `C4BZMd` = `[[project_id, null, null, [1, "Untitled
+  character", []]]]`, which creates the character record (`/character/<id>`). It then sends
+  **`ogiZ0b`** directly: `[…, 3, "BELUGA", …, [<reCAPTCHA token>, 1]], [[[prompt]]], …`. There is
+  no agent and no quote; the page shows "image 99%".
+- **Consequence:** plan B's character and extend commands cannot approve against Flow's quote.
+  They need a known price and an explicit budget, plus a credit check before and after.
+- **Leftovers in the "aistudio" project from these probes:** an empty "Untitled character"
+  record and the empty scene.
