@@ -28,6 +28,7 @@ TITLE = "Editable text"
 TUNE = "Settings"
 NEW_PROJECT = re.compile(r"New project")
 NEW_SESSION = "Start new session"
+EXPAND = "Expand"  # a collapsed prompt box hides "Start new session" (live)
 ACCOUNT = "Account details"
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
@@ -134,6 +135,10 @@ class FlowPage:
         return project_id
 
     async def new_session(self) -> None:
+        if (not await self._ui.visible("button", NEW_SESSION, exact=True)
+                and await self._ui.visible("button", EXPAND, exact=True)):
+            await self._ui.activate("button", EXPAND, exact=True)
+            await self._ui.pause(1000)
         await self._ui.activate("button", NEW_SESSION, exact=True)
         await self._ui.pause(1000)
 

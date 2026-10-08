@@ -204,3 +204,11 @@ def test_picker_labels_keep_their_dashes_and_lose_icons():
 
     assert _label("Veo 3.1 - Lite arrow_drop_down") == "Veo 3.1 - Lite"
     assert _label("🍌 Nano Banana 2.1 arrow_drop_down") == "Nano Banana 2.1"
+
+
+async def test_new_session_expands_a_compact_prompt_box_first(fake_ui):
+    # Live: the box can be collapsed ("Expand"); "Start new session" appears only once expanded.
+    ui = fake_ui(visible={("button", NEW_SESSION): [False], ("button", "Expand"): [True]})
+    await FlowPage(ui).new_session()
+    assert ui.ops == [("activate", "button", "Expand", 0),
+                      ("activate", "button", NEW_SESSION, 0)]

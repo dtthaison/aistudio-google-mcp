@@ -375,3 +375,13 @@ The scratch scripts live in `/tmp` and are not kept.
   - `ngNC2` repeats the project title and its thumbnail media id.
 - **Paid check (CLI, approved):** `flow video -m veo-3.1-lite --duration 8 --max-credits 10`
   finished in 96 s. Credits went 1,040 → 1,030 and the downloaded MP4 was 2,286,873 bytes.
+- **Compact prompt box.** Flow can show the prompt box collapsed, with an "Expand" button and an
+  "Agent" chip. "Start new session" appears only after Expand. `new_session` expands first.
+- **Attachments are media ids.** The `StreamChat` request lists attached media next to the prompt:
+  `[[[[prompt]]], [[media_id, …]]], ["projects/<id>", null, [<token>, 1], …]`. Frames and
+  ingredients are therefore referenced by Flow media id.
+- **Upload not automatable yet.** "Add media → Upload" and the ingredients panel's "Upload media"
+  open no file picker, minimized or visible. There is no `<input type=file>` (shadow DOM
+  included), no `showOpenFilePicker` call, and a synthetic drop on the page does nothing. Local
+  files can't be used until the upload path is found.
+- **Expiry.** A banner reads: "Your oldest creations will expire soon. Opt-in to keep them around."
