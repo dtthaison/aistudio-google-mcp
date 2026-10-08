@@ -267,3 +267,69 @@ decisions are recorded in the conversation.
    - `flow extend` adds `scene_id`;
    - `flow media` items carry `prompt`;
    - `flow projects` reports `created`, because Flow lists no update time.
+
+## 11. Amendments from plan D discovery (2026-10-08)
+
+Evidence: `docs/wire/findings.md`, "Flow plan D discovery". The user asked for every remaining
+feature ("go ahead all the issues an unbuilt"). Everything new here is free, except attaching a
+character to `flow video`/`flow image`, which keeps the normal quote-and-budget path (§3.1).
+
+1. **Commands** (these replace the `flow scene` and `flow character` lines of §3):
+
+   ```
+   aistudio flow character create NAME (DESCRIPTION | --photo FILE|media-id) [--i-have-rights]
+   aistudio flow character list
+   aistudio flow character rename <character-id> NAME
+   aistudio flow scene list
+   aistudio flow scene stitch <media-id>[@START-END]... -o out.mp4
+   aistudio flow scene download <scene-id> -o out.mp4
+   aistudio flow video|image … [--character NAME|character-id]...
+   ```
+
+   - `flow scene` becomes a group, because it now has three subcommands.
+   - `character create` takes no `-m`. Only Nano Banana 2.1 has a measured price, and the price
+     table (§10.2) still refuses any other picker model.
+2. **Names.** A character name is unique in its project, compared case-insensitively.
+   - `create` and `rename` refuse a name that another character already has.
+   - `rename` sends `rzMKMb` (findings), then reads the name back.
+   - `create` from a description names the new character the same way, after its image is made.
+3. **Character from a photo.** `--photo` takes a Flow image media id or a local image.
+   - A local image is uploaded first, under the §10.3 rule (`--i-have-rights`).
+   - aistudio then sends `C4BZMd` (create, with the name) and `Sc7aEb` (link the photo) **from
+     the page**, as it does for `as29s`.
+     - The photo picker knows photos only by file name, but these RPCs take the exact media id.
+     - Neither RPC carries a reCAPTCHA token.
+     - Generation RPCs (`StreamChat`, `ogiZ0b`, `fZytfe`) stay page-driven.
+   - Nothing is generated and it is free. Credits are still read before and after, and any change
+     is reported as a warning.
+   - The result has `character_id`, `name`, `media_id` (the character's image) and `files` (that
+     image, downloaded).
+4. **Characters as ingredients.** `--character` resolves a name or an id against the project's
+   characters before anything is sent.
+   - Flow's panel shows characters by name only, so the name must be unique. A character
+     without an image is refused.
+   - Each one is attached from the + panel's **Characters** tab, and the instruction names it:
+     "Feature the attached characters: NAME, …".
+   - After the free quote, the `StreamChat` request is checked. Its character slot must hold
+     exactly the requested ids. Otherwise the request is rejected and the run stops with
+     `PLAN_MISMATCH`.
+5. **Stitching.** `scene stitch` sends `GjQLTd` with clips `[media_id, null, [start], [end]]` in
+   the given order, polls `IxdSwd` until it reports done, and writes the base64 MP4 it returns.
+   - It is free and needs no scene record.
+   - **Trims:** whole seconds. `@START-END` must satisfy 0 ≤ START < END ≤ the clip's length.
+     Without a trim, the whole clip is used (`[]` to `[length]`). Verified live: trims 2–5 and
+     0–3 gave a 6.0 s file.
+   - **Checks:** every id must be a finished video in the project, and there must be at least
+     two clips.
+   - `scene download` takes the scene's clips from the project contents, in position order and at
+     full length.
+   - A stitch that is still running at `--timeout` (default 300 s) stops with `TIMEOUT`, exit 1.
+     Nothing was spent.
+   - Any state other than running or done is a `SERVER_ERROR`.
+6. **Lists.**
+   - `character list` gives `id`, `name`, `media_id` (null without an image) and `created`.
+   - `scene list` gives `id`, `title`, `created` and `clips` (`media_id`, `title`, `seconds`) in
+     order.
+7. **Extend's `scene_id`** comes from the project's scene clips after the job (the scene holding
+   the new clip). The `rqZuUc` reply is used only if the contents do not show it, because that
+   reply's shape was never seen live (plan C review M2).
