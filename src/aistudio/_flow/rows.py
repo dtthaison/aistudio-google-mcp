@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import parse_qs
 
 from aistudio._rpc.wire import opt_index
 
@@ -50,10 +52,36 @@ class FlowProject:
 
 
 @dataclass(frozen=True)
+class FlowCharacter:
+    id: str
+    name: str
+    media_id: str | None  # the character's image; None until it has one
+    created: int | None
+
+
+@dataclass(frozen=True)
+class SceneClip:
+    media_id: str
+    title: str | None
+    start: int  # whole seconds into the clip
+    end: int
+
+
+@dataclass(frozen=True)
+class FlowScene:
+    id: str
+    title: str | None
+    created: int | None
+    clips: list[SceneClip]
+
+
+@dataclass(frozen=True)
 class ProjectContents:
     titles: dict[str, str]  # media_id -> its workflow title (what the grid shows)
     media: list[FlowMedia]
     workflows: dict[str, str] = field(default_factory=dict)  # media_id -> workflow id (editor)
+    characters: list[FlowCharacter] = field(default_factory=list)
+    scenes: list[FlowScene] = field(default_factory=list)
 
 
 def decode_projects(payload: Any) -> list[FlowProject]:
@@ -77,7 +105,80 @@ def decode_contents(payload: Any) -> ProjectContents:
             if isinstance(opt_index(workflow, 0), str):
                 workflows[media_id] = workflow[0]
     media = [m for m in (_record(r) for r in opt_index(payload, 2) or []) if m is not None]
-    return ProjectContents(titles, media, workflows)
+    return ProjectContents(titles, media, workflows, _characters(opt_index(payload, 5)),
+                           _scenes(opt_index(payload, 4), opt_index(payload, 6)))
+
+
+def _characters(rows: Any) -> list[FlowCharacter]:
+    """``[project_id, id, None, [1, name, refs], image_media_id, [w, h], [created], …]``."""
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        cid, name = _str(opt_index(row, 1)), _str(opt_index(row, 3, 1))
+        if cid and name is not None:
+            out.append(FlowCharacter(cid, name, _str(opt_index(row, 4)),
+                                     _int(opt_index(row, 6, 0))))
+    return out
+
+
+def _scenes(rows: Any, clip_rows: Any) -> list[FlowScene]:
+    """Scenes ``[id, title, None, [created], …]``; clips ``[[workflow …, media_id …], scene_id,
+    [position, [seconds], [start], [end], …]]`` (position None for the first)."""
+    clips: dict[str, list[tuple[int, SceneClip]]] = {}
+    for row in clip_rows if isinstance(clip_rows, list) else []:
+        media_id, scene_id = _str(opt_index(row, 0, 3, 4)), _str(opt_index(row, 1))
+        if media_id and scene_id:
+            place = opt_index(row, 2)
+            clip = SceneClip(media_id, _str(opt_index(row, 0, 3, 0)),
+                             _seconds(opt_index(place, 2)), _seconds(opt_index(place, 3)))
+            clips.setdefault(scene_id, []).append((_int(opt_index(place, 0)) or 0, clip))
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        sid = _str(opt_index(row, 0))
+        if sid:
+            ordered = [clip for _, clip in sorted(clips.get(sid, []), key=lambda c: c[0])]
+            out.append(FlowScene(sid, _str(opt_index(row, 1)), _int(opt_index(row, 3, 0)),
+                                 ordered))
+    return out
+
+
+def _seconds(value: Any) -> int:
+    """A ``[seconds]`` duration (``[]`` is 0)."""
+    return _int(opt_index(value, 0)) or 0
+
+
+def stitch_job(payload: Any) -> str | None:
+    """``GjQLTd`` reply: ``[None, [["projects/…/jobs/<uuid>"]]]``."""
+    job = opt_index(payload, 1, 0, 0)
+    return job if isinstance(job, str) and job.startswith("projects/") else None
+
+
+def stitch_state(payload: Any) -> tuple[int | None, str | None]:
+    """``IxdSwd`` reply: ``[2, "", "", 0]`` running, ``[3, "", "", 3, <base64 MP4>]`` done."""
+    data = opt_index(payload, 4)
+    return _int(opt_index(payload, 0)), data if isinstance(data, str) and data else None
+
+
+def sent_characters(body: str) -> list[str]:
+    """Character ids in a StreamChat request:
+    ``[session, [[[[prompt]]], media, None, [[character_id], …]], …]`` inside ``f.req``."""
+    raw = parse_qs(body).get("f.req", [body])[0]
+    try:
+        inner = opt_index(json.loads(raw), 1)
+        message = json.loads(inner) if isinstance(inner, str) else None
+    except ValueError:
+        return []
+    return [c[0] for c in opt_index(message, 1, 3) or []
+            if isinstance(c, list) and c and isinstance(c[0], str)]
+
+
+def linked_image(payload: Any) -> str | None:
+    """``Sc7aEb`` reply: the character's new image record first, ``[[media_id, …], …]``."""
+    return _str(opt_index(payload, 0, 0))
+
+
+def character_name(payload: Any) -> str | None:
+    """``C4BZMd``/``rzMKMb`` reply: ``[[project_id, id, None, [1, name, …], …]]``."""
+    return _str(opt_index(payload, 0, 3, 1))
 
 
 def character_id(payload: Any) -> str | None:
@@ -180,6 +281,10 @@ def _record(row: Any) -> FlowMedia | None:
 
 def _str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _lists(node: Any):
