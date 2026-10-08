@@ -83,11 +83,14 @@ async def test_responses_are_logged_per_method_until_the_block_ends():
 
 
 class Cdp:
-    def __init__(self):
+    def __init__(self, bounds=None):
         self.sent = []
+        self.bounds = bounds or {"width": 1600, "height": 1000}
 
     async def send(self, method, params=None):
         self.sent.append((method, params))
+        if method == "Browser.getWindowBounds":
+            return {"bounds": self.bounds}
         return {"windowId": 7}
 
 
@@ -139,14 +142,19 @@ async def test_open_browser_minimizes_a_desktop_sized_window_and_closes(aistudio
     assert context.closed
 
 
-async def test_visible_window_is_not_minimized(aistudio_home):
+async def test_a_visible_window_follows_the_screen_like_normal_chrome(aistudio_home):
+    # User report: a fixed 1600x1000 page was larger than a smaller screen, so pop-ups on the
+    # right were cut off. Visible windows get no fixed viewport and open maximized.
     profile = get_profile("default").ensure()
     profile.chrome_dir.mkdir()
     context = Context()
+    chromium = Chromium(context)
     async with open_browser(profile, window="visible",
-                            playwright_factory=lambda: Playwright(Chromium(context))):
+                            playwright_factory=lambda: Playwright(chromium)):
         pass
-    assert context.cdp.sent == []
+    assert chromium.kwargs.get("no_viewport") is True and "viewport" not in chromium.kwargs
+    assert context.cdp.sent[-1] == (
+        "Browser.setWindowBounds", {"windowId": 7, "bounds": {"windowState": "maximized"}})
 
 
 async def test_open_browser_requires_a_browser_session(aistudio_home):
@@ -212,3 +220,4 @@ async def test_navigation_failures_are_browser_errors():
     with pytest.raises(BrowserError) as info:
         await PlaywrightUi(Broken()).goto("https://aistudio.google.com/apps")
     assert "ERR_INTERNET_DISCONNECTED" in info.value.message
+

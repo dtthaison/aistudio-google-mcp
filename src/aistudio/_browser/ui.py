@@ -357,6 +357,16 @@ async def _minimize(context: Any, page: Any) -> None:
         pass  # cosmetic: a visible window works the same
 
 
+async def _maximize(context: Any, page: Any) -> None:
+    try:
+        cdp = await context.new_cdp_session(page)
+        window = await cdp.send("Browser.getWindowForTarget")
+        await cdp.send("Browser.setWindowBounds",
+                       {"windowId": window["windowId"], "bounds": {"windowState": "maximized"}})
+    except Exception:
+        pass  # cosmetic
+
+
 @contextlib.asynccontextmanager
 async def open_browser(
     profile: Profile,
@@ -364,19 +374,26 @@ async def open_browser(
     window: str = "minimized",
     playwright_factory: Callable[[], Any] | None = None,
 ) -> AsyncIterator[Ui]:
-    """The profile's Chrome at a desktop viewport; ``window`` is minimized, visible or headless."""
+    """The profile's Chrome; ``window`` is minimized or headless (desktop viewport) or visible
+    (maximized, page sized by the window)."""
     if not profile.chrome_dir.exists():
         raise BrowserError(
             f"profile {profile.name!r} has no browser session", hint='run "aistudio login" first'
         )
     factory = playwright_factory or default_playwright_factory()
     async with factory() as playwright:
+        # A visible window is for watching: the page follows the real window like normal Chrome
+        # (a fixed 1600x1000 page cut off pop-ups on smaller screens). Hidden runs keep the
+        # desktop viewport that page driving relies on.
         context = await launch_persistent(playwright, profile, browser="chrome",
-                                          headless=window == "headless", viewport=VIEWPORT)
+                                          headless=window == "headless",
+                                          viewport=None if window == "visible" else VIEWPORT)
         try:
             page = context.pages[0] if context.pages else await context.new_page()
             if window == "minimized":
                 await _minimize(context, page)
+            elif window == "visible":
+                await _maximize(context, page)
             yield PlaywrightUi(page)
         finally:
             try:
