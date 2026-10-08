@@ -88,6 +88,16 @@ class Ui(Protocol):
 
     def current_url(self) -> str: ...
 
+    async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None: ...
+
+    async def choose_file(self, role: str, name: Name, path: Any) -> None: ...
+
+    async def hover_text(self, text: str) -> None: ...
+
+    async def click_text(self, text: str) -> None: ...
+
+    async def dispatch_click_near(self, role: str, name: Name, text: str) -> None: ...
+
 
 def _method(url: str) -> str:
     """The RPC a response answers: batchexecute's ``rpcids``, else the URL's last segment."""
@@ -312,6 +322,61 @@ class PlaywrightUi:
 
     def current_url(self) -> str:
         return str(getattr(self._page, "url", "") or "")
+
+    async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None:
+        """A click event on the control itself: some Flow controls ignore keyboard activation."""
+        locator = self._role(role, name, exact).first
+        await self._act(role, name, lambda: locator.dispatch_event("click",
+                                                                   timeout=CONTROL_TIMEOUT_MS))
+
+    async def choose_file(self, role: str, name: Name, path: Any) -> None:
+        """Answer the file chooser that clicking this control opens (Flow's Upload media)."""
+        locator = self._role(role, name).first
+
+        async def run() -> None:
+            async with self._page.expect_file_chooser(timeout=CONTROL_TIMEOUT_MS) as chooser:
+                await locator.dispatch_event("click")
+            await (await chooser.value).set_files(str(path))
+
+        await self._act(role, name, run)
+
+    async def _tile_point(self, text: str, dx: float, dy: float) -> tuple[float, float]:
+        box = await self._page.get_by_text(text).first.bounding_box(timeout=CONTROL_TIMEOUT_MS)
+        if box is None:
+            raise RuntimeError(f"{text!r} is not on screen")
+        return box["x"] + dx, box["y"] + dy
+
+    async def hover_text(self, text: str) -> None:
+        """Hover the media tile captioned ``text`` (its image sits above the caption)."""
+        async def run() -> None:
+            await self._page.mouse.move(*await self._tile_point(text, 20, -100))
+
+        await self._act("text", text, run)
+
+    async def click_text(self, text: str) -> None:
+        """A real mouse click on the media tile captioned ``text`` (opens Flow's editor)."""
+        async def run() -> None:
+            await self._page.mouse.click(*await self._tile_point(text, 60, -120))
+
+        await self._act("text", text, run)
+
+    async def dispatch_click_near(self, role: str, name: Name, text: str) -> None:
+        """Click the matching control closest to ``text`` (a tile's own ⋮ menu)."""
+        async def run() -> None:
+            anchor = await self._page.get_by_text(text).first.bounding_box()
+            best, best_distance = None, None
+            for element in await self._role(role, name, True).all():
+                box = await element.bounding_box()
+                if anchor is None or box is None:
+                    continue
+                distance = abs(box["x"] - anchor["x"]) + abs(box["y"] - anchor["y"])
+                if best_distance is None or distance < best_distance:
+                    best, best_distance = element, distance
+            if best is None:
+                raise RuntimeError(f"no {role} near {text!r}")
+            await best.dispatch_event("click")
+
+        await self._act(role, name, run)
 
     @contextlib.asynccontextmanager
     async def responses(self, marker: str = RPC_MARKER) -> AsyncIterator[ResponseLog]:

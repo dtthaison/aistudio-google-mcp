@@ -179,6 +179,21 @@ class FakeUi:
     def current_url(self):
         return self.url
 
+    async def dispatch_click(self, role, name, *, exact=False):
+        self.ops.append(("dispatch", role, self._key(name)))
+
+    async def choose_file(self, role, name, path):
+        self.ops.append(("choose_file", role, self._key(name), str(path)))
+
+    async def hover_text(self, text):
+        self.ops.append(("hover", text))
+
+    async def click_text(self, text):
+        self.ops.append(("click_text", text))
+
+    async def dispatch_click_near(self, role, name, text):
+        self.ops.append(("dispatch_near", role, self._key(name), text))
+
     @contextlib.asynccontextmanager
     async def responses(self, marker=None):
         yield self

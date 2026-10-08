@@ -12,10 +12,21 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from aistudio._browser.ui import ResponseLog, Ui
 from aistudio._flow.models import ASPECTS
-from aistudio._flow.rows import FlowMedia, Quote, credits_left, media_records, parse_permission
+from aistudio._flow.rows import (
+    FlowMedia,
+    FlowProject,
+    ProjectContents,
+    Quote,
+    credits_left,
+    decode_contents,
+    decode_projects,
+    media_records,
+    parse_permission,
+)
 from aistudio._flow.wire import decode_batch, payloads
 from aistudio.exceptions import BrowserError, NotFoundError, ServerError
 
@@ -30,6 +41,16 @@ NEW_PROJECT = re.compile(r"New project")
 NEW_SESSION = "Start new session"
 EXPAND = "Expand"  # a collapsed prompt box hides "Start new session" (live)
 ACCOUNT = "Account details"
+INGREDIENTS = "Add ingredients to the prompt box"
+UPLOAD_MEDIA = "Upload media"
+AGREE = "I agree"  # Flow's "Rights to use this image" dialog
+MORE = "More options"
+ADD_TO_PROMPT = "Add to prompt"
+EDITOR_ANY = "[contenteditable=true]"
+EDITOR_LAST = "[contenteditable=true] >> nth=-1"
+START = "Start generation"
+ADD_CLIP = "Add clip"
+EXTEND = re.compile(r"^Extend")
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
 MODEL_BUTTON = {"video": "Video generation default model",
@@ -212,6 +233,54 @@ class FlowPage:
             since = self._clock()
             await self._ui.activate("radio", "Approve", exact=True)
             return await self._follow(log, count, timeout_s, kind, since)
+
+    async def projects(self) -> list[FlowProject]:
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            await self._ui.goto(HOME_URL)
+            response = await log.next("UpteDb", timeout_s=30.0)
+        if response is None:
+            raise BrowserError("Flow did not list the projects",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return decode_projects(decode_batch(response.text).get("UpteDb"))
+
+    async def contents(self, project_id: str) -> ProjectContents:
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            await self.open_project(project_id)
+            response = await log.next("Zzl0ze", timeout_s=30.0)
+        if response is None:
+            raise BrowserError("Flow did not list the project's media",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return decode_contents(decode_batch(response.text).get("Zzl0ze"))
+
+    async def upload(self, path: Path) -> str:
+        """Upload a local file (the caller has the person's --i-have-rights)."""
+        await self._ui.activate("button", INGREDIENTS, exact=True)
+        await self._ui.pause(1500)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            since = self._clock()
+            await self._ui.choose_file("button", UPLOAD_MEDIA, path)
+            await self._ui.pause(1500)
+            await self._ui.dispatch_click("button", AGREE)
+            if await log.next("maseQ", timeout_s=120.0) is None:
+                raise BrowserError(f"Flow did not upload {path.name}",
+                                   hint="re-run; if it persists, the Flow UI changed")
+            deadline = self._now() + 60.0
+            while self._now() < deadline:
+                response = await log.next("as29s", timeout_s=self._poll_s)
+                if response is None:
+                    continue
+                for media in media_records("as29s", decode_batch(response.text).get("as29s")):
+                    if media.created is not None and media.created >= since - CREATED_SLACK_S:
+                        return media.media_id
+        raise BrowserError(f"Flow did not report the uploaded {path.name}",
+                           hint="check the project's Uploads in Flow")
+
+    async def attach(self, title: str) -> None:
+        await self._ui.hover_text(title)
+        await self._ui.dispatch_click_near("button", MORE, title)
+        await self._ui.pause(800)
+        await self._ui.dispatch_click("menuitem", ADD_TO_PROMPT)
+        await self._ui.pause(800)
 
     async def credits(self) -> int | None:
         await self._ui.goto(HOME_URL)
