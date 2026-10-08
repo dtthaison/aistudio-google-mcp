@@ -373,8 +373,10 @@ class PlaywrightUi:
         await self._act(role, name, run)
 
     async def _tile_point(self, text: str, dx: float, dy: float) -> tuple[float, float]:
-        box = await self._page.get_by_text(text, exact=True).first.bounding_box(
-            timeout=CONTROL_TIMEOUT_MS)
+        caption = self._page.get_by_text(text, exact=True).first
+        # A tile below the window has a box too, but the mouse cannot reach it (live).
+        await caption.scroll_into_view_if_needed(timeout=CONTROL_TIMEOUT_MS)
+        box = await caption.bounding_box(timeout=CONTROL_TIMEOUT_MS)
         if box is None:
             raise RuntimeError(f"{text!r} is not on screen")
         return box["x"] + dx, box["y"] + dy

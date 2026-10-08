@@ -114,7 +114,7 @@ async def flow_generate(
         if duration is not None and flow_model is None:  # check against the default model
             check_options(kind, model_by_label(previous.model), None, None, duration)
         uploads: list[dict[str, str]] = []
-        attached_ids: set[str] = set()
+        attached_ids: list[str] = []  # in attach order: frames are named "in order"
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
@@ -124,9 +124,9 @@ async def flow_generate(
                     media_id = await page.upload(value, known_ids=known_ids)
                     known_ids.add(media_id)  # its late as29s record is not the next upload
                     uploads.append({"file": value.name, "media_id": media_id})
-                    attached_ids.add(media_id)
+                    attached_ids.append(media_id)
                 else:
-                    attached_ids.add(value)
+                    attached_ids.append(value)
                 await page.attach(title)
             for chosen_character in chosen:
                 await page.attach_character(chosen_character.name)
@@ -144,11 +144,11 @@ async def flow_generate(
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
                                            "spent")
-            if set(turn.media) != attached_ids:
+            if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
                 waiting = await _reject_noting(page)
                 raise PlanMismatchError(
-                    f"Flow's request carries media {sorted(turn.media) or 'none'}, "
-                    f"not {sorted(attached_ids) or 'none'}",
+                    f"Flow's request carries media {list(turn.media) or 'none'}, "
+                    f"not {attached_ids or 'none'} (in that order)",
                     hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
                          f"re-run{waiting}")
             wanted_ids = {c.id for c in chosen}
@@ -477,8 +477,10 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
         try:
             outcome = await page.extend(prompt, timeout_s=timeout_s)
-        except Exception as exc:  # the click spent credits; never invite a re-run
-            raise _spent(exc, page.paid_media, project_id) from exc
+        except Exception as exc:
+            if not page.started:  # a check before Start: its own "nothing was spent" stands
+                raise
+            raise _spent(exc, page.paid_media, project_id) from exc  # Start may have spent
         after, read_notes = await _credits_after(page, outcome.credits_left)
         new_ids = page.paid_media or [m.media_id for m in outcome.media]
         scene_id = await _scene_holding(page, project_id, new_ids) or page.last_scene_id
@@ -549,8 +551,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
             price = check_direct_spend("character", model, max_credits)  # before any spend
             try:
                 outcome = await page.start_character(description or "")
-            except Exception as exc:  # Start may have spent and made the character
-                made = page.paid_media[0] if page.paid_media else None
+            except Exception as exc:
+                if not page.started:  # a check before Start: nothing was made
+                    raise
+                made = page.paid_media[0] if page.paid_media else None  # Start may have made it
                 raise _character_made(exc, made, name) from exc
             cid, media = outcome.character_id, outcome.media
             image_id = media[0].media_id if media else None

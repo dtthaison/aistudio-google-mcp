@@ -228,3 +228,12 @@ async def test_start_character_needs_the_character_page(fake_ui):
     with pytest.raises(BrowserError):
         await FlowPage(ui, now=Clock()).start_character("a robot")
     assert not any(op[0] in ("type", "click") for op in ui.ops)
+
+
+
+async def test_the_page_says_when_start_was_pressed(fake_ui):
+    ui = extend_ui(fake_ui, ("as29s", [poll("as29s", record(media_id="m2"))]))
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    assert page.started is False
+    await page.extend("rolls off", timeout_s=60)
+    assert page.started is True

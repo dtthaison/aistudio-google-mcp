@@ -514,3 +514,9 @@ blocked; the RPCs that went through are free.
 - **Attached media in the request.** Attaching "apple-start.jpg" with its tile's "Add to prompt"
   sent `StreamChat` message `[[[[prompt]]], [["ea396dda…"]]]`: slot 1 lists the attached media
   ids (the original upload, not the copy). Characters use slot 3 (plan D).
+- **Two attachments (plan E review check, free).** Attaching "apple-start.jpg" then "apple.jpg"
+  by their tiles sent slot 1 `[["ea396dda…"], ["91f49a6c…"]]`, one entry per media **in attach
+  order**. The quote was 10 credits and was rejected.
+- **Tiles below the window.** Once the project held more media, those two tiles sat at
+  y = 1,290 and 1,667 in a 1,000 px viewport. A mouse hover at their box never reached them, so
+  their ⋮ menus never opened. Scrolling the caption into view first fixes it.

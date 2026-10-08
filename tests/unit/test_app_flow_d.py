@@ -308,7 +308,7 @@ async def test_a_failed_description_character_names_it(logged_in_profile, tmp_pa
     kw, pages, _ = harness(credits=(1010, 1010))
 
     async def broken(description):
-        pages[-1].paid_media = ["c1"]
+        pages[-1].paid_media, pages[-1].started = ["c1"], True
         raise BrowserError("closed")
 
     original = kw["page_factory"]
@@ -368,3 +368,26 @@ async def test_no_rename_without_an_id(logged_in_profile, tmp_path):
     assert not any(c[0] == "rename" for c in pages[0].calls)
     assert any("Robot" in w for w in result["warnings"])
     assert result["name"] == "Untitled character"  # what Flow holds, not what was asked
+
+
+
+async def test_a_character_that_never_started_is_not_reported_as_made(logged_in_profile,
+                                                                     tmp_path):
+    # Plan E review: the page check and the prompt wait run before Start; nothing was made.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010))
+    original = kw["page_factory"]
+
+    def factory(ui):
+        page = original(ui)
+
+        async def refuse(description):
+            raise BrowserError("Flow's character page is not open; nothing was spent",
+                               hint="re-run")
+        page.start_character = refuse
+        return page
+
+    kw["page_factory"] = factory
+    with pytest.raises(BrowserError) as info:
+        await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
+    assert info.value.hint == "re-run"

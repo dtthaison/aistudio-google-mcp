@@ -50,7 +50,7 @@ class FakePage:
         self.details, self.turn_media = details, turn_media
         self.uploaded, self.attached = {}, []  # what Flow would send: the attached media ids
         self.credit_values, self.character_model_label = list(credits), character_model
-        self.paid_media = []
+        self.paid_media, self.started = [], False
 
     async def open_project(self, pid):
         self.calls.append(("open", pid))
@@ -112,6 +112,7 @@ class FakePage:
 
     async def extend(self, prompt, *, timeout_s):
         self.calls.append(("extend", prompt))
+        self.started = True
         self.paid_media, self.last_scene_id = ["m2"], "s1"
         return FlowOutcome([media("m2")], 1021, False)
 
@@ -394,3 +395,42 @@ def test_avif_heic_and_unknown_image_bytes():
     assert _type_of("image", b"\x00\x00\x00\x18ftypheic\x00") == ("image/heic", ".heic")
     assert _type_of("image", b"GIF89a....") == ("application/octet-stream", ".bin")
     assert _type_of("video", b"\x00\x00\x00\x18ftypisom") == ("video/mp4", ".mp4")
+
+
+
+async def test_attachments_are_checked_in_order(logged_in_profile, tmp_path):
+    # Plan E review: swapped frames would make a paid video the wrong way round.
+    from aistudio.exceptions import PlanMismatchError
+
+    profile = logged_in_profile()
+    store(profile)
+    kw, pages, _ = harness(turn_media=[VID, IMG])
+    with pytest.raises(PlanMismatchError):
+        await flow_generate(profile, "video", "an apple", start_frame=IMG, end_frame=VID,
+                            max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert ("reject",) in pages[0].calls
+
+
+async def test_an_extend_that_never_started_is_not_reported_as_spent(logged_in_profile,
+                                                                   tmp_path):
+    # Plan E review: checks before Start ("nothing was spent") must keep their own message.
+    from aistudio.exceptions import BrowserError
+
+    profile = logged_in_profile()
+    store(profile)
+    kw, pages, _ = harness()
+    original = kw["page_factory"]
+
+    def factory(ui):
+        page = original(ui)
+
+        async def refuse(prompt, *, timeout_s):
+            raise BrowserError("Flow's Extend panel did not open; nothing was spent",
+                               hint="re-run")
+        page.extend = refuse
+        return page
+
+    kw["page_factory"] = factory
+    with pytest.raises(BrowserError) as info:
+        await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "e.mp4", **kw)
+    assert info.value.hint == "re-run"

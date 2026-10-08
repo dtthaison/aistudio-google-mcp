@@ -154,6 +154,7 @@ class FlowPage:
         self._poll_s = poll_s
         self.paid_media: list[str] = []  # media ids of the approved job, as soon as seen
         self.last_scene_id: str | None = None  # the scene an extension creates
+        self.started = False  # Start was pressed: from here on, failures may have spent
 
     async def open_project(self, project_id: str) -> None:
         await self._ui.goto(PROJECT_URL.format(id=project_id))
@@ -427,6 +428,7 @@ class FlowPage:
         await self._ui.type_text(EDITOR_ANY, description)
         await self._wait_for_prompt(EDITOR_ANY, description)
         async with self._ui.responses(marker=FLOW_RPC) as log:
+            self.started = True
             await self._ui.click("button", START, exact=True)
             created = await log.next("C4BZMd", timeout_s=60.0)
             cid = character_id(decode_batch(created.text).get("C4BZMd")) if created else None
@@ -465,6 +467,7 @@ class FlowPage:
         await self._wait_for_prompt(EDITOR_LAST, prompt)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
+            self.started = True
             await self._ui.click("button", START, exact=True, nth=-1)
             started = await log.next("fZytfe", timeout_s=60.0)
             scene = await log.next("rqZuUc", timeout_s=2.0)  # sent first; usually queued already

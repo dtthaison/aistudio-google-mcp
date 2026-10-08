@@ -201,3 +201,36 @@ async def test_long_prompts_are_inserted_not_typed():
     await ui.type_text(".ProseMirror", "short")
     await ui.type_text(".ProseMirror", "x" * 2000)
     assert page.keyboard.typed == ["short"] and page.keyboard.inserted == ["x" * 2000]
+
+
+async def test_a_tile_below_the_window_is_scrolled_into_view_before_hovering():
+    # Live (plan E review): with more media, a tile sat below the 1000 px viewport and the hover
+    # never reached it, so its ⋮ menu never appeared.
+    class Caption:
+        def __init__(self):
+            self.steps = []
+
+        @property
+        def first(self):
+            return self
+
+        async def scroll_into_view_if_needed(self, timeout=None):
+            self.steps.append("scroll")
+
+        async def bounding_box(self, timeout=None):
+            self.steps.append("measure")
+            return {"x": 100, "y": 400 if "scroll" in self.steps else 1667}
+
+    class Mouse:
+        def __init__(self):
+            self.moved = []
+
+        async def move(self, x, y):
+            self.moved.append((x, y))
+
+    caption = Caption()
+    page = Page({})
+    page.mouse = Mouse()
+    page.get_by_text = lambda text, exact=False: caption
+    await PlaywrightUi(page).hover_text("apple.jpg")
+    assert caption.steps == ["scroll", "measure"] and page.mouse.moved == [(120, 300)]
