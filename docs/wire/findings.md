@@ -563,3 +563,19 @@ blocked; the RPCs that went through are free.
   not be reached; a reload fixes it, so aistudio now uploads everything first. Each tile's image
   carries its id (`<img … data-media-id="d2780832…">`). A quote with `--start-frame d2780832…` was
   10 credits, carried that exact id, and was declined.
+
+### Flow paid measurements (2026-10-08, user-approved)
+
+| Action | Model | Credits (before → after) |
+|---|---|---|
+| Video with a character (`--character "Paper boat"`) | Veo 3.1 Lite, 8 s | **10** (1,010 → 1,000), quoted |
+| Edit an 8 s clip ("make the video black and white") | Omni 1.1 Flash (`abra_edit`) | **20** (1,000 → 980), **no quote** |
+
+- **Omni edit.** The clip editor's box ("Describe how to edit this video…", model chip "Omni 1.1
+  Flash") generates **directly**: no permission request, no agent. Start sent `WuwhI`, `jIps6`,
+  `mYWVGd` and `nzlxg` after a reCAPTCHA reload. The new clip (model key `abra_edit`, 8 s) showed
+  up in `as29s`/`jwpduf`. A probe that blocked requests at Start broke Playwright's route handler
+  (`Route.abort` TypeError) and left the request hanging; nothing was spent.
+- **Extend follows the source clip.** With the video default set to Veo 3.1 Fast, a Lite clip's
+  Extend menu and panel still said "Extend (Veo 3.1 - Lite)". The panel has no model picker. No
+  project holds a Fast or Quality clip, so measuring extend on those needs one generated first.
