@@ -350,8 +350,9 @@ class PlaywrightUi:
         return str(getattr(self._page, "url", "") or "")
 
     async def batch_rpc(self, rpcid: str, args_json: str) -> tuple[int, str]:
-        """A read-only batchexecute call made by the page itself, with the page's own session
-        token (Flow's as29s carries the signed links its project list leaves out)."""
+        """A token-less batchexecute call made by the page itself, with the page's own session:
+        reads (as29s carries the links the project list leaves out) and free writes (renames,
+        photo characters, stitching). Calls that need reCAPTCHA stay page-driven."""
         return await self._read(lambda: self._page.evaluate(_BATCH_RPC_JS, [rpcid, args_json]))
 
     async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None:

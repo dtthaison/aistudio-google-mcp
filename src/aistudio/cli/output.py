@@ -13,8 +13,8 @@ from rich.text import Text
 
 from aistudio.exceptions import ValidationError
 
-stdout = Console()
-stderr = Console(stderr=True)
+stdout = Console(soft_wrap=True)  # long lines stay whole when piped (no 80-column wrap)
+stderr = Console(stderr=True, soft_wrap=True)
 
 json_option = click.option(
     "--json", "json_output", is_flag=True, help="Print machine-readable JSON."

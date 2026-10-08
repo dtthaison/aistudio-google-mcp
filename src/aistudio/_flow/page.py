@@ -86,6 +86,7 @@ MEDIA_METHODS = ("as29s", "jwpduf", "bOKtO")
 CHARACTERS_TAB = re.compile(r"Characters$")  # the + panel's tab (mat-list-item, role=tab)
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
+STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
 
@@ -356,16 +357,18 @@ class FlowPage:
             raise BrowserError(f"Flow did not rename character {character_id}",
                                hint="check its name in Flow's Characters; re-run to retry")
 
-    async def create_character_record(self, project_id: str, name: str) -> str:
-        """An empty, named character (free; what "Add from project" sends first)."""
+    async def create_character_record(self, project_id: str, name: str) -> tuple[str, str]:
+        """An empty, named character (free; what "Add from project" sends first): its id and
+        the name Flow stored."""
         status, text = await self._ui.batch_rpc(
             "C4BZMd", json.dumps([[project_id, None, None, [1, name, []]]]))
-        cid = character_id(decode_batch(text).get("C4BZMd")) if status < 400 else None
+        payload = decode_batch(text).get("C4BZMd") if status < 400 else None
+        cid = character_id(payload)
         if cid is None:
             raise BrowserError("Flow did not confirm the new character",
                                hint='check "aistudio flow character list" for it before '
                                     're-running (re-run with the same name, never another)')
-        return cid
+        return cid, character_name(payload) or name
 
     async def link_photo(self, project_id: str, character_id: str, media_id: str) -> str:
         """Make a project image the character's image; returns the copy Flow makes (free)."""
@@ -376,8 +379,8 @@ class FlowPage:
         image = linked_image(decode_batch(text).get("Sc7aEb")) if status < 400 else None
         if image is None:
             raise BrowserError(f"Flow created character {character_id} but did not add the photo",
-                               hint="add one in Flow's Characters, or rename it; re-running "
-                                    "makes another character")
+                               hint="do not re-run; add a photo to it in Flow's Characters, "
+                                    "or rename it")
         return image
 
     async def stitch(self, clips: list[list[Any]], *, timeout_s: float) -> bytes:
@@ -387,14 +390,21 @@ class FlowPage:
         if job is None:
             raise BrowserError("Flow did not start stitching the clips",
                                hint="re-run; if it persists, the Flow UI changed")
-        deadline = self._now() + timeout_s
+        deadline, failures = self._now() + timeout_s, 0
         while self._now() < deadline:
             await self._ui.pause(STITCH_POLL_MS)
             status, text = await self._ui.batch_rpc("IxdSwd", json.dumps([[[job]]]))
-            if status >= 400:
+            state, data = (stitch_state(decode_batch(text).get("IxdSwd")) if status < 400
+                           else (None, None))
+            if state is None:
+                failures += 1
+                if failures >= STITCH_FAILURES:
+                    raise BrowserError(f"Flow stopped answering about the stitch (HTTP {status})",
+                                       hint="re-run; if it persists, sign in again with "
+                                            '"aistudio login"; nothing was spent')
                 continue
-            state, data = stitch_state(decode_batch(text).get("IxdSwd"))
-            if state in (None, _STITCH_RUNNING):
+            failures = 0
+            if state == _STITCH_RUNNING:
                 continue
             if state == _STITCH_DONE and data:
                 return base64.b64decode(data)

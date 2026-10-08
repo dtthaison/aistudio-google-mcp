@@ -252,7 +252,8 @@ def character_list(state: CliState, project: str | None, visible: bool,
     state.require_browser()
     result = asyncio.run(flow_characters(state.profile(), project=project, visible=visible))
     emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{c['id']}  {c['name']}{'' if c['media_id'] else '  (no image)'}",
+        stdout.print(f"{c['id']}  {c['name'] or '(unnamed)'}"
+                     f"{'' if c['media_id'] else '  (no image)'}",
                      markup=False) for c in d["characters"]])
 
 

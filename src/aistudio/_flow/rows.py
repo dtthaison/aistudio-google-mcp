@@ -113,8 +113,8 @@ def _characters(rows: Any) -> list[FlowCharacter]:
     """``[project_id, id, None, [1, name, refs], image_media_id, [w, h], [created], …]``."""
     out = []
     for row in rows if isinstance(rows, list) else []:
-        cid, name = _str(opt_index(row, 1)), _str(opt_index(row, 3, 1))
-        if cid and name is not None:
+        cid, name = _str(opt_index(row, 1)), opt_index(row, 3, 1)
+        if cid and isinstance(name, str):  # "" stays: an unnamed character can be renamed
             out.append(FlowCharacter(cid, name, _str(opt_index(row, 4)),
                                      _int(opt_index(row, 6, 0))))
     return out

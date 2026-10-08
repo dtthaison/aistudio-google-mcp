@@ -34,8 +34,8 @@ async def test_a_photo_character_is_created_named_then_linked(fake_ui):
     ui = fake_ui({"C4BZMd": [rpc("C4BZMd", [[PID, "c7", None, [1, "Apple", []]]])],
                   "Sc7aEb": [rpc("Sc7aEb", [["i7", PID, "w7"], ["w7"]])]})
     page = FlowPage(ui)
-    cid = await page.create_character_record(PID, "Apple")
-    assert cid == "c7"
+    cid, stored = await page.create_character_record(PID, "Apple")
+    assert (cid, stored) == ("c7", "Apple")
     assert ("batch_rpc", "C4BZMd", json.dumps([[PID, None, None, [1, "Apple", []]]])) in ui.ops
     assert await page.link_photo(PID, cid, "m3") == "i7"
     sent = json.loads(next(op[2] for op in ui.ops if op[:2] == ("batch_rpc", "Sc7aEb")))
@@ -104,3 +104,22 @@ async def test_the_quote_reports_the_characters_it_was_sent_with(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert turn.characters == ("c1",)
+
+
+async def test_stitch_gives_up_after_repeated_failures(fake_ui):
+    # Plan D review M1: an expired session is not "still stitching" for 5 minutes.
+    ui = fake_ui({"GjQLTd": [rpc("GjQLTd", [None, [[JOB]]])],
+                  "IxdSwd": [rpc("IxdSwd", [], status=401) for _ in range(100)]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=10_000)
+    assert "401" in info.value.message
+    assert len([op for op in ui.ops if op[:2] == ("batch_rpc", "IxdSwd")]) == 5
+
+
+async def test_link_photo_hint_is_accurate(fake_ui):
+    # Plan D review M7: re-running with the same name is refused, so the hint must not say
+    # it makes another character.
+    ui = fake_ui({"Sc7aEb": [rpc("Sc7aEb", [], status=500)]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).link_photo(PID, "c7", "m3")
+    assert "do not re-run" in info.value.hint and "another character" not in info.value.hint

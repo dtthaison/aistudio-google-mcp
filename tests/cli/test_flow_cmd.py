@@ -158,11 +158,13 @@ def test_character_list_and_rename(logged_in_profile, monkeypatch):
     calls = []
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_characters", fake(
         {"characters": [{"id": "c1", "name": "Paper boat", "media_id": "i1", "created": None},
-                        {"id": "c4", "name": "Sketch", "media_id": None, "created": None}],
-         "count": 2, "project": "p"}, calls))
+                        {"id": "c4", "name": "Sketch", "media_id": None, "created": None},
+                        {"id": "c5", "name": "", "media_id": "i5", "created": None}],
+         "count": 3, "project": "p"}, calls))
     res = CliRunner().invoke(cli, ["flow", "character", "list"])
     assert res.exit_code == 0, res.output
     assert "c1  Paper boat" in res.stdout and "Sketch  (no image)" in res.stdout
+    assert "c5  (unnamed)" in res.stdout
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_rename_character",
                         fake({"character_id": "c1", "name": "Boat", "project": "p"}, calls))
     res = CliRunner().invoke(cli, ["flow", "character", "rename", "c1", "Boat", "--project", "p2"])
@@ -225,3 +227,15 @@ def test_flow_notice_comes_after_validation(logged_in_profile, monkeypatch):
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", start)
     res = CliRunner().invoke(cli, ["flow", "video", "x"])
     assert res.exit_code == 0 and "Asking Flow" in res.stderr
+
+
+
+def test_long_list_lines_do_not_wrap(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    title = "A very long scene title " * 5
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_scenes", fake(
+        {"scenes": [{"id": "s1", "title": title.strip(), "created": None,
+                     "clips": [{"media_id": "m1", "title": "a", "seconds": 8}]}],
+         "count": 1, "project": "p"}, []))
+    res = CliRunner().invoke(cli, ["flow", "scene", "list"])
+    assert f"s1  {title.strip()}  1 clip(s), 8 s" in res.stdout

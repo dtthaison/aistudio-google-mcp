@@ -10,7 +10,7 @@ from aistudio._app.flow import (
     flow_scenes,
     flow_stitch,
 )
-from aistudio._flow.page import AgentTurn
+from aistudio._flow.page import AgentTurn, CharacterOutcome
 from aistudio._flow.rows import FlowCharacter, FlowScene, ProjectContents, Quote, SceneClip
 from aistudio.exceptions import BrowserError, NotFoundError, PlanMismatchError, ValidationError
 from tests.unit.test_app_flow_b import CONTENTS, IMG, VID, listed, media, store
@@ -36,10 +36,16 @@ FULL = ProjectContents(
 
 class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
-                 after=None, link_error=None, details_error=None, **kw):
+                 after=None, link_error=None, details_error=None, stored_name=None,
+                 outcome_id="c1", **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
+        self.stored_name, self.outcome_id = stored_name, outcome_id
+
+    async def start_character(self, description):
+        self.calls.append(("character", description))
+        return CharacterOutcome(self.outcome_id, [media("i9", video=False)])
 
     async def media_details(self, media_id):
         if self.details_error:
@@ -68,7 +74,7 @@ class FakePage(PlanBPage):
 
     async def create_character_record(self, pid, name):
         self.calls.append(("record", name))
-        return "c7"
+        return "c7", self.stored_name or name
 
     async def link_photo(self, pid, cid, media_id):
         self.calls.append(("link", cid, media_id))
@@ -316,3 +322,49 @@ async def test_a_failed_description_character_names_it(logged_in_profile, tmp_pa
     with pytest.raises(BrowserError) as info:
         await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
     assert "character c1" in info.value.hint and "'Robot'" in info.value.hint
+
+
+
+SPACED = ProjectContents(FULL.titles, FULL.media, FULL.workflows,
+                         [FlowCharacter("c1", "Paper  boat", "i1", 100)], [SCENE])
+
+
+async def test_names_compare_with_spaces_collapsed(logged_in_profile, tmp_path):
+    # Plan D review M5: Flow's panel matches names with spaces collapsed.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(contents=SPACED)
+    await flow_generate(profile, "video", "x", characters=["paper boat"], out=tmp_path / "a.mp4",
+                        **kw)
+    assert ("attach_character", "Paper  boat") in pages[0].calls
+    kw, pages, _ = harness(contents=SPACED)
+    with pytest.raises(ValidationError):
+        await flow_character(profile, "Paper boat", "a boat", out=tmp_path / "b.png", **kw)
+
+
+async def test_character_mismatch_hint_points_at_flow(logged_in_profile, tmp_path):
+    # Plan D review M6: a stale chip would fail every re-run the same way.
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(turn_characters=())
+    with pytest.raises(PlanMismatchError) as info:
+        await flow_generate(profile, "video", "x", characters=["Paper boat"],
+                            out=tmp_path / "a.mp4", **kw)
+    assert "prompt box" in info.value.hint
+
+
+async def test_a_different_stored_name_is_a_warning(logged_in_profile, tmp_path):
+    # Plan D review M8: report the name Flow kept.
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(credits=(1010, 1010), stored_name="Apple (2)")
+    result = await flow_character(profile, "Apple", photo=IMG, out=tmp_path / "a.png", **kw)
+    assert result["name"] == "Apple (2)"
+    assert any("Apple (2)" in w for w in result["warnings"])
+
+
+async def test_no_rename_without_an_id(logged_in_profile, tmp_path):
+    # Plan D review M9: never send a rename for character "None".
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010), outcome_id=None)
+    result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
+    assert not any(c[0] == "rename" for c in pages[0].calls)
+    assert any("Robot" in w for w in result["warnings"])
+    assert result["name"] == "Untitled character"  # what Flow holds, not what was asked

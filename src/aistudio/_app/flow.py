@@ -157,7 +157,8 @@ async def flow_generate(
                 raise PlanMismatchError(
                     f"Flow's request carries characters {sorted(turn.characters) or 'none'}, "
                     f"not {sorted(wanted_ids) or 'none'}",
-                    hint=f"nothing was spent; re-run{waiting}")
+                    hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
+                         f"re-run{waiting}")
             expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
                             duration)
             decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
@@ -299,6 +300,7 @@ async def _reject_noting(page: Any) -> str:
 
 
 _NAME_MAX = 100
+UNTITLED = "Untitled character"  # Flow's name for a character made from a description
 _FINISHED = 3
 _CLIP = re.compile(r"^(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
                    r"(?:@(?P<start>\d+)-(?P<end>\d+))?$")
@@ -311,10 +313,14 @@ def _name(value: str) -> str:
     return name
 
 
+def _key(name: str) -> str:
+    """How names are compared: spaces collapsed (as Flow's panel matches them), any case."""
+    return " ".join(name.split()).casefold()
+
+
 def _free_name(contents: ProjectContents, name: str, *, keep: str | None = None) -> None:
     """Names are unique per project (case-insensitively): Flow attaches characters by name."""
-    taken = [c for c in contents.characters
-             if c.name.casefold() == name.casefold() and c.id != keep]
+    taken = [c for c in contents.characters if _key(c.name) == _key(name) and c.id != keep]
     if taken:
         raise ValidationError(f"character {taken[0].id} is already named {taken[0].name!r}",
                               hint="choose another name; --character picks characters by name")
@@ -327,11 +333,11 @@ def _characters(contents: ProjectContents, wanted: list[str]) -> list[FlowCharac
     for value in wanted:
         value = " ".join(value.split())
         found = ([c for c in contents.characters if c.id == value]
-                 or [c for c in contents.characters if c.name.casefold() == value.casefold()])
+                 or [c for c in contents.characters if _key(c.name) == _key(value)])
         if not found:
             raise NotFoundError(f"no character {value!r} in this Flow project",
                                 hint='see "aistudio flow character list"; nothing was sent')
-        same = [c for c in contents.characters if c.name.casefold() == found[0].name.casefold()]
+        same = [c for c in contents.characters if _key(c.name) == _key(found[0].name)]
         if len(same) > 1:
             raise ValidationError(
                 f"{len(same)} characters are named {found[0].name!r}",
@@ -522,7 +528,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
         if source is not None:
             price = 0  # measured: linking a photo generates nothing
             media_id = await _photo_id(page, contents, source)
-            cid = await page.create_character_record(project_id, name)
+            cid, stored = await page.create_character_record(project_id, name)
+            if stored != name:
+                notes.append(f"Flow stored the name {stored!r}, not {name!r}")
+                name = stored
             try:
                 image_id = await page.link_photo(project_id, cid, media_id)
             except Exception as exc:  # the named character exists now
@@ -545,11 +554,18 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                 raise _character_made(exc, made, name) from exc
             cid, media = outcome.character_id, outcome.media
             image_id = media[0].media_id if media else None
-            try:
-                await page.rename_character(project_id, cid, name)
-            except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
-                notes.append(f'Flow kept the name "Untitled character"; rename it with: '
-                             f'aistudio flow character rename {cid} "{name}"')
+            if cid is None:
+                notes.append(f'Flow did not report the new character\'s id, so it is still '
+                             f'"Untitled character"; find it with "aistudio flow character list" '
+                             f'and rename it to "{name}"')
+                name = UNTITLED
+            else:
+                try:
+                    await page.rename_character(project_id, cid, name)
+                except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
+                    notes.append(f'Flow kept the name "Untitled character"; rename it with: '
+                                 f'aistudio flow character rename {cid} "{name}"')
+                    name = UNTITLED
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings + notes

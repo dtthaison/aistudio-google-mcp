@@ -79,3 +79,11 @@ def test_sent_media_reads_slot_1():
     assert sent_media(body) == ["m1", "m2"]
     bare = json.dumps([None, json.dumps(["s", [[[["x"]]]]])])
     assert sent_media(urlencode({"f.req": bare})) == []
+
+
+
+def test_unnamed_characters_are_listed():
+    # Plan D review M10: a character Flow lists without a name can still be listed and renamed.
+    (character,) = contents(s5=[["p1", "c9", None, [1, "", []], None, None, [1, 0], [1, 0]]]
+                            ).characters
+    assert (character.id, character.name) == ("c9", "")
