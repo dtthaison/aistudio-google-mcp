@@ -396,7 +396,7 @@ Evidence: `docs/wire/findings.md`, "Flow paid measurements" (the user approved t
    - Omni 1.1 Flash edit of an 8-second clip, 20.
 
    An edit of a clip of any other length has no measured price and is refused. Nano Banana 2
-   Lite stays unmeasured, because its reading was unclear.
+   Lite's first reading was unclear; a clean re-measure gave 0 (item 6).
 2. **`character create -m nano-banana-2.1|nano-banana-pro`.** aistudio picks that model in the
    character page's "Select model family", reads the picker back, and prices the action with the
    label shown.

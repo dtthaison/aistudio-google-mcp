@@ -151,3 +151,15 @@ def test_a_later_node_does_not_overwrite_the_call():
     result[0][1][0][4][2][0] = [p for p in pairs if p[0] != "placeholder_frontend_id"]
     (made,) = agent_generated([generated_call(), progress, result])  # joined by node[3]
     assert (made.model, made.aspect) == ("Nano Banana 2.1", "16:9")
+
+
+
+def test_a_failed_result_without_media_is_not_pending():
+    from aistudio._flow.rows import agent_pending
+
+    failed = [[None, [["e4", None, None, None, ["generate_image", "generate_image",
+                                               [[["status", [None, None, "failed"]]]], "ph1"]]],
+               "e4"]]
+    assert agent_pending([generated_call()]) and not agent_pending([generated_call(), failed])
+    odd = [["generate_image", "generate_image", [[["prompt", [None, None, "x"]]]], ["not", "str"]]]
+    assert agent_pending([odd]) in (True, False)  # never an unhashable-key crash

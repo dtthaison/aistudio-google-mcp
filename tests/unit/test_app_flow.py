@@ -306,7 +306,7 @@ async def test_any_failure_after_approve_says_credits_were_spent(logged_in_profi
     with pytest.raises(AIStudioError) as info:
         await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                             duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
-    assert "credits were spent" in info.value.hint and "m9" in info.value.hint
+    assert "credits may have been spent" in info.value.hint and "m9" in info.value.hint
     assert "do not re-run" in info.value.hint
 
 
@@ -559,6 +559,7 @@ async def test_a_free_stream_still_running_is_a_timeout(logged_in_profile, tmp_p
     with pytest.raises(WaitTimeoutError) as info:
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "still generating" in info.value.message and "re-running" in info.value.hint
+    assert "charged" not in info.value.hint  # credits were not read (plan H review M3)
 
 
 async def test_charge_wording_is_neutral(logged_in_profile, tmp_path):
@@ -606,3 +607,17 @@ async def test_saving_errors_keep_the_free_runs_warnings(logged_in_profile, tmp_
         await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
                             out=tmp_path / "x.png", **kw)
     assert "without asking" in info.value.hint
+
+
+
+async def test_a_failed_restore_is_reported_on_a_quote_and_on_errors(logged_in_profile, tmp_path):
+    # Plan H review I2: the restore warning came after the result was built.
+    kw, _, _ = harness(restore_error=BrowserError("tune panel"))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    assert any("could not restore" in w for w in result["warnings"])
+    kw, _, _ = harness(restore_error=BrowserError("tune panel"))
+    with pytest.raises(OverBudgetError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=5, out=tmp_path / "b.mp4", **kw)
+    assert "could not restore" in info.value.hint

@@ -611,7 +611,7 @@ async def test_personality_hint_is_shell_safe(logged_in_profile, tmp_path):
     kw, _, _ = harness(credits=(1010, 1010), personality_error=BrowserError("no"))
     result = await flow_character(profile, "Apple", photo=IMG, personality=text,
                                   out=tmp_path / "a.png", **kw)
-    assert any(f"personality c7 {shlex.quote(text)}" in w for w in result["warnings"])
+    assert any(f"personality c7 -- {shlex.quote(text)}" in w for w in result["warnings"])
     kw, _, _ = harness(credits=(1010, 1010), personality_error=BrowserError("no"))
     result = await flow_character(profile, "Apple 2", photo=IMG, personality="x" * 500,
                                   out=tmp_path / "b.png", **kw)
@@ -644,3 +644,14 @@ async def test_a_record_without_a_workflow_is_named_as_such(logged_in_profile, t
         await flow_edit(profile, IMG, "x", max_credits=20, out=tmp_path / "b.mp4", **kw)
     assert "not a finished video" in info.value.message
     assert not any(c[0] == "details" for c in pages[0].calls)
+
+
+
+async def test_rename_hint_is_shell_safe(logged_in_profile, tmp_path):
+    import shlex
+
+    profile = profile_with_project(logged_in_profile)
+    name = 'Rob "the" $(bot)'
+    kw, _, _ = harness(credits=(1010, 1010), rename_error=BrowserError("no"))
+    result = await flow_character(profile, name, "a robot", out=tmp_path / "r.png", **kw)
+    assert any(f"rename c1 {shlex.quote(name)}" in w for w in result["warnings"])

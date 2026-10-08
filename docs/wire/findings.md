@@ -575,6 +575,7 @@ blocked; the RPCs that went through are free.
 | "Create body" for a character | Nano Banana 2.1 | **0** (1,030 → 1,030) |
 | Edit an 8 s clip through `aistudio flow edit` ("old sepia film") | Omni 1.1 Flash | **20** (1,030 → 1,010) |
 | An 8 s video (quoted) | Veo 3.1 Fast | **20** (1,010 → 990) |
+| Character from a description (clean re-measure, reads right around it) | Nano Banana 2 Lite | **0** (990 → 990) |
 
 - **Omni edit.** The clip editor's box ("Describe how to edit this video…", model chip "Omni 1.1
   Flash") generates **directly**: no permission request, no agent. Start sent `WuwhI`, `jIps6`,

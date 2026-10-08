@@ -278,7 +278,8 @@ class FlowPage:
                     quote = parse_permission(payload) or quote  # the last ask is the one waiting
                 if quote is not None:  # a request to approve always wins
                     return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
-                                     tuple(sent_characters(body)), tuple(sent_media(body)))
+                                     tuple(sent_characters(body)), tuple(sent_media(body)),
+                                     tuple(agent_generated(seen)))
                 generated = agent_generated(seen)
                 if generated:  # a free model: Flow generated without asking (live)
                     return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,

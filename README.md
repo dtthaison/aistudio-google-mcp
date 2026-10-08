@@ -45,9 +45,9 @@ uv run aistudio flow character create Robo "a friendly cartoon robot with round 
 uv run aistudio flow character create Apple --photo <image-media-id>    # free: the photo becomes the character
 uv run aistudio flow character list                     # ids and names; rename with "character rename ID NAME"
 uv run aistudio flow character personality <id> "calm and curious"     # free
-uv run aistudio flow character create Robo "a robot" -m nano-banana-pro  # 0 credits (measured)
+uv run aistudio flow character create Robo "a robot" -m nano-banana-pro  # or nano-banana-2-lite; 0 credits
 uv run aistudio flow character body <id> "full body, standing"          # 0 credits on Nano Banana 2.1
-uv run aistudio flow edit <media-id> "make it black and white" --max-credits 20 -o bw.mp4  # 8 s clips
+uv run aistudio flow edit <media-id> "make it black and white" --max-credits 20 -o bw.mp4  # 8 s Veo 3.1 Lite clips
 uv run aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
 uv run aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 uv run aistudio flow scene download <scene-id> -o scene.mp4              # e.g. the scene "flow extend" reports

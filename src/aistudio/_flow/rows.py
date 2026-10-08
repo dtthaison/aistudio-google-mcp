@@ -272,7 +272,7 @@ def agent_generated(items: list[Any]) -> list[Generated]:
     """``generate_*`` tool results in StreamChat payloads, joined to their calls by placeholder:
     ``["generate_image", "generate_image", [[["media_id", [None, None, id]], …]], placeholder]``.
     """
-    calls, results = _generate_nodes(items)
+    calls, results, _ = _generate_nodes(items)
     out = []
     for media_id, (name, values) in results.items():
         call = calls.get(values.get("placeholder_frontend_id"), {})
@@ -286,16 +286,18 @@ def agent_generated(items: list[Any]) -> list[Generated]:
 
 def agent_pending(items: list[Any]) -> bool:
     """A ``generate_*`` call with no result yet: Flow is still making it (free models)."""
-    calls, results = _generate_nodes(items)
-    done = {values.get("placeholder_frontend_id") for _, values in results.values()}
+    calls, results, finished = _generate_nodes(items)
+    done = {values.get("placeholder_frontend_id") for _, values in results.values()} | finished
     return any(placeholder not in done for placeholder in calls)
 
 
 def _generate_nodes(items: list[Any]) -> tuple[dict[Any, dict[str, Any]],
-                                               dict[str, tuple[str, dict[str, Any]]]]:
-    """Calls by placeholder (later nodes add keys, never erase them) and results by media id."""
+                                               dict[str, tuple[str, dict[str, Any]]], set[Any]]:
+    """Calls by placeholder (later nodes add keys, never erase them), results by media id, and
+    placeholders that finished without media (a failed result carries a status)."""
     calls: dict[Any, dict[str, Any]] = {}
     results: dict[str, tuple[str, dict[str, Any]]] = {}
+    finished: set[Any] = set()
     for payload in items:
         for node in _lists(payload):
             if (len(node) >= 3 and isinstance(node[0], str) and node[0].startswith("generate_")
@@ -303,14 +305,17 @@ def _generate_nodes(items: list[Any]) -> tuple[dict[Any, dict[str, Any]],
                 values = {pair[0]: pair[1][-1] for pair in opt_index(node, 2, 0) or []
                           if isinstance(pair, list) and len(pair) == 2
                           and isinstance(pair[0], str) and isinstance(pair[1], list) and pair[1]}
-                values.setdefault("placeholder_frontend_id", opt_index(node, 3))
+                if not isinstance(values.get("placeholder_frontend_id"), str):
+                    values["placeholder_frontend_id"] = _str(opt_index(node, 3))
                 media_id = values.get("media_id")
                 if isinstance(media_id, str) and media_id:
                     results[media_id] = (node[0], values)
+                elif "status" in values:
+                    finished.add(values["placeholder_frontend_id"])
                 else:
                     merged = calls.setdefault(values.get("placeholder_frontend_id"), {})
                     merged.update({k: v for k, v in values.items() if v is not None})
-    return calls, results
+    return calls, results, finished
 
 
 def _plain(label: str) -> str:

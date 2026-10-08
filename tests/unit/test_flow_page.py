@@ -374,3 +374,14 @@ async def test_a_turn_notes_a_generation_still_running(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 image."], AGENT_MESSAGE: ["..."]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 image.")
     assert turn.quote is None and turn.generating
+
+
+
+async def test_a_quote_turn_also_reports_what_flow_made(fake_ui):
+    from tests.unit.test_flow_rows import generated_call, generated_result
+
+    ui = fake_ui({"StreamChat": [chat(stream(generated_call(), generated_result(),
+                                             permission(cost=10)))]},
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
+    assert turn.quote is not None and [g.media_id for g in turn.generated] == ["g1"]

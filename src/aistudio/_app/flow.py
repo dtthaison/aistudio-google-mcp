@@ -138,27 +138,30 @@ async def flow_generate(
             check_options(kind, model_by_label(previous.model), None, None, duration)
         uploads: list[dict[str, str]] = []
         attached_ids: list[str] = []  # in attach order: frames are named "in order"
+        quoted: dict[str, Any] | None = None  # built here, returned after the restore
+        failure: AIStudioError | None = None
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
             if any(isinstance(value, Path) for _, value in attachments):
                 await page.new_session()  # expands a compact prompt box, which hides "+" (live)
-            for _, value in attachments:
-                if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
-                    media_id = await page.upload(value, known_ids=known_ids)
-                    known_ids.add(media_id)  # its late as29s record is not the next upload
-                    uploads.append({"file": value.name, "media_id": media_id})
-                    attached_ids.append(media_id)
-                    await page.open_project(project_id)  # the + panel stays open (live)
-                else:
-                    attached_ids.append(value)
-            if uploads:  # a reload can list the project without the newest upload (live)
-                try:
+            try:
+                for _, value in attachments:
+                    if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
+                        media_id = await page.upload(value, known_ids=known_ids)
+                        known_ids.add(media_id)  # its late as29s record is not the next upload
+                        uploads.append({"file": value.name, "media_id": media_id})
+                        attached_ids.append(media_id)
+                        await page.open_project(project_id)  # the + panel stays open (live)
+                    else:
+                        attached_ids.append(value)
+                if uploads:  # a reload can list the project without the newest upload (live)
                     await page.show_tiles(project_id, [u["file"] for u in uploads])
-                except AIStudioError as exc:
-                    ids = ", ".join(u["media_id"] for u in uploads)
-                    exc.hint = f"{exc.hint}: {ids}" if exc.hint else ids
-                    raise
+            except AIStudioError as exc:
+                if uploads:  # already in Flow: name each file's media id for the re-run
+                    exc.hint = _with_note(exc.hint, "uploaded: " + ", ".join(
+                        f"{u['file']}={u['media_id']}" for u in uploads))
+                raise
             await page.new_session()
             for title in titles:
                 await page.attach(title)
@@ -175,9 +178,12 @@ async def flow_generate(
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect))
             if turn.quote is None and not turn.generated and turn.generating:
-                raise WaitTimeoutError("Flow was still generating (free) when aistudio stopped "
-                                       "waiting", hint="nothing was charged by asking; check the "
-                                                       "project in Flow before re-running")
+                waiting = await _reject_noting(page, expect=False)
+                raise WaitTimeoutError(f"Flow was still generating without asking when aistudio "
+                                       f"stopped waiting: {turn.text[-300:]}",
+                                       hint=_with_note("Flow may still finish it; check the "
+                                                       "project in Flow before re-running",
+                                                       waiting))
             if turn.quote is None and not turn.generated:
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
@@ -216,44 +222,52 @@ async def flow_generate(
                         wrong = [*wrong, f"{note} (the settings were restored)"]
                     wrong = wrong + [f"Flow also made {g.media_id} without asking (free)"
                                      for g in turn.generated]
-                    return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
-                            "count": turn.quote.count, "plan": turn.text, "project": project_id,
-                            **({"uploads": uploads} if uploads else {}),
-                            **({"warnings": warnings + wrong} if warnings or wrong else {})}
-                if decision is Decision.REJECT_MISMATCH:
+                    warnings += wrong
+                    quoted = {"status": "quoted", "declined": declined,
+                              "credits": turn.quote.credits, "count": turn.quote.count,
+                              "plan": turn.text, "project": project_id,
+                              **({"uploads": uploads} if uploads else {})}
+                elif decision is Decision.REJECT_MISMATCH:
                     waiting = await _reject_noting(page)
                     raise PlanMismatchError("; ".join(wrong), hint=_with_note(
                         "nothing was spent; adjust the flags or the prompt", waiting))
-                if decision is Decision.REJECT_OVER_BUDGET:
+                elif decision is Decision.REJECT_OVER_BUDGET:
                     waiting = await _reject_noting(page)
                     raise OverBudgetError(f"Flow quotes {turn.quote.credits} credits, over "
                                           f"--max-credits {max_credits}",
                                           hint=_with_note(f"nothing was spent; re-run with "
                                                           f"--max-credits {turn.quote.credits} "
                                                           f"to accept", waiting))
-                try:
-                    outcome = await page.approve_and_follow(count=wanted.count,
-                                                            credits=turn.quote.credits,
-                                                            timeout_s=timeout_s, kind=kind,
-                                                            known=existing)
-                except Exception as exc:
-                    if not page.started:  # refused before Approve: decline the waiting request
-                        waiting = await _reject_noting(page)
-                        if waiting and isinstance(exc, AIStudioError):
-                            exc.hint = _with_note(exc.hint, waiting)
-                        raise
-                    # Approve may have spent: name the media, never invite a re-run
-                    raise _spent(exc, page.paid_media, project_id) from exc
+                else:
+                    try:
+                        outcome = await page.approve_and_follow(
+                            count=wanted.count, credits=turn.quote.credits, timeout_s=timeout_s,
+                            kind=kind, known=existing | set(attached_ids))  # not our uploads
+                    except Exception as exc:
+                        if not page.started:  # refused before Approve: decline the request
+                            waiting = await _reject_noting(page)
+                            if waiting and isinstance(exc, AIStudioError):
+                                exc.hint = _with_note(exc.hint, waiting)
+                            raise
+                        # Approve may have spent: name the media, never invite a re-run
+                        raise _spent(exc, page.paid_media, project_id) from exc
+        except AIStudioError as exc:
+            failure = exc  # the restore below must be able to add its note
+            raise
         finally:
             if wanted != previous:
                 try:
                     await page.apply_defaults(kind, previous)
                 except Exception:  # noqa: BLE001 - restoring must never hide the run's outcome
-                    warnings.append(f"could not restore Flow's {kind} defaults "
-                                    f"({previous.model}, {previous.aspect}, x{previous.count}); "
-                                    "set them in Flow's settings")
+                    note = (f"could not restore Flow's {kind} defaults ({previous.model}, "
+                            f"{previous.aspect}, x{previous.count}); set them in Flow's settings")
+                    warnings.append(note)
+                    if failure is not None:
+                        failure.hint = _with_note(failure.hint, note)
         if free is not None:  # after the restore: reading credits leaves the project page
             after, free_notes = await _credits_after(page, None)
+    if quoted is not None:
+        return {**quoted, **({"warnings": warnings} if warnings else {})}
     project_url = PROJECT_URL.format(id=project_id)
     if free is not None:
         media, notes = free
@@ -346,8 +360,10 @@ async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any
 
 
 def _free_charge(before: int | None, after: int | None) -> tuple[int | None, list[str]]:
-    if before is None or after is None:
-        return None, ["could not read Flow credits around the run; the charge was not verified"]
+    if before is None:  # already noted when the run started
+        return None, ["the charge was not verified"]
+    if after is None:
+        return None, ["could not read Flow credits after the run; the charge was not verified"]
     spent = before - after
     return spent, ([f"credits fell by {spent} during this run, which Flow did not quote"]
                    if spent else [])
@@ -502,7 +518,7 @@ def _spent(exc: Exception, media_ids: list[str], project_id: str, *, about: str 
     """An error after Approve or Start: credits may be spent, so name the media (and what they
     were for) and forbid a re-run."""
     made = ", ".join(media_ids) or "(not seen yet)"
-    lead = "credits were spent: Flow made" if paid else "Flow may have made"
+    lead = "credits may have been spent: Flow made" if paid else "Flow may have made"
     note = (f"{lead} media {made}{f' ({about})' if about else ''} in "
             f"{PROJECT_URL.format(id=project_id)}; do not re-run, check the project in Flow")
     if isinstance(exc, AIStudioError):
@@ -683,8 +699,9 @@ async def flow_edit(profile: Profile, media_id: str, text: str, *,
                                   hint=f"only {EDIT_MEASURED_SECONDS}-second clips are measured; "
                                        "nothing was spent")
         if source.model_key not in EDIT_MEASURED_SOURCES:
-            raise ValidationError(f"aistudio has no measured price for editing a "
-                                  f"{source.model_key or 'unknown'} clip",
+            raise ValidationError(f"aistudio has no measured price for editing "
+                                  f"{f'a {source.model_key}' if source.model_key else 'an unknown'}"
+                                  f" clip",
                                   hint="only Veo 3.1 Lite clips are measured (20 credits); "
                                        "nothing was spent")
         workflow_id = await _workflow_of(page, contents, media_id)
@@ -792,8 +809,8 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                 try:
                     await page.rename_character(project_id, cid, name)
                 except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
-                    notes.append(f'Flow kept the name "Untitled character"; rename it with: '
-                                 f'aistudio flow character rename {cid} "{name}"')
+                    notes.append(f"Flow kept the name \"Untitled character\"; rename it with: "
+                                 f"aistudio flow character rename {cid} {shlex.quote(name)}")
                     name = UNTITLED
         personality = personality.strip() if personality is not None else None
         if personality and cid is not None:
@@ -803,7 +820,7 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                 again = (shlex.quote(personality) if len(personality) <= _HINT_TEXT_MAX
                          else "TEXT")
                 notes.append(f"Flow did not save the personality; set it with: aistudio flow "
-                             f"character personality {cid} {again}")
+                             f"character personality {cid} -- {again}")
                 personality = None
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)

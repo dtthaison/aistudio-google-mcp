@@ -45,9 +45,10 @@ CONTENTS = ProjectContents({VID: "Red apple rolling on table", IMG: "apple.jpg"}
 
 class FakePage:
     def __init__(self, ui, *, contents=CONTENTS, credits=(1030, 1020), label="Veo 3.1 - Lite",
-                 character_model="Nano Banana 2.1", details=None, turn_media=None):
+                 character_model="Nano Banana 2.1", details=None, turn_media=None,
+                 tiles_error=None):
         self.calls, self.contents_value, self.label = [], contents, label
-        self.details, self.turn_media = details, turn_media
+        self.details, self.turn_media, self.tiles_error = details, turn_media, tiles_error
         self.uploaded, self.attached = {}, []  # what Flow would send: the attached media ids
         self.credit_values, self.character_model_label = list(credits), character_model
         self.paid_media, self.started = [], False
@@ -89,6 +90,12 @@ class FakePage:
 
     async def show_tiles(self, pid, titles):
         self.calls.append(("show_tiles", tuple(titles)))
+        if self.tiles_error:
+            raise self.tiles_error
+
+    async def approve_and_follow(self, *, count, credits, timeout_s, kind, known=frozenset()):
+        self.calls.append(("approve", frozenset(known)))
+        return FlowOutcome([media("v9")], 1020, False)
 
     async def upload(self, path, known_ids=frozenset()):
         self.calls.append(("upload", path.name, frozenset(known_ids)))
@@ -510,3 +517,34 @@ async def test_uploaded_tiles_are_shown_before_attaching(logged_in_profile, tmp_
     calls = pages[0].calls
     shown = calls.index(("show_tiles", ("a.jpg", "b.jpg")))
     assert shown < next(i for i, c in enumerate(calls) if c[0] == "attach")
+
+
+
+async def test_a_paid_run_never_takes_its_own_uploads(logged_in_profile, tmp_path):
+    # Plan H review M2: an upload made seconds before Approve is inside the time slack.
+    profile = logged_in_profile()
+    store(profile)
+    photo = tmp_path / "me.jpg"
+    photo.write_bytes(b"\xff\xd8x")
+    kw, pages, _ = harness()
+    await flow_generate(profile, "video", "an apple", start_frame=str(photo), max_credits=10,
+                        i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    approve = next(c for c in pages[0].calls if c[0] == "approve")
+    assert "up1" in approve[1]
+
+
+async def test_upload_errors_map_files_to_ids(logged_in_profile, tmp_path):
+    from aistudio.exceptions import BrowserError
+
+    profile = logged_in_profile()
+    store(profile)
+    first, second = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    first.write_bytes(b"\xff\xd8x")
+    second.write_bytes(b"\xff\xd8y")
+    kw, _, _ = harness(tiles_error=BrowserError("Flow does not show b.jpg yet; nothing was sent",
+                                                hint="re-run later"))
+    with pytest.raises(BrowserError) as info:
+        await flow_generate(profile, "video", "an apple", start_frame=str(first),
+                            end_frame=str(second), i_have_rights=True, out=tmp_path / "x.mp4",
+                            **kw)
+    assert "a.jpg=up1" in info.value.hint and "b.jpg=up2" in info.value.hint

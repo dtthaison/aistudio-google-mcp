@@ -82,7 +82,9 @@ quotes and write each `'` as `'\''`.
 - **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow
   does not ask, so `flow image` without `--max-credits` already makes and downloads the images
   (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
-  the user wants the images. Video models quote first (verified). Other image models are
+  the user wants the images. A `TIMEOUT` error saying Flow "was still generating without asking"
+  means Flow may still finish the images: tell the user to check the project in Flow, never
+  re-run it blindly. Video models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
