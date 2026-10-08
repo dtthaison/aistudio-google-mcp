@@ -258,3 +258,36 @@ async def test_choose_character_model_reads_the_picker_back(fake_ui):
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui).choose_character_model("Nano Banana Pro")
     assert "nothing was spent" in info.value.message
+
+
+
+EDIT_BOX = ("a red apple Describe how to edit this video\u2026 add pen_magic Omni 1.1 Flash "
+            "arrow_forward Google Flow can make mistakes")
+
+
+async def test_edit_label_reads_the_edit_box_model(fake_ui):
+    ui = fake_ui(texts={"body": [EDIT_BOX]}, url=f"https://flow.google.com/project/{PID}/edit/w1")
+    assert await FlowPage(ui).edit_label(PID, "w1") == "Omni 1.1 Flash"
+    assert ui.ops[0] == ("goto", f"https://flow.google.com/project/{PID}/edit/w1")
+
+
+async def test_edit_label_refuses_another_clip_or_no_box(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(texts={"body": [EDIT_BOX]}, url=f"https://flow.google.com/project/{PID}/edit/w2")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui).edit_label(PID, "w1")
+    ui = fake_ui(texts={"body": ["no edit box"]},
+                 url=f"https://flow.google.com/project/{PID}/edit/w1")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui).edit_label(PID, "w1")
+
+
+async def test_edit_follows_only_the_new_clip(fake_ui):
+    old = record(media_id=MEDIA, created=CREATED - 86_400)
+    ui = fake_ui({"as29s": [poll("as29s", old), poll("as29s", record(media_id="m3"))]},
+                 texts={EDITOR_LAST: ["make it black and white"]})
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    outcome = await page.edit("make it black and white", timeout_s=60)
+    assert [m.media_id for m in outcome.media] == ["m3"] and page.started
+    assert ("click", "button", "Start generation", -1) in ui.ops

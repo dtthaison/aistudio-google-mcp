@@ -4,6 +4,7 @@ from aistudio._app.flow import (
     flow_character,
     flow_character_body,
     flow_characters,
+    flow_edit,
     flow_extend,
     flow_generate,
     flow_rename_character,
@@ -12,9 +13,15 @@ from aistudio._app.flow import (
     flow_set_personality,
     flow_stitch,
 )
-from aistudio._flow.page import AgentTurn, CharacterOutcome
+from aistudio._flow.page import AgentTurn, CharacterOutcome, FlowOutcome
 from aistudio._flow.rows import FlowCharacter, FlowScene, ProjectContents, Quote, SceneClip
-from aistudio.exceptions import BrowserError, NotFoundError, PlanMismatchError, ValidationError
+from aistudio.exceptions import (
+    BrowserError,
+    NotFoundError,
+    OverBudgetError,
+    PlanMismatchError,
+    ValidationError,
+)
 from tests.unit.test_app_flow_b import CONTENTS, IMG, VID, listed, media, store
 from tests.unit.test_app_flow_b import FakePage as PlanBPage
 from tests.unit.test_app_flow_b import harness as plan_b_harness
@@ -39,12 +46,12 @@ FULL = ProjectContents(
 class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
                  after=None, link_error=None, details_error=None, stored_name=None,
-                 outcome_id="c1", personality_error=None, **kw):
+                 outcome_id="c1", personality_error=None, edit_model="Omni 1.1 Flash", **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
         self.stored_name, self.outcome_id = stored_name, outcome_id
-        self.personality_error = personality_error
+        self.personality_error, self.edit_model = personality_error, edit_model
 
     async def start_character(self, description):
         self.calls.append(("character", description))
@@ -66,6 +73,15 @@ class FakePage(PlanBPage):
         self.calls.append(("submit", text))
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
                          Quote(1, "video", 10), self.turn_characters, tuple(self.attached))
+
+    async def edit_label(self, pid, workflow_id):
+        self.calls.append(("edit_label", workflow_id))
+        return self.edit_model
+
+    async def edit(self, prompt, *, timeout_s):
+        self.calls.append(("edit", prompt))
+        self.started, self.paid_media = True, ["e1"]
+        return FlowOutcome([media("e1")], None, False)
 
     async def open_body(self, pid, cid):
         self.calls.append(("open_body", cid))
@@ -487,3 +503,32 @@ async def test_character_body_is_priced_and_downloaded(logged_in_profile, tmp_pa
     kw, _, _ = harness()
     with pytest.raises(NotFoundError):
         await flow_character_body(profile, "c9", "x", out=tmp_path / "d.png", **kw)
+
+
+
+SIX = "9a0b1c2d-1111-4222-8333-944455556666"
+
+
+async def test_edit_is_priced_by_model_and_length(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1000, 980))
+    result = await flow_edit(profile, VID, " make it  black and white ", max_credits=20,
+                             out=tmp_path / "e.mp4", **kw)
+    assert ("edit", "make it black and white") in pages[0].calls
+    assert result["credits_spent"] == 20 and result["model"] == "omni-1.1-flash"
+    assert result["source"] == VID and (tmp_path / "e.mp4").exists()
+    for budget in (None, 19):
+        kw, pages, _ = harness()
+        with pytest.raises(OverBudgetError):
+            await flow_edit(profile, VID, "x", max_credits=budget, out=tmp_path / "f.mp4", **kw)
+        assert not any(c[0] == "edit" for c in pages[0].calls)
+    kw, pages, _ = harness(edit_model="Veo 3.1 - Lite")
+    with pytest.raises(ValidationError):
+        await flow_edit(profile, VID, "x", max_credits=100, out=tmp_path / "g.mp4", **kw)
+    six = ProjectContents({**FULL.titles, SIX: "six"}, [*FULL.media, listed(media(SIX, seconds=6))],
+                          {**FULL.workflows, SIX: "w6"}, CHARS, [SCENE])
+    kw, pages, _ = harness(contents=six)
+    with pytest.raises(ValidationError) as info:
+        await flow_edit(profile, SIX, "x", max_credits=100, out=tmp_path / "h.mp4", **kw)
+    assert "6-second" in info.value.message
+    assert not any(c[0] in ("edit_label", "edit") for c in pages[0].calls)

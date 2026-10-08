@@ -278,3 +278,16 @@ def test_character_body_command(logged_in_profile, monkeypatch):
                               "credits_spent": 0, "credits_left": 5, "project": "p"}, calls))
     res = CliRunner().invoke(cli, ["flow", "character", "body", "c1", "full body", "--json"])
     assert res.exit_code == 0 and calls[-1][0] == ("c1", "full body")
+
+
+
+def test_edit_command(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_edit",
+                        fake({"status": "done", "files": [], "credits_spent": 20,
+                              "credits_left": 980, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "edit", "m1", "make it black and white",
+                                   "--max-credits", "20", "--timeout", "300", "--json"])
+    assert res.exit_code == 0 and calls[-1][0] == ("m1", "make it black and white")
+    assert calls[-1][1]["max_credits"] == 20 and calls[-1][1]["timeout_s"] == 300.0

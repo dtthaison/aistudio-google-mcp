@@ -11,6 +11,7 @@ from typing import Any
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
 from aistudio._flow.models import (
+    EDIT_MEASURED_SECONDS,
     FREE_WITHOUT_ASKING,
     MODEL_KEYS,
     Decision,
@@ -602,6 +603,62 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
     return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
             "model": label_to_id(label), "scene_id": scene_id, "source": media_id,
             "project": project_id,
+            **({"warnings": warnings} if warnings else {})}
+
+
+async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
+                    max_credits: int | None = None, project: str | None = None,
+                    out: Path | None = None, overwrite: bool = False, timeout_s: float = 600.0,
+                    visible: bool = False, browser: Callable[..., Any] = open_browser,
+                    downloader: Callable[[str], Any] = download_signed,
+                    now: Callable[[], datetime] = datetime.now,
+                    page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Edit a clip with the editor's box (Omni; a direct spend priced from the table)."""
+    instruction = " ".join(instruction.split())
+    if not instruction:
+        raise ValidationError("nothing to do: the edit instruction is empty")
+    project_id = _project_id(project) if project else None
+    _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        before = await page.credits()
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        source = next((m for m in contents.media if m.media_id == media_id), None)
+        workflow_id = contents.workflows.get(media_id)
+        if source is None or workflow_id is None:
+            raise NotFoundError(f"no media {media_id} in this Flow project",
+                                hint='see "aistudio flow media"')
+        if _media_kind(source) != "video" or source.status != 3:
+            raise ValidationError(f"media {media_id} is not a finished video")
+        if source.seconds != EDIT_MEASURED_SECONDS:
+            raise ValidationError(f"aistudio has no measured price for editing a "
+                                  f"{source.seconds}-second clip",
+                                  hint=f"only {EDIT_MEASURED_SECONDS}-second clips are measured; "
+                                       "nothing was spent")
+        label = await page.edit_label(project_id, workflow_id)  # opens that exact clip
+        price = check_direct_spend("edit", label, max_credits)  # refuses before any spend
+        try:
+            outcome = await page.edit(instruction, timeout_s=timeout_s)
+        except Exception as exc:
+            if not page.started:  # a check before Start: its own "nothing was spent" stands
+                raise
+            raise _spent(exc, page.paid_media, project_id) from exc  # Start may have spent
+        after, read_notes = await _credits_after(page, outcome.credits_left)
+    spent, warnings = _cost_warning(before, after, price)
+    warnings = read_notes + warnings
+    project_url = PROJECT_URL.format(id=project_id)
+    if outcome.timed_out:
+        return {"status": "timeout",
+                "media_ids": page.paid_media or [m.media_id for m in outcome.media],
+                "project_url": project_url, "credits_spent": spent,
+                **({"warnings": warnings} if warnings else {})}
+    files, saved_notes = await _save_all("video", outcome.media, out=out, overwrite=overwrite,
+                                         downloader=downloader, stamp=now(),
+                                         project_url=project_url)
+    warnings += saved_notes
+    return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
+            "model": label_to_id(label), "source": media_id, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
 
 

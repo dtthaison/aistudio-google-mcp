@@ -14,6 +14,7 @@ from aistudio._app.flow import (
     flow_characters,
     flow_credits,
     flow_download,
+    flow_edit,
     flow_extend,
     flow_generate,
     flow_media,
@@ -394,6 +395,30 @@ def scene_download(state: CliState, scene_id: str, project: str | None, out: Pat
     _finish(asyncio.run(flow_scene_download(state.profile(), scene_id, project=project, out=out,
                                             overwrite=force, timeout_s=float(timeout),
                                             visible=visible)), json_output)
+
+
+@flow.command("edit")
+@click.argument("media_id")
+@click.argument("instruction")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--max-credits", type=click.IntRange(0),
+              help="Spend at most this many credits (an Omni edit of an 8-second clip costs 20).")
+@click.option("-o", "--out", type=click.Path(path_type=Path), help="Output file for the new clip.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True)
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def edit_cmd(state: CliState, media_id: str, instruction: str, project: str | None,
+             max_credits: int | None, out: Path | None, force: bool, timeout: int,
+             visible: bool, json_output: bool) -> None:
+    """Edit a clip with INSTRUCTION, e.g. "make it black and white" (Omni 1.1 Flash; Flow
+    charges without a quote, priced from aistudio's measured table)."""
+    state.require_browser()
+    _finish(asyncio.run(flow_edit(state.profile(), media_id, instruction, max_credits=max_credits,
+                                  project=project, out=out, overwrite=force,
+                                  timeout_s=float(timeout), visible=visible)), json_output)
 
 
 @flow.command("extend")
