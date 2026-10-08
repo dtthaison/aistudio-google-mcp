@@ -23,6 +23,7 @@ from aistudio.exceptions import (
     ValidationError,
 )
 from tests.unit.test_app_flow_b import CONTENTS, IMG, VID, listed, media, store
+from tests.unit.test_app_flow_b import PID as PROJECT
 from tests.unit.test_app_flow_b import FakePage as PlanBPage
 from tests.unit.test_app_flow_b import harness as plan_b_harness
 
@@ -46,12 +47,14 @@ FULL = ProjectContents(
 class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
                  after=None, link_error=None, details_error=None, stored_name=None,
-                 outcome_id="c1", personality_error=None, edit_model="Omni 1.1 Flash", **kw):
+                 outcome_id="c1", personality_error=None, edit_model="Omni 1.1 Flash",
+                 edit_error=None, edit_timeout=False, **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
         self.stored_name, self.outcome_id = stored_name, outcome_id
         self.personality_error, self.edit_model = personality_error, edit_model
+        self.edit_error, self.edit_timeout = edit_error, edit_timeout
 
     async def start_character(self, description):
         self.calls.append(("character", description))
@@ -78,10 +81,14 @@ class FakePage(PlanBPage):
         self.calls.append(("edit_label", workflow_id))
         return self.edit_model
 
-    async def edit(self, prompt, *, timeout_s):
-        self.calls.append(("edit", prompt))
+    async def edit(self, prompt, *, timeout_s, known):
+        self.calls.append(("edit", prompt, frozenset(known)))
+        if self.edit_error is not None:
+            started, error = self.edit_error
+            self.started, self.paid_media = started, (["e1"] if started else [])
+            raise error
         self.started, self.paid_media = True, ["e1"]
-        return FlowOutcome([media("e1")], None, False)
+        return FlowOutcome([media("e1")], None, self.edit_timeout)
 
     async def open_body(self, pid, cid):
         self.calls.append(("open_body", cid))
@@ -514,7 +521,8 @@ async def test_edit_is_priced_by_model_and_length(logged_in_profile, tmp_path):
     kw, pages, _ = harness(credits=(1000, 980))
     result = await flow_edit(profile, VID, " make it  black and white ", max_credits=20,
                              out=tmp_path / "e.mp4", **kw)
-    assert ("edit", "make it black and white") in pages[0].calls
+    edit_call = next(c for c in pages[0].calls if c[0] == "edit")
+    assert edit_call[1] == "make it black and white" and VID in edit_call[2]
     assert result["credits_spent"] == 20 and result["model"] == "omni-1.1-flash"
     assert result["source"] == VID and (tmp_path / "e.mp4").exists()
     for budget in (None, 19):
@@ -546,3 +554,36 @@ async def test_an_older_clip_finds_its_workflow_from_its_record(logged_in_profil
     await flow_edit(profile, VID, "make it black and white", max_credits=20,
                     out=tmp_path / "e.mp4", **kw)
     assert ("edit_label", "w-old") in pages[0].calls
+
+
+
+async def test_edit_failures_before_and_after_start(logged_in_profile, tmp_path):
+    # Plan G review Important 2.
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(edit_error=(False, BrowserError("Flow's editor shows nothing; nothing "
+                                                       "was spent", hint="re-run")))
+    with pytest.raises(BrowserError) as info:
+        await flow_edit(profile, VID, "x", max_credits=20, out=tmp_path / "a.mp4", **kw)
+    assert info.value.hint == "re-run"
+    kw, _, _ = harness(edit_error=(True, BrowserError("window closed")))
+    with pytest.raises(BrowserError) as info:
+        await flow_edit(profile, VID, "x", max_credits=20, out=tmp_path / "b.mp4", **kw)
+    assert "e1" in info.value.hint and "do not re-run" in info.value.hint
+    kw, _, _ = harness(edit_timeout=True, credits=(1000, 980))
+    result = await flow_edit(profile, VID, "x", max_credits=20, out=tmp_path / "c.mp4", **kw)
+    assert result["status"] == "timeout" and result["media_ids"] == ["e1"]
+    assert result["project_url"].endswith(PROJECT)
+
+
+async def test_edit_only_on_a_measured_source_model(logged_in_profile, tmp_path):
+    # Plan G review Minor 4 (re-graded): only a Veo 3.1 Lite source was measured.
+    import dataclasses
+
+    profile = profile_with_project(logged_in_profile)
+    fast = dataclasses.replace(listed(media(VID)), model_key="veo_3_1_t2v_fast")
+    other = ProjectContents(FULL.titles, [fast, *FULL.media[1:]], FULL.workflows, CHARS, [SCENE])
+    kw, pages, _ = harness(contents=other)
+    with pytest.raises(ValidationError) as info:
+        await flow_edit(profile, VID, "x", max_credits=100, out=tmp_path / "a.mp4", **kw)
+    assert "veo_3_1_t2v_fast" in info.value.message
+    assert not any(c[0] in ("edit_label", "edit") for c in pages[0].calls)

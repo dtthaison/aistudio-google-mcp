@@ -135,6 +135,7 @@ PRICES = {("character", "Nano Banana 2.1"): 0, ("character", "Nano Banana Pro"):
           ("extend", "Veo 3.1 - Lite"): 10,
           ("edit", "Omni 1.1 Flash"): 20}  # an 8-second source clip (the only one measured)
 EDIT_MEASURED_SECONDS = 8  # the edit price above is for clips of this length only
+EDIT_MEASURED_SOURCES = {"veo_3_1_t2v_lite"}  # ...and made by this model (16:9, measured)
 # Image models Flow's agent is known to generate with at once (no quote), and their price.
 # Another image model may also skip the quote, at an unknown price, so it is refused.
 FREE_WITHOUT_ASKING = {"Nano Banana 2.1": 0}

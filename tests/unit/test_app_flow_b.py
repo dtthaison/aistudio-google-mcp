@@ -474,5 +474,21 @@ async def test_uploads_happen_before_the_session_and_the_page_is_reloaded(logged
                         i_have_rights=True, out=tmp_path / "a.mp4", **kw)
     names = [c[0] for c in pages[0].calls]
     upload = names.index("upload")
-    assert upload < names.index("session") < names.index("attach")
-    assert "open" in names[upload:names.index("session")]
+    assert "session" in names[:upload]  # expands a compact prompt box before uploading (live)
+    after = names[upload:]
+    assert after.index("open") < after.index("session") < after.index("attach")
+
+
+async def test_each_upload_is_followed_by_a_reload(logged_in_profile, tmp_path):
+    # Plan G review Minor 3 (re-graded): a second "+" press could close the open panel.
+    profile = logged_in_profile()
+    store(profile)
+    first, second = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    first.write_bytes(b"\xff\xd8x")
+    second.write_bytes(b"\xff\xd8y")
+    kw, pages, _ = harness()
+    await flow_generate(profile, "video", "an apple", start_frame=str(first),
+                        end_frame=str(second), i_have_rights=True, out=tmp_path / "a.mp4", **kw)
+    names = [c[0] for c in pages[0].calls]
+    uploads = [i for i, n in enumerate(names) if n == "upload"]
+    assert names[uploads[0] + 1] == "open" and names[uploads[1] + 1] == "open"

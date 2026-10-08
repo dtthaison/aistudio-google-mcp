@@ -77,6 +77,8 @@ ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
 CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
+BODY_MODE = "Clear prompt"  # shown once body mode is on (findings)
+EDIT_MODEL_KEY = "abra_edit"  # the model key of a clip an Omni edit makes (live)
 # The clip editor's own box: "Describe how to edit this video… add pen_magic Omni 1.1 Flash →"
 _EDIT_MODEL = re.compile(r"Describe how to edit this video…\s+(?:add\s+)?(?:pen_magic\s+)?"
                          r"(.+?)\s+arrow_forward")
@@ -515,16 +517,18 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
         return _label(match.group(1))
 
-    async def edit(self, prompt: str, *, timeout_s: float) -> FlowOutcome:
+    async def edit(self, prompt: str, *, timeout_s: float, known: set[str]) -> FlowOutcome:
         """Call after edit_label. Flow edits without a quote (a direct spend, priced first) and
-        makes a new clip; only media created after Start are followed."""
+        makes a new clip. Only an edit's media created after Start, and not in ``known`` (the
+        source and the project's media before Start), are followed."""
         await self._ui.type_text(EDITOR_LAST, prompt)
         await self._wait_for_prompt(EDITOR_LAST, prompt)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True
             await self._ui.click("button", START, exact=True, nth=-1)
-            return await self._follow(log, 1, timeout_s, "video", since)
+            return await self._follow(log, 1, timeout_s, "video", since, exclude=known,
+                                      model_key=EDIT_MODEL_KEY)
 
     async def open_body(self, project_id: str, character_id: str) -> str:
         """Open the character's page in body mode; return the image model it will use."""
@@ -533,10 +537,13 @@ class FlowPage:
         if not self._ui.current_url().split("?", 1)[0].endswith(f"/character/{character_id}"):
             raise BrowserError("Flow opened another page than the character; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
-        label = _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
         await self._ui.dispatch_click("button", CREATE_BODY)
         await self._ui.pause(2000)
-        return label
+        # Without body mode, Start would run the page's other, unpriced action.
+        if not await self._ui.visible("button", BODY_MODE, exact=True):
+            raise BrowserError("Flow did not switch to body mode; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
 
     async def start_body(self, prompt: str) -> list[FlowMedia]:
         """Call after open_body. Generates the body image (a direct spend: priced first)."""
@@ -643,7 +650,9 @@ class FlowPage:
         return int(match.group(1).replace(",", "")) if match else None
 
     async def _follow(self, log: ResponseLog, count: int, timeout_s: float, kind: str,
-                      since: float, only: set[str] | None = None) -> FlowOutcome:
+                      since: float, only: set[str] | None = None,
+                      exclude: set[str] | frozenset[str] = frozenset(),
+                      model_key: str | None = None) -> FlowOutcome:
         """Follow only media created by this job: the reused project lists older media too."""
         seen: dict[str, FlowMedia] = {}
         credits = None
@@ -657,6 +666,10 @@ class FlowPage:
                 if method == "jwpduf" and credits_left(payload) is not None:
                     credits = credits_left(payload)
                 for media in media_records(method, payload):
+                    if media.media_id in exclude:
+                        continue  # existed before Start (e.g. the clip being edited)
+                    if model_key and media.model_key and media.model_key != model_key:
+                        continue  # another kind of job, not this one
                     if only is not None:
                         if media.media_id not in only:
                             continue  # Flow named this job's media: nothing else counts

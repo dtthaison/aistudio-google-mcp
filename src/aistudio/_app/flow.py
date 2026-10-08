@@ -12,6 +12,7 @@ from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
 from aistudio._flow.models import (
     EDIT_MEASURED_SECONDS,
+    EDIT_MEASURED_SOURCES,
     FREE_WITHOUT_ASKING,
     MODEL_KEYS,
     Decision,
@@ -128,16 +129,17 @@ async def flow_generate(
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
+            if any(isinstance(value, Path) for _, value in attachments):
+                await page.new_session()  # expands a compact prompt box, which hides "+" (live)
             for _, value in attachments:
                 if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
                     media_id = await page.upload(value, known_ids=known_ids)
                     known_ids.add(media_id)  # its late as29s record is not the next upload
                     uploads.append({"file": value.name, "media_id": media_id})
                     attached_ids.append(media_id)
+                    await page.open_project(project_id)  # the + panel stays open (live)
                 else:
                     attached_ids.append(value)
-            if uploads:  # the + panel stays over the grid after an upload (live): reload
-                await page.open_project(project_id)
             await page.new_session()
             for title in titles:
                 await page.attach(title)
@@ -632,14 +634,21 @@ async def flow_edit(profile: Profile, media_id: str, instruction: str, *,
         if _media_kind(source) != "video" or source.status != 3:
             raise ValidationError(f"media {media_id} is not a finished video")
         if source.seconds != EDIT_MEASURED_SECONDS:
-            raise ValidationError(f"aistudio has no measured price for editing a "
-                                  f"{source.seconds}-second clip",
+            length = (f"a {source.seconds}-second clip" if source.seconds
+                      else "a clip of unknown length")
+            raise ValidationError(f"aistudio has no measured price for editing {length}",
                                   hint=f"only {EDIT_MEASURED_SECONDS}-second clips are measured; "
+                                       "nothing was spent")
+        if source.model_key not in EDIT_MEASURED_SOURCES:
+            raise ValidationError(f"aistudio has no measured price for editing a "
+                                  f"{source.model_key or 'unknown'} clip",
+                                  hint="only Veo 3.1 Lite clips are measured (20 credits); "
                                        "nothing was spent")
         label = await page.edit_label(project_id, workflow_id)  # opens that exact clip
         price = check_direct_spend("edit", label, max_credits)  # refuses before any spend
+        known = {m.media_id for m in contents.media} | set(contents.titles) | {media_id}
         try:
-            outcome = await page.edit(instruction, timeout_s=timeout_s)
+            outcome = await page.edit(instruction, timeout_s=timeout_s, known=known)
         except Exception as exc:
             if not page.started:  # a check before Start: its own "nothing was spent" stands
                 raise

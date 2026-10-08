@@ -283,11 +283,31 @@ async def test_edit_label_refuses_another_clip_or_no_box(fake_ui):
         await FlowPage(ui).edit_label(PID, "w1")
 
 
+def edited(media_id):
+    """A clip made by an Omni edit (live model key ``abra_edit``)."""
+    row = record(media_id=media_id)
+    row[5][6][1][0][0] = "abra_edit"
+    return row
+
+
 async def test_edit_follows_only_the_new_clip(fake_ui):
     old = record(media_id=MEDIA, created=CREATED - 86_400)
-    ui = fake_ui({"as29s": [poll("as29s", old), poll("as29s", record(media_id="m3"))]},
+    ui = fake_ui({"as29s": [poll("as29s", old), poll("as29s", edited("m3"))]},
                  texts={EDITOR_LAST: ["make it black and white"]})
     page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
-    outcome = await page.edit("make it black and white", timeout_s=60)
+    outcome = await page.edit("make it black and white", timeout_s=60, known={MEDIA})
     assert [m.media_id for m in outcome.media] == ["m3"] and page.started
     assert ("click", "button", "Start generation", -1) in ui.ops
+
+
+
+async def test_edit_never_takes_the_source_or_another_jobs_clip(fake_ui):
+    # Plan G review Critical 1: a source made a minute before Start is inside the time slack.
+    source = record(media_id=MEDIA, created=CREATED - 60)  # done, with its link
+    other = record(media_id="m8", created=CREATED - 10)   # another job's Veo clip
+    ui = fake_ui({"as29s": [poll("as29s", source), poll("as29s", other),
+                            poll("as29s", edited("m3"))]},
+                 texts={EDITOR_LAST: ["make it black and white"]})
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    outcome = await page.edit("make it black and white", timeout_s=60, known={MEDIA})
+    assert [m.media_id for m in outcome.media] == ["m3"] and page.paid_media == ["m3"]

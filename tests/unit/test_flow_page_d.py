@@ -171,6 +171,7 @@ async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
     ui = fake_ui({"ogiZ0b": [rpc("ogiZ0b", [[IMAGE_ROW]])]},
                  inner={("button", CHARACTER_MODEL): [picker]},
                  texts={EDITOR_LAST: ["full body on a dock"]},
+                 visible={("button", "Clear prompt"): [True]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
     page = FlowPage(ui, now=Clock())
     assert await page.open_body(PID, "c1") == "Nano Banana 2.1"
@@ -184,3 +185,15 @@ async def test_body_needs_the_characters_own_page(fake_ui):
     with pytest.raises(BrowserError):
         await FlowPage(ui, now=Clock()).open_body(PID, "c1")
     assert ("dispatch", "button", "Create body") not in ui.ops
+
+
+
+async def test_body_mode_must_take_effect_before_anything_is_priced(fake_ui):
+    # Plan G review Important 1: otherwise Start runs the page's other, unmeasured action.
+    from aistudio._flow.page import CHARACTER_MODEL
+
+    ui = fake_ui(inner={("button", CHARACTER_MODEL): ["Nano Banana 2.1 arrow_drop_down"]},
+                 url=f"https://flow.google.com/project/{PID}/character/c1")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).open_body(PID, "c1")
+    assert "nothing was spent" in info.value.message
