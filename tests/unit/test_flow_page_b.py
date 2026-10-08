@@ -65,3 +65,9 @@ async def test_extend_reads_the_model_and_follows_the_new_clip(fake_ui):
     assert await page.extend_label("Red apple") == "Veo 3.1 - Lite"
     outcome = await page.extend("Red apple", "rolls off", timeout_s=60)
     assert [m.media_id for m in outcome.media] == ["m2"] and outcome.credits_left == 1020
+
+
+async def test_character_model_reads_the_character_pages_picker(fake_ui):
+    ui = fake_ui(inner={("button", "Select model family"): ["🍌 Nano Banana Pro arrow_drop_down"]})
+    assert await FlowPage(ui).character_model(PID) == "Nano Banana Pro"
+    assert ui.ops[0] == ("goto", f"https://flow.google.com/project/{PID}/character")

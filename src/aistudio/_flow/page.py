@@ -53,6 +53,7 @@ EDITOR_LAST = "[contenteditable=true] >> nth=-1"
 START = "Start generation"
 ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
+CHARACTER_MODEL = "Select model family"
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
 MODEL_BUTTON = {"video": "Video generation default model",
@@ -289,6 +290,12 @@ class FlowPage:
         await self._ui.pause(800)
         await self._ui.dispatch_click("menuitem", ADD_TO_PROMPT)
         await self._ui.pause(800)
+
+    async def character_model(self, project_id: str) -> str:
+        """The image model the character page will use (its picker's label)."""
+        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
+        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
 
     async def create_character(self, project_id: str, description: str) -> CharacterOutcome:
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
