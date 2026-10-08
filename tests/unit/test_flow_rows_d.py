@@ -6,6 +6,7 @@ from aistudio._flow.rows import (
     decode_contents,
     linked_image,
     sent_characters,
+    sent_media,
     stitch_job,
     stitch_state,
 )
@@ -70,3 +71,11 @@ def test_linked_image_and_character_name():
     assert linked_image([]) is None
     assert character_name([[PID, "c1", None, [1, "Boat", []]]]) == "Boat"
     assert character_name(None) is None
+
+
+def test_sent_media_reads_slot_1():
+    message = ["sess", [[[["a prompt"]]], [["m1"], ["m2", None]]], ["projects/p1"]]
+    body = urlencode({"f.req": json.dumps([None, json.dumps(message)])})
+    assert sent_media(body) == ["m1", "m2"]
+    bare = json.dumps([None, json.dumps(["s", [[[["x"]]]]])])
+    assert sent_media(urlencode({"f.req": bare})) == []

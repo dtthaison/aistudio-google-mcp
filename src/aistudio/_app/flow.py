@@ -111,6 +111,7 @@ async def flow_generate(
         if duration is not None and flow_model is None:  # check against the default model
             check_options(kind, model_by_label(previous.model), None, None, duration)
         uploads: list[dict[str, str]] = []
+        attached_ids: set[str] = set()
         try:
             if wanted != previous:
                 await page.apply_defaults(kind, wanted)
@@ -120,6 +121,9 @@ async def flow_generate(
                     media_id = await page.upload(value, known_ids=known_ids)
                     known_ids.add(media_id)  # its late as29s record is not the next upload
                     uploads.append({"file": value.name, "media_id": media_id})
+                    attached_ids.add(media_id)
+                else:
+                    attached_ids.add(value)
                 await page.attach(title)
             for chosen_character in chosen:
                 await page.attach_character(chosen_character.name)
@@ -137,6 +141,13 @@ async def flow_generate(
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint="rephrase the prompt or add options; nothing was "
                                            "spent")
+            if set(turn.media) != attached_ids:
+                waiting = await _reject_noting(page)
+                raise PlanMismatchError(
+                    f"Flow's request carries media {sorted(turn.media) or 'none'}, "
+                    f"not {sorted(attached_ids) or 'none'}",
+                    hint=f"nothing was spent; check the prompt box's attachments in Flow, then "
+                         f"re-run{waiting}")
             wanted_ids = {c.id for c in chosen}
             if set(turn.characters) != wanted_ids:
                 waiting = await _reject_noting(page)
@@ -244,9 +255,11 @@ def _attachment_titles(contents: ProjectContents | None,
     by title, so each title must name exactly one media in the project."""
     if not attachments or contents is None:
         return [], set()
+    hidden = {c.media_id for c in contents.characters}  # characters' images: copies, no tile
     by_title: dict[str, list[str]] = {}
     for media_id, title in contents.titles.items():
-        by_title.setdefault(title, []).append(media_id)
+        if media_id not in hidden:
+            by_title.setdefault(title, []).append(media_id)
     titles = []
     for _, value in attachments:
         if isinstance(value, Path):
@@ -257,6 +270,10 @@ def _attachment_titles(contents: ProjectContents | None,
                                            "nothing was uploaded")
             titles.append(value.name)
             continue
+        owner = next((c for c in contents.characters if c.media_id == value), None)
+        if owner is not None:
+            raise ValidationError(f"{value} is the image of character {owner.name!r}",
+                                  hint=f'use --character "{owner.name}" instead; nothing was sent')
         title = contents.titles.get(value)
         if title is None:
             raise NotFoundError(f"no media {value} in this Flow project",

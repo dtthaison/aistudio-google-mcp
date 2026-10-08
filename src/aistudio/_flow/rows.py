@@ -161,13 +161,22 @@ def stitch_state(payload: Any) -> tuple[int | None, str | None]:
 def sent_characters(body: str) -> list[str]:
     """Character ids in a StreamChat request:
     ``[session, [[[[prompt]]], media, None, [[character_id], …]], …]`` inside ``f.req``."""
+    return _sent_ids(body, 3)
+
+
+def sent_media(body: str) -> list[str]:
+    """Attached media ids in a StreamChat request: slot 1, ``[[media_id, …], …]``."""
+    return _sent_ids(body, 1)
+
+
+def _sent_ids(body: str, slot: int) -> list[str]:
     raw = parse_qs(body).get("f.req", [body])[0]
     try:
         inner = opt_index(json.loads(raw), 1)
         message = json.loads(inner) if isinstance(inner, str) else None
     except ValueError:
         return []
-    return [c[0] for c in opt_index(message, 1, 3) or []
+    return [c[0] for c in opt_index(message, 1, slot) or []
             if isinstance(c, list) and c and isinstance(c[0], str)]
 
 

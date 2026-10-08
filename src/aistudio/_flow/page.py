@@ -35,6 +35,7 @@ from aistudio._flow.rows import (
     media_records,
     parse_permission,
     sent_characters,
+    sent_media,
     stitch_job,
     stitch_state,
 )
@@ -103,6 +104,7 @@ class AgentTurn:
     text: str
     quote: Quote | None
     characters: tuple[str, ...] = ()  # character ids sent with the request that was quoted
+    media: tuple[str, ...] = ()  # attached media ids sent with it
 
 
 @dataclass(frozen=True)
@@ -242,8 +244,9 @@ class FlowPage:
                 for _, payload in payloads(response.text):
                     quote = parse_permission(payload)
                     if quote is not None:
+                        body = response.request_body
                         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
-                                         tuple(sent_characters(response.request_body)))
+                                         tuple(sent_characters(body)), tuple(sent_media(body)))
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
 

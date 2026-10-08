@@ -45,9 +45,10 @@ CONTENTS = ProjectContents({VID: "Red apple rolling on table", IMG: "apple.jpg"}
 
 class FakePage:
     def __init__(self, ui, *, contents=CONTENTS, credits=(1030, 1020), label="Veo 3.1 - Lite",
-                 character_model="Nano Banana 2.1", details=None):
+                 character_model="Nano Banana 2.1", details=None, turn_media=None):
         self.calls, self.contents_value, self.label = [], contents, label
-        self.details = details
+        self.details, self.turn_media = details, turn_media
+        self.uploaded, self.attached = {}, []  # what Flow would send: the attached media ids
         self.credit_values, self.character_model_label = list(credits), character_model
         self.paid_media = []
 
@@ -87,15 +88,20 @@ class FakePage:
 
     async def upload(self, path, known_ids=frozenset()):
         self.calls.append(("upload", path.name, frozenset(known_ids)))
-        return f"up{len([c for c in self.calls if c[0] == 'upload'])}"
+        self.uploaded[path.name] = f"up{len([c for c in self.calls if c[0] == 'upload'])}"
+        return self.uploaded[path.name]
 
     async def attach(self, title):
         self.calls.append(("attach", title))
+        hidden = {c.media_id for c in self.contents_value.characters}
+        by_title = {t: m for m, t in self.contents_value.titles.items() if m not in hidden}
+        self.attached.append(self.uploaded.get(title) or by_title[title])
 
     async def submit_for_quote(self, text, *, timeout_s=90.0):
         self.calls.append(("submit", text))
+        media = self.attached if self.turn_media is None else self.turn_media
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
-                         Quote(1, "video", 10))
+                         Quote(1, "video", 10), media=tuple(media))
 
     async def reject(self):
         self.calls.append(("reject",))
@@ -330,3 +336,50 @@ async def test_a_second_upload_never_takes_the_first_uploads_id(logged_in_profil
     uploads = [c for c in pages[0].calls if c[0] == "upload"]
     assert "up1" not in uploads[0][2] and "up1" in uploads[1][2]
     assert [u["media_id"] for u in result["uploads"]] == ["up1", "up2"]
+
+
+COPY = "1306ca3e-0000-4000-8000-000000000000"
+
+
+async def test_a_characters_photo_copy_does_not_block_its_photo(logged_in_profile, tmp_path):
+    # Plan E: a character's image is a hidden copy titled like its photo (live: one tile).
+    from aistudio._flow.rows import FlowCharacter
+
+    profile = logged_in_profile()
+    store(profile)
+    with_copy = ProjectContents({**CONTENTS.titles, COPY: "apple.jpg"},
+                                [*CONTENTS.media, listed(media(COPY, video=False))],
+                                CONTENTS.workflows, [FlowCharacter("c1", "Apple", COPY, 1)])
+    kw, pages, _ = harness(contents=with_copy)
+    result = await flow_generate(profile, "video", "an apple", start_frame=IMG,
+                                 out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "quoted" and ("attach", "apple.jpg") in pages[0].calls
+
+
+async def test_attachments_are_checked_by_id_in_the_quote(logged_in_profile, tmp_path):
+    # Plan E: a stale chip or a wrong tile would otherwise be approved with the quote.
+    from aistudio.exceptions import PlanMismatchError
+
+    profile = logged_in_profile()
+    store(profile)
+    kw, pages, _ = harness(turn_media=[VID])
+    with pytest.raises(PlanMismatchError) as info:
+        await flow_generate(profile, "video", "an apple", start_frame=IMG, max_credits=10,
+                            out=tmp_path / "a.mp4", **kw)
+    assert ("reject",) in pages[0].calls and "attachments" in info.value.hint
+
+
+async def test_a_characters_image_id_is_not_an_ingredient(logged_in_profile, tmp_path):
+    from aistudio._flow.rows import FlowCharacter
+
+    profile = logged_in_profile()
+    store(profile)
+    with_copy = ProjectContents({**CONTENTS.titles, COPY: "apple.jpg"},
+                                [*CONTENTS.media, listed(media(COPY, video=False))],
+                                CONTENTS.workflows, [FlowCharacter("c1", "Apple", COPY, 1)])
+    kw, pages, _ = harness(contents=with_copy)
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(profile, "video", "an apple", ingredients=[COPY],
+                            out=tmp_path / "a.mp4", **kw)
+    assert "--character" in info.value.hint
+    assert not any(c[0] == "submit" for c in pages[0].calls)
