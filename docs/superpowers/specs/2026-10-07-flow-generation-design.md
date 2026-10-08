@@ -385,3 +385,30 @@ the paid `--character` check.
    **Paid, pending the user's budget:** Omni video edits, extend on Veo 3.1 Fast and Quality, the
    other character models (Nano Banana Pro and 2 Lite), and "Create body".
 6. **Unnamed characters** cannot be attached with `--character`: rename them first.
+
+## 14. Amendments from plan G: measured direct-spend actions (2026-10-08)
+
+Evidence: `docs/wire/findings.md`, "Flow paid measurements" (the user approved those runs).
+
+1. **Price table additions:**
+   - character on Nano Banana Pro, 0;
+   - "Create body" on Nano Banana 2.1, 0;
+   - Omni 1.1 Flash edit of an 8-second clip, 20.
+
+   An edit of a clip of any other length has no measured price and is refused. Nano Banana 2
+   Lite stays unmeasured, because its reading was unclear.
+2. **`character create -m nano-banana-2.1|nano-banana-pro`.** aistudio picks that model in the
+   character page's "Select model family", reads the picker back, and prices the action with the
+   label shown.
+3. **`character body <character-id> PROMPT`** generates a body image for the character with the
+   page's model ("Create body"). It is priced from the table (0 on Nano Banana 2.1) and
+   downloaded like a character image.
+4. **`flow edit <video-media-id> INSTRUCTION --max-credits N`** opens the clip's editor by its
+   workflow id and reads the edit model from the box ("Omni 1.1 Flash").
+   - It is priced from the table by model and source length. The edit is a direct spend: no
+     quote, so `--max-credits` must cover the table price.
+   - It types the instruction and presses Start, then follows the new clip (created after Start).
+   - It reads credits before and after, and downloads the result. A failure after Start names the
+     clip and forbids a re-run.
+5. **Extend on Veo 3.1 Fast or Quality** stays unmeasured. Flow extends with the source clip's
+   model, so measuring it first needs a Fast or Quality clip. That is pending the user's budget.

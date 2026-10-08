@@ -570,6 +570,9 @@ blocked; the RPCs that went through are free.
 |---|---|---|
 | Video with a character (`--character "Paper boat"`) | Veo 3.1 Lite, 8 s | **10** (1,010 → 1,000), quoted |
 | Edit an 8 s clip ("make the video black and white") | Omni 1.1 Flash (`abra_edit`) | **20** (1,000 → 980), **no quote** |
+| Character from a description | Nano Banana Pro | **0** (1,030 → 1,030) |
+| Character from a description | Nano Banana 2 Lite | unclear (made; the after-read failed, and credits rose 980 → 1,030 for an unknown reason) |
+| "Create body" for a character | Nano Banana 2.1 | **0** (1,030 → 1,030) |
 
 - **Omni edit.** The clip editor's box ("Describe how to edit this video…", model chip "Omni 1.1
   Flash") generates **directly**: no permission request, no agent. Start sent `WuwhI`, `jIps6`,
@@ -579,3 +582,12 @@ blocked; the RPCs that went through are free.
 - **Extend follows the source clip.** With the video default set to Veo 3.1 Fast, a Lite clip's
   Extend menu and panel still said "Extend (Veo 3.1 - Lite)". The panel has no model picker. No
   project holds a Fast or Quality clip, so measuring extend on those needs one generated first.
+- **Credits can rise on their own.** Between the edit (980) and the next read, credits went to
+  1,030 (+50). The account menu shows only the total. A before/after reading is trusted only
+  when both reads sit right around one action.
+- **Character model picker.** "Select model family" → `menuitem` "🍌 Nano Banana Pro" (or 2 Lite or
+  2.1) switches the picker for this character. Start then sends `C4BZMd` + `ogiZ0b` as for 2.1.
+- **Create body.** On a character page, "Create body" switches the prompt box to body mode: Upload,
+  Add from project, an Ingredient chip and Clear prompt. Typing a prompt and pressing Start sent
+  `WuwhI`, a reCAPTCHA reload and `ogiZ0b`. The reply is the body image (a new media), at 0
+  credits on Nano Banana 2.1.
