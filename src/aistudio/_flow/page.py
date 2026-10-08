@@ -220,7 +220,7 @@ class FlowPage:
         """
         async with self._ui.responses(marker=CHAT_RPC) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
-            await self._wait_for_prompt(text)
+            await self._wait_for_prompt(PROMPT_EDITOR, text)
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             while self._now() < deadline:
@@ -234,12 +234,12 @@ class FlowPage:
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None)
 
-    async def _wait_for_prompt(self, text: str) -> None:
-        """Enter only once the editor shows the prompt: a long prompt is inserted at once, and an
+    async def _wait_for_prompt(self, editor: str, text: str) -> None:
+        """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
         immediate Enter sent an empty box (live)."""
         want = int(len(" ".join(text.split())) * 0.9)
         for _ in range(PROMPT_POLLS):
-            if len(await self._ui.text_of(PROMPT_EDITOR)) >= want:
+            if len(await self._ui.text_of(editor)) >= want:
                 return
             await self._ui.pause(250)
         raise BrowserError("the prompt did not reach Flow's editor; nothing was sent",
@@ -331,6 +331,7 @@ class FlowPage:
     async def start_character(self, description: str) -> CharacterOutcome:
         """Call after open_character (same page load). Creating a character may spend."""
         await self._ui.type_text(EDITOR_ANY, description)
+        await self._wait_for_prompt(EDITOR_ANY, description)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             await self._ui.click("button", START, exact=True)
             created = await log.next("C4BZMd", timeout_s=60.0)
@@ -367,6 +368,7 @@ class FlowPage:
             raise BrowserError("Flow's Extend panel did not open; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
         await self._ui.type_text(EDITOR_LAST, prompt)
+        await self._wait_for_prompt(EDITOR_LAST, prompt)
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             await self._ui.click("button", START, exact=True, nth=-1)

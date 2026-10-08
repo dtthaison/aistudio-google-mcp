@@ -75,7 +75,8 @@ quotes and write each `'` as `'\''`.
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
-     request is declined (nothing waits in Flow).
+     request is declined (nothing waits in Flow). If `"declined": false`, Flow's request is still
+     waiting: tell the user to press Reject on it in Flow, never Approve.
   2. Show the user the cost and ask.
   3. Re-run with `--max-credits <credits>`.
 

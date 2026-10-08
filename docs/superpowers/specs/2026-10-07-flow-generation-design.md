@@ -101,8 +101,9 @@ permission message. "Always approve" is never pressed.
 ### 3.2 Results (`--json`)
 
 ```
-quoted:  {"status": "quoted", "credits": 10, "plan": "1 video … Veo 3.1 - Lite",
-          "project": "<id>", "session": "<id>"}
+quoted:  {"status": "quoted", "declined": true, "credits": 10, "count": 1,
+          "plan": "1 video … Veo 3.1 - Lite", "project": "<id>", "uploads"?: [...],
+          "warnings"?: [...]}
 done:    {"status": "done", "files": [{"path", "mime_type", "bytes", "media_id"}],
           "credits_spent": 10, "credits_left": 1040, "model": "veo-3.1-lite",
           "project": "<id>", "warnings"?: [...]}
@@ -175,7 +176,8 @@ Every error uses the existing JSON envelope. Nothing is spent unless noted.
 
 | Situation | Code / status | Notes |
 |---|---|---|
-| No `--max-credits` | `status: "quoted"`, exit 0 | — |
+| No `--max-credits` | `status: "quoted"`, `declined: true`, exit 0 | Flow's request is rejected (§10.6) |
+| Reject fails on a quote-only run | `status: "quoted"`, `declined: false`, exit 0 | the quote, plus a warning that Flow's request is still waiting and must be rejected there, not approved |
 | Over budget | `OVER_BUDGET` (new), exit 1 | rejected in Flow; hint gives the quote |
 | Plan differs from flags | `PLAN_MISMATCH` (new), exit 1 | rejected; shows both versions |
 | Agent asks a question instead of quoting | `AGENT_REPLY` (new), exit 1 | the agent's text; hint: rephrase or add flags |
@@ -258,7 +260,8 @@ decisions are recorded in the conversation.
    a later plan; its "Download scene" output has not been mapped yet.
 6. **Quote-only runs decline Flow's request** (plan C). A request left waiting could later be
    approved in Flow with the restored settings rather than the quoted ones. The result is
-   unchanged, plus `"declined": true`.
+   unchanged, plus `"declined": true`. If Reject itself fails, the quote is still returned with
+   `"declined": false` and a warning to reject the waiting request in Flow (final review I3).
 7. **Result fields** (plan C):
    - `model` is the CLI id (e.g. `veo-3.1-lite`) whenever aistudio knows the label;
    - `flow extend` adds `scene_id`;

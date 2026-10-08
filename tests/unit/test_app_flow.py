@@ -37,8 +37,9 @@ class FakePage:
     """Scripted FlowPage: records calls; behaviour set per test."""
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
-                 restore_error=None, follow_error=None):
+                 restore_error=None, follow_error=None, reject_error=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
+        self.reject_error = reject_error
         self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
         self.missing, self.restore_error = set(missing), restore_error
@@ -69,6 +70,8 @@ class FakePage:
 
     async def reject(self):
         self.calls.append(("reject",))
+        if self.reject_error:
+            raise self.reject_error
 
     async def approve_and_follow(self, *, count, timeout_s, kind):
         self.calls.append(("approve", count))
@@ -113,6 +116,17 @@ async def test_quote_only_rejects_flows_request(logged_in_profile, tmp_path):
     assert result["status"] == "quoted" and result["credits"] == 10 and result["declined"]
     assert ("reject",) in pages[0].calls and ("approve", 1) not in pages[0].calls
     assert opened == ["minimized"]
+
+
+async def test_a_quote_survives_a_failed_reject(logged_in_profile, tmp_path):
+    # Final review I3: the free run still returns its quote, and says a request is waiting.
+    kw, pages, _ = harness(reject_error=BrowserError("radio 'Reject' not found"))
+    result = await flow_generate(logged_in_profile(), "video", "an apple",
+                                 model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "quoted" and result["credits"] == 10
+    assert result["declined"] is False
+    assert any("still waiting" in w and "Reject" in w for w in result["warnings"])
+    assert ("approve", 1) not in pages[0].calls
 
 
 async def test_approved_video_is_downloaded_and_defaults_restored(logged_in_profile, tmp_path):

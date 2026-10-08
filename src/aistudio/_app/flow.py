@@ -29,6 +29,7 @@ from aistudio._media.save import check_folder, free_name, write_file
 from aistudio.exceptions import (
     AgentReplyError,
     AIStudioError,
+    BrowserError,
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
@@ -114,6 +115,7 @@ async def flow_generate(
             for (_, value), title in zip(attachments, titles, strict=True):
                 if isinstance(value, Path):  # --i-have-rights was checked before Chrome opened
                     media_id = await page.upload(value, known_ids=known_ids)
+                    known_ids.add(media_id)  # its late as29s record is not the next upload
                     uploads.append({"file": value.name, "media_id": media_id})
                 await page.attach(title)
             if attachments:
@@ -133,8 +135,14 @@ async def flow_generate(
             if decision is Decision.QUOTE_ONLY:
                 # Declined in Flow too: a waiting request could later be approved there with
                 # the restored settings, not the quoted ones.
-                await page.reject()
-                return {"status": "quoted", "declined": True, "credits": turn.quote.credits,
+                declined = True
+                try:
+                    await page.reject()
+                except BrowserError:
+                    declined = False
+                    wrong = [*wrong, "Flow's request is still waiting: press Reject on it in "
+                                     "Flow, do not approve it (the settings were restored)"]
+                return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
                         "count": turn.quote.count, "plan": turn.text, "project": project_id,
                         **({"uploads": uploads} if uploads else {}),
                         **({"warnings": wrong} if wrong else {})}

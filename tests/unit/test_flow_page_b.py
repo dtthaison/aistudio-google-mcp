@@ -2,7 +2,7 @@
 import pytest
 
 from aistudio._browser.ui import CapturedResponse
-from aistudio._flow.page import FlowPage
+from aistudio._flow.page import EDITOR_ANY, EDITOR_LAST, FlowPage
 from tests.unit.test_flow_page import PID, Clock, poll
 from tests.unit.test_flow_rows import CREATED, MEDIA, batch, record
 
@@ -50,7 +50,7 @@ def character_ui(fake_ui, image_payload):
     if image_payload is not None:
         responses["ogiZ0b"] = [CapturedResponse("ogiZ0b", 200, batch("ogiZ0b", image_payload), "")]
     return fake_ui(responses, inner={("button", "Select model family"): [
-        "🍌 Nano Banana 2.1 arrow_drop_down"]})
+        "🍌 Nano Banana 2.1 arrow_drop_down"]}, texts={EDITOR_ANY: ["a robot"]})
 
 
 IMAGE_ROW = ["i1", None, "w1", None, None, None,
@@ -99,7 +99,7 @@ def extend_ui(fake_ui, *responses, url_workflow="w1", texts=EXTENDING):
     return fake_ui(scripted,
                    inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
                                                     "Lite)"]},
-                   texts={"body": [texts]},
+                   texts={"body": [texts], EDITOR_LAST: ["rolls off the table"]},
                    url=f"https://flow.google.com/project/{PID}/edit/{url_workflow}")
 
 
@@ -184,3 +184,27 @@ async def test_extend_reads_the_scene_flow_creates(fake_ui):
     page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
     await page.extend("rolls off", timeout_s=60)
     assert page.last_scene_id == "s1"
+
+
+async def test_extend_starts_only_once_the_editor_shows_the_prompt(fake_ui):
+    # Final review I2: Start spends 10 credits with no quote; a lagging insert sent nothing.
+    from aistudio.exceptions import BrowserError
+
+    ui = extend_ui(fake_ui)
+    ui._texts[EDITOR_LAST] = [""]
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).extend("rolls off the table", timeout_s=60)
+    assert "nothing was sent" in info.value.message
+    assert not any(op[0] == "click" for op in ui.ops)
+
+
+async def test_character_starts_only_once_the_editor_shows_the_prompt(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = character_ui(fake_ui, [[IMAGE_ROW]])
+    ui._texts[EDITOR_ANY] = [""]
+    page = FlowPage(ui, now=Clock())
+    await page.open_character(PID)
+    with pytest.raises(BrowserError):
+        await page.start_character("a robot")
+    assert not any(op[0] == "click" for op in ui.ops)

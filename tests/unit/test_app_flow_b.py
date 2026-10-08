@@ -86,8 +86,8 @@ class FakePage:
         self.calls.append(("session",))
 
     async def upload(self, path, known_ids=frozenset()):
-        self.calls.append(("upload", path.name))
-        return "up1"
+        self.calls.append(("upload", path.name, frozenset(known_ids)))
+        return f"up{len([c for c in self.calls if c[0] == 'upload'])}"
 
     async def attach(self, title):
         self.calls.append(("attach", title))
@@ -198,7 +198,7 @@ async def test_attachments_are_uploaded_attached_and_named_in_order(logged_in_pr
     await flow_generate(profile, "video", "an apple", start_frame=str(photo), ingredients=[IMG],
                         i_have_rights=True, out=tmp_path / "a.mp4", **kw)
     calls = pages[0].calls
-    assert ("upload", "me.jpg") in calls
+    assert [c[1] for c in calls if c[0] == "upload"] == ["me.jpg"]
     assert [c for c in calls if c[0] == "attach"] == [("attach", "me.jpg"), ("attach", "apple.jpg")]
     submit = next(c[1] for c in calls if c[0] == "submit")
     assert "as: start frame, ingredient." in submit
@@ -311,3 +311,19 @@ async def test_extend_reports_the_scene_and_the_cli_model_id(logged_in_profile, 
     result = await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "x.mp4",
                                **kw)
     assert result["scene_id"] == "s1" and result["model"] == "veo-3.1-lite"
+
+
+async def test_a_second_upload_never_takes_the_first_uploads_id(logged_in_profile, tmp_path):
+    # Final review I1: a.jpg's as29s record can arrive while b.jpg uploads.
+    profile = logged_in_profile()
+    store(profile)
+    first, second = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    first.write_bytes(b"\xff\xd8x")
+    second.write_bytes(b"\xff\xd8y")
+    kw, pages, _ = harness()
+    result = await flow_generate(profile, "video", "an apple", start_frame=str(first),
+                                 end_frame=str(second), i_have_rights=True,
+                                 out=tmp_path / "a.mp4", **kw)
+    uploads = [c for c in pages[0].calls if c[0] == "upload"]
+    assert "up1" not in uploads[0][2] and "up1" in uploads[1][2]
+    assert [u["media_id"] for u in result["uploads"]] == ["up1", "up2"]
