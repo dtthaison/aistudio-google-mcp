@@ -529,3 +529,32 @@ blocked; the RPCs that went through are free.
   a character showed two 10-credit requests: the first disabled, the second waiting. Approve and
   Reject must act only on enabled radios. Before Approve, aistudio checks that the waiting
   request shows the cost it checked ("costing N credits").
+
+### Flow plan F discovery: free generations, personality, avatars, music, tools (2026-10-08)
+
+- **Free generations skip the quote.** With "Confirm before generating: Always", a Nano Banana 2.1
+  image request (0 credits) was generated at once, with no permission request.
+  - Two quote-only `flow image` runs made 1 and 2 images; credits stayed at 1,010, and aistudio
+    reported `AGENT_REPLY`.
+  - The `StreamChat` stream carries a tool call `["generate_image", "generate_image",
+    [[["model_usage_key", [null, null, "BELUGA"]], ["aspect_ratio", …], ["prompt", …],
+    ["model_display_name", [null, null, "🍌 Nano Banana 2.1"]], …]], <placeholder>]`.
+  - It then carries a tool result with the same name and `[["media_id", …], ["display_name", …],
+    ["status", [null, null, "success"]], ["workflow_id", …], …]`.
+  - The whole stream arrived in about 47 s; the media record (`bOKtO`) came at about 41 s.
+- **Personality.** The character page's "Character personality" text box sends `rzMKMb`
+  `[[project_id, character_id, null, [1, null, [null, null, "<text>"]]],
+  [["entity_info.character_info.personality_notes"]]]` (blocked in the probe).
+- **Voice.** Choosing a voice in "Select a voice" (30 voices, plus a "Describe the voice
+  performance style" box) sent nothing, and neither did "Close" or "Done". No save call was
+  found.
+- **Character model picker:** Nano Banana Pro, Nano Banana 2 Lite, Nano Banana 2.1. Only 2.1
+  has a measured price (0).
+- **"Create body"** opens Upload / Add from project for a body reference; generating it is not
+  measured.
+- **Avatars:** "Create my avatar" asks for a recorded selfie video and a few spoken words
+  (experimental, English only). This is not automatable.
+- **Flow Music** is a separate site (`flowmusic.app`). **Tools** (`/project/<id>/tools`) is a
+  builder: My Tools / Community / Templates / Create New.
+- **Omni edit.** A clip's editor names "Omni 1.1 Flash" for edits; its price and whether it
+  asks first are not measured.

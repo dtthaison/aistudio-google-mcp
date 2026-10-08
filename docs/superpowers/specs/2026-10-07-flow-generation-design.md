@@ -353,3 +353,35 @@ Evidence: `docs/wire/findings.md`, "Flow plan E discovery". The user asked for a
 5. **File types.** An image whose bytes are AVIF or HEIC (`ftyp` brands) is saved as `.avif` or
    `.heic`. Unrecognised image bytes keep the requested name and get a warning, instead of being
    called JPEG.
+
+## 13. Amendments from plan F (2026-10-08)
+
+Evidence: `docs/wire/findings.md`, "Flow plan F discovery". These follow the plan E review and
+the paid `--character` check.
+
+1. **Free generations.** When Flow's agent generates without asking (free models, such as
+   Nano Banana 2.1 images), the `StreamChat` stream carries `generate_*` tool results with media
+   ids.
+   - aistudio follows those media, downloads them, and returns `status: "done"` with the warning
+     "Flow generated without asking (free model)".
+   - It reads credits before and after. Any charge appears as `credits_spent` with a warning. A
+     run without `--max-credits` can still produce these free results, because Flow does not
+     ask.
+   - A requested model, count or aspect that differs from the tool call's becomes a warning.
+2. **Credits around every run.** `flow video|image` reads credits before the run. For a quoted
+   run, a charge different from the quote becomes a warning.
+3. **Approve and Reject** act only on the enabled (waiting) permission radios. Approve also
+   requires that the waiting request shows the checked cost. Already shipped by the review
+   fixes; recorded here.
+4. **Personality.** `character create … --personality TEXT` and
+   `character personality <character-id> TEXT` send `rzMKMb` with
+   `entity_info.character_info.personality_notes`. It is free.
+5. **Out of scope (findings):**
+   - avatars, which need a recorded selfie video;
+   - Flow Music, a separate site;
+   - Tools, a builder;
+   - voice choice, which has no save call.
+
+   **Paid, pending the user's budget:** Omni video edits, extend on Veo 3.1 Fast and Quality, the
+   other character models (Nano Banana Pro and 2 Lite), and "Create body".
+6. **Unnamed characters** cannot be attached with `--character`: rename them first.
