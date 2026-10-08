@@ -223,7 +223,8 @@ async def flow_generate(
                                              downloader=downloader, stamp=now(),
                                              project_url=project_url)
         warnings = notes + charge_notes + warnings + saved_notes
-        model_id = next((label_to_id(g.model) for g in turn.generated if g.model), None)
+        named = next((g.model for g in turn.generated if g.model), None)
+        model_id = label_to_id(named or wanted.model)  # the settings' model made it otherwise
         return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
                 "model": model_id, "project": project_id,
                 **({"warnings": warnings} if warnings else {})}

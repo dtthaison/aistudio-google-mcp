@@ -458,3 +458,16 @@ async def test_a_free_run_restores_the_settings_before_leaving_the_project(logge
     calls = pages[0].calls
     restore = max(i for i, c in enumerate(calls) if c == ("apply", OMNI))
     assert restore < max(i for i, c in enumerate(calls) if c == ("credits",))
+
+
+async def test_a_free_run_names_the_settings_model_when_flow_does_not(logged_in_profile,
+                                                                     tmp_path):
+    from aistudio._flow.rows import Generated
+
+    made = (Generated("g1", "success", "image", None, None),)
+    kw, _, _ = harness(turn=AgentTurn("done", None, generated=made),
+                       defaults=Defaults("Nano Banana 2.1", "16:9", 1, asks=True),
+                       credit_values=(5, 5))
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert result["model"] == "nano-banana-2.1"
