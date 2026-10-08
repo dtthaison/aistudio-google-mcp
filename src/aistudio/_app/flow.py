@@ -576,6 +576,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
 
 async def flow_character(profile: Profile, name: str, description: str | None = None, *,
                          photo: str | None = None, i_have_rights: bool = False,
+                         personality: str | None = None,
                          max_credits: int | None = None, project: str | None = None,
                          out: Path | None = None, overwrite: bool = False, visible: bool = False,
                          browser: Callable[..., Any] = open_browser,
@@ -642,6 +643,14 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                     notes.append(f'Flow kept the name "Untitled character"; rename it with: '
                                  f'aistudio flow character rename {cid} "{name}"')
                     name = UNTITLED
+        personality = personality.strip() if personality is not None else None
+        if personality and cid is not None:
+            try:
+                await page.set_personality(project_id, cid, personality)
+            except Exception:  # noqa: BLE001 - the character exists; never invite a re-run
+                notes.append(f'Flow did not save the personality; set it with: aistudio flow '
+                             f'character personality {cid} "{personality}"')
+                personality = None
         after, read_notes = await _credits_after(page, None)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings + notes
@@ -653,7 +662,7 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
         raise _character_made(exc, cid, name) from exc
     warnings += saved_notes
     return {"status": "done", "character_id": cid, "name": name, "media_id": image_id,
-            "files": files,
+            **({"personality": personality} if personality else {}), "files": files,
             "credits_spent": spent, "credits_left": after,
             **({"model": label_to_id(model)} if model else {}), "project": project_id,
             **({"warnings": warnings} if warnings else {})}
@@ -725,6 +734,24 @@ async def flow_rename_character(profile: Profile, character_id: str, name: str, 
         _free_name(contents, name, keep=character_id)
         await page.rename_character(project_id, character_id, name)
     return {"character_id": character_id, "name": name, "project": project_id}
+
+
+async def flow_set_personality(profile: Profile, character_id: str, text: str, *,
+                               project: str | None = None, visible: bool = False,
+                               browser: Callable[..., Any] = open_browser,
+                               page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Set a character's personality notes (free). An empty text clears them."""
+    text = text.strip()
+    project_id = _project_id(project) if project else None
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        if not any(c.id == character_id for c in contents.characters):
+            raise NotFoundError(f"no character {character_id} in this Flow project",
+                                hint='see "aistudio flow character list"')
+        await page.set_personality(project_id, character_id, text)
+    return {"character_id": character_id, "personality": text, "project": project_id}
 
 
 async def flow_scenes(profile: Profile, *, project: str | None = None, visible: bool = False,

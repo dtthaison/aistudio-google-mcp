@@ -8,6 +8,7 @@ from aistudio._app.flow import (
     flow_rename_character,
     flow_scene_download,
     flow_scenes,
+    flow_set_personality,
     flow_stitch,
 )
 from aistudio._flow.page import AgentTurn, CharacterOutcome
@@ -37,11 +38,12 @@ FULL = ProjectContents(
 class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
                  after=None, link_error=None, details_error=None, stored_name=None,
-                 outcome_id="c1", **kw):
+                 outcome_id="c1", personality_error=None, **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
         self.stored_name, self.outcome_id = stored_name, outcome_id
+        self.personality_error = personality_error
 
     async def start_character(self, description):
         self.calls.append(("character", description))
@@ -81,6 +83,11 @@ class FakePage(PlanBPage):
         if self.link_error:
             raise self.link_error
         return "i7"
+
+    async def set_personality(self, pid, cid, text):
+        self.calls.append(("personality", cid, text))
+        if self.personality_error:
+            raise self.personality_error
 
     async def stitch(self, clips, *, timeout_s):
         self.calls.append(("stitch", clips))
@@ -391,3 +398,21 @@ async def test_a_character_that_never_started_is_not_reported_as_made(logged_in_
     with pytest.raises(BrowserError) as info:
         await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
     assert info.value.hint == "re-run"
+
+
+
+async def test_create_with_personality_and_the_personality_command(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010))
+    result = await flow_character(profile, "Apple", photo=IMG, personality=" Calm ",
+                                  out=tmp_path / "a.png", **kw)
+    assert ("personality", "c7", "Calm") in pages[0].calls and result["personality"] == "Calm"
+    kw, pages, _ = harness(credits=(1010, 1010), personality_error=BrowserError("no"))
+    result = await flow_character(profile, "Apple 2", photo=IMG, personality="Calm",
+                                  out=tmp_path / "b.png", **kw)
+    assert result["status"] == "done" and any("personality" in w for w in result["warnings"])
+    kw, pages, _ = harness()
+    done = await flow_set_personality(profile, "c1", "Brave", **lists(kw))
+    assert ("personality", "c1", "Brave") in pages[0].calls and done["personality"] == "Brave"
+    with pytest.raises(NotFoundError):
+        await flow_set_personality(profile, "c9", "Brave", **lists(kw))

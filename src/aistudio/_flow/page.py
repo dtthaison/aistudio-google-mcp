@@ -403,6 +403,15 @@ class FlowPage:
             raise BrowserError(f"Flow did not rename character {character_id}",
                                hint="check its name in Flow's Characters; re-run to retry")
 
+    async def set_personality(self, project_id: str, character_id: str, text: str) -> None:
+        """The character page's "Character personality" (free; findings, plan F)."""
+        args = [[project_id, character_id, None, [1, None, [None, None, text]]],
+                [["entity_info.character_info.personality_notes"]]]
+        status, _ = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
+        if status >= 400:
+            raise BrowserError(f"Flow did not save the personality of character {character_id} "
+                               f"(HTTP {status})", hint="re-run; nothing else changed")
+
     async def create_character_record(self, project_id: str, name: str) -> tuple[str, str]:
         """An empty, named character (free; what "Add from project" sends first): its id and
         the name Flow stored."""

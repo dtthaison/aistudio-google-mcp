@@ -20,6 +20,7 @@ from aistudio._app.flow import (
     flow_rename_character,
     flow_scene_download,
     flow_scenes,
+    flow_set_personality,
     flow_stitch,
 )
 from aistudio._flow.models import ASPECTS, MODELS
@@ -218,6 +219,7 @@ def character() -> None:
                               "(free; nothing is generated).")
 @click.option("--i-have-rights", is_flag=True,
               help="Confirm you have the rights to the local photo; Flow asks this before upload.")
+@click.option("--personality", help="The character's personality notes (free).")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
 @click.option("--max-credits", type=click.IntRange(0),
               help="Needed only when aistudio's price table says the character costs credits.")
@@ -228,8 +230,9 @@ def character() -> None:
 @click.pass_obj
 @handle_errors
 def character_create(state: CliState, name: str, description: str | None, photo: str | None,
-                     i_have_rights: bool, project: str | None, max_credits: int | None,
-                     out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
+                     i_have_rights: bool, personality: str | None, project: str | None,
+                     max_credits: int | None, out: Path | None, force: bool, visible: bool,
+                     json_output: bool) -> None:
     """Create a character called NAME from DESCRIPTION, or from --photo.
 
     Names are unique per project: --character picks characters by name. From a description Flow
@@ -237,7 +240,8 @@ def character_create(state: CliState, name: str, description: str | None, photo:
     state.require_browser()
     result = asyncio.run(flow_character(
         state.profile(), name, description, photo=photo, i_have_rights=i_have_rights,
-        max_credits=max_credits, project=project, out=out, overwrite=force, visible=visible))
+        personality=personality, max_credits=max_credits, project=project, out=out,
+        overwrite=force, visible=visible))
 
     def render(data: dict[str, Any]) -> None:
         stdout.print(f"Created character {data['character_id']} ({data['name']})", markup=False)
@@ -279,6 +283,24 @@ def character_rename(state: CliState, character_id: str, name: str, project: str
                                                project=project, visible=visible))
     emit(result, json_output=json_output, render=lambda d: stdout.print(
         f"Renamed {d['character_id']} to {d['name']}", markup=False))
+
+
+@character.command("personality")
+@click.argument("character_id")
+@click.argument("text")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_personality(state: CliState, character_id: str, text: str, project: str | None,
+                          visible: bool, json_output: bool) -> None:
+    """Set a character's personality notes; "" clears them (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_set_personality(state.profile(), character_id, text,
+                                              project=project, visible=visible))
+    emit(result, json_output=json_output, render=lambda d: stdout.print(
+        f"Personality of {d['character_id']}: {d['personality'] or '(cleared)'}", markup=False))
 
 
 @flow.group("scene")

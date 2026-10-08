@@ -147,8 +147,8 @@ def test_character_create_passes_name_photo_and_rights(logged_in_profile, monkey
                                    "--i-have-rights", "--json"])
     assert res.exit_code == 0, res.output
     assert calls[-1] == (("Apple", None), {
-        "photo": "m3", "i_have_rights": True, "max_credits": None, "project": None, "out": None,
-        "overwrite": False, "visible": False})
+        "photo": "m3", "i_have_rights": True, "personality": None, "max_credits": None,
+        "project": None, "out": None, "overwrite": False, "visible": False})
     res = CliRunner().invoke(cli, ["flow", "character", "create", "Apple", "--photo", "m3"])
     assert res.exit_code == 0 and "c7" in res.stdout and "Apple" in res.stdout
 
@@ -249,3 +249,20 @@ def test_an_unverified_charge_says_unknown(logged_in_profile, monkeypatch):
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", fake(free, []))
     res = CliRunner().invoke(cli, ["flow", "image", "x"])
     assert "Spent None" not in res.stdout and "credits spent unknown" in res.stdout
+
+
+
+def test_personality_options(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_set_personality",
+                        fake({"character_id": "c1", "personality": "Brave", "project": "p"},
+                             calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "personality", "c1", "Brave"])
+    assert res.exit_code == 0 and calls[-1][0] == ("c1", "Brave") and "Brave" in res.stdout
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character",
+                        fake({"status": "done", "character_id": "c7", "name": "A", "files": [],
+                              "credits_spent": 0, "credits_left": 1, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "create", "A", "a robot",
+                                   "--personality", "Calm"])
+    assert res.exit_code == 0 and calls[-1][1]["personality"] == "Calm"

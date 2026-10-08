@@ -127,3 +127,16 @@ async def test_link_photo_hint_is_accurate(fake_ui):
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui).link_photo(PID, "c7", "m3")
     assert "do not re-run" in info.value.hint and "another character" not in info.value.hint
+
+
+
+async def test_personality_sends_its_field_mask(fake_ui):
+    text = 'Calm, "curious"\nand kind ' + "x" * 2000
+    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [[PID, "c1", None, [1, "Boat", []]]])]})
+    await FlowPage(ui).set_personality(PID, "c1", text)
+    assert ("batch_rpc", "rzMKMb", json.dumps(
+        [[PID, "c1", None, [1, None, [None, None, text]]],
+         [["entity_info.character_info.personality_notes"]]])) in ui.ops
+    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [], status=500)]})
+    with pytest.raises(BrowserError):
+        await FlowPage(ui).set_personality(PID, "c1", "Calm")
