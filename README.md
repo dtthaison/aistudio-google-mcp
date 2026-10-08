@@ -38,6 +38,10 @@ uv run aistudio generate music "calm solo piano, slow tempo" -o piano.mp3
 uv run aistudio flow credits
 uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8   # shows the quote
 uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8 --max-credits 10 -o apple.mp4
+uv run aistudio flow media --type video                  # media ids in the "aistudio" project
+uv run aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
+uv run aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
+uv run aistudio flow character create "a friendly cartoon robot with round blue eyes" -o robot.png
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 

@@ -61,6 +61,11 @@ quotes and write each `'` as `'\''`.
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
 | Flow video / image quote (free: shows the credit cost, spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
+| Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
+| Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
+| Frames / reference images on flow video or image | `--start-frame X`, `--end-frame X`, `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
+| Flow character (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<description>' -o robot.png --json` |
+| Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".
@@ -79,6 +84,11 @@ quotes and write each `'` as `'\''`.
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
   generating" is set to Never. Tell the user; aistudio will not change it.
+- **Never pass `--i-have-rights`** unless the user confirmed they have the rights to that exact
+  file. It answers Flow's "Rights to use this image" question for them.
+- `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
+  measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
+  warning that Flow charged a different amount.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
