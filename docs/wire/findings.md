@@ -558,3 +558,8 @@ blocked; the RPCs that went through are free.
   builder: My Tools / Community / Templates / Create New.
 - **Omni edit.** A clip's editor names "Omni 1.1 Flash" for edits; its price and whether it
   asks first are not measured.
+- **Fresh uploads (user-confirmed rights, a synthetic gradient PNG).** The upload became media
+  `d2780832`. Right after "Upload media" the + panel stays over the grid, so the new tile's ⋮ could
+  not be reached; a reload fixes it, so aistudio now uploads everything first. Each tile's image
+  carries its id (`<img … data-media-id="d2780832…">`). A quote with `--start-frame d2780832…` was
+  10 credits, carried that exact id, and was declined.
