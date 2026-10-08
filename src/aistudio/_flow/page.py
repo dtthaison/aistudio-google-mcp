@@ -48,6 +48,7 @@ from aistudio.exceptions import (
     NotFoundError,
     PlanMismatchError,
     ServerError,
+    ValidationError,
     WaitTimeoutError,
 )
 
@@ -98,6 +99,7 @@ SEARCH_ASSETS = 'input[placeholder="Search assets"]'  # the + panel's search box
 STITCH_POLL_MS = 3000  # the page itself polls IxdSwd every 3 s (live)
 _STITCH_RUNNING, _STITCH_DONE = 2, 3
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
+REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
@@ -259,12 +261,13 @@ class FlowPage:
                 if response is None or response.status >= 400:
                     continue
                 body = response.request_body
+                quote = None
                 for _, payload in payloads(response.text):
                     seen.append(payload)
-                    quote = parse_permission(payload)
-                    if quote is not None:  # a request to approve always wins
-                        return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
-                                         tuple(sent_characters(body)), tuple(sent_media(body)))
+                    quote = parse_permission(payload) or quote  # the last ask is the one waiting
+                if quote is not None:  # a request to approve always wins
+                    return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), quote,
+                                     tuple(sent_characters(body)), tuple(sent_media(body)))
                 generated = agent_generated(seen)
                 if generated:  # a free model: Flow generated without asking (live)
                     return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
@@ -285,25 +288,37 @@ class FlowPage:
                            hint="re-run; if it persists, shorten the prompt or add --visible to "
                                 "watch it")
 
-    async def reject(self) -> None:
-        """Reject every request still waiting in the chat (answered ones keep disabled radios,
-        so the first "Reject" on the page can be an old one: live)."""
+    async def reject(self, *, expect: bool = True) -> int:
+        """Reject every request still waiting in the chat and say how many were pressed.
+
+        Answered requests keep disabled radios, so the first "Reject" on the page can be an old
+        one (live). With ``expect`` (a quote was just read) the request may render a moment
+        after the stream, so wait for it before concluding there is nothing to reject."""
+        for _ in range(REJECT_WAIT_POLLS if expect else 0):
+            if any(await self._ui.enabled("radio", "Reject")):
+                break
+            await self._ui.pause(500)
+        pressed = 0
         for _ in range(REJECT_ROUNDS):
             waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject")) if ok]
             if not waiting:
-                return
+                return pressed
             await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
             await self._ui.pause(1000)
+            pressed += 1
         raise BrowserError("Flow still shows a waiting request after Reject",
                            hint="press Reject on it in Flow, never Approve")
 
     async def approve_and_follow(self, *, count: int, credits: int, timeout_s: float,
                                  kind: str) -> FlowOutcome:
         """Approve the one waiting request, only if it shows the cost that was checked."""
-        waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Approve")) if ok]
-        if len(waiting) != 1:  # the quote just read must be the only request that can be approved
-            raise BrowserError(f"found {len(waiting)} waiting Approve options, not exactly one; "
-                               "nothing was spent",
+        flags = await self._ui.enabled("radio", "Approve")
+        waiting = [i for i, ok in enumerate(flags) if ok]
+        # The quote just read must be the only request that can be approved, and the newest one:
+        # its cost is read from the newest permission message below.
+        if waiting != [len(flags) - 1]:
+            raise BrowserError(f"found {len(waiting)} waiting Approve options, not exactly one "
+                               "on the newest request; nothing was spent",
                                hint="re-run; if it persists, check Flow's chat for old requests")
         # Live: the agent can ask twice in one run; the waiting request may not be the quote read.
         shown = _SHOWN_COST.search(await self._ui.text_of(PERMISSION_LAST))
@@ -391,8 +406,14 @@ class FlowPage:
         await self._ui.pause(1500)
         await self._ui.dispatch_click("tab", CHARACTERS_TAB)
         await self._ui.pause(1500)
-        await self._ui.type_text(SEARCH_ASSETS, name)
+        await self._ui.fill_first(SEARCH_ASSETS, name)  # replaces an earlier search
         await self._ui.pause(2000)
+        shown = await self._ui.labels("option", re.compile("."))
+        if not shown or shown[0] != name:  # the panel acts on its first option
+            raise ValidationError(f"Flow's character search for {name!r} lists "
+                                  f"{shown[:3] or 'nothing'} first; nothing was sent",
+                                  hint="rename the character so no other name contains it: "
+                                       "aistudio flow character rename <id> NAME")
         await self._ui.dispatch_click("option", name, exact=True)  # attaches and closes (live)
         await self._ui.pause(800)
 

@@ -60,7 +60,8 @@ model needs a Gemini API key, so it is not offered either.
 
 Video comes from Google Flow (`aistudio flow video|image`). Flow is paid in your Google AI
 plan's Flow credits: Veo 3.1 Lite is about 10 credits, Fast 20 and Quality 100. **Nothing is spent
-without `--max-credits`**: a run without it only shows Flow's quote. When the quote fits the budget
+without `--max-credits`**: a run without it only shows Flow's quote (the free image model, Nano
+Banana 2.1, generates at once and costs nothing; image models not measured yet are refused). When the quote fits the budget
 and its counts match your options (model, aspect and outputs are set in Flow's own settings
 first), aistudio approves it and downloads the result. Results go
 to a Flow project named "aistudio", unless you pass `--project`. Your Flow default settings are

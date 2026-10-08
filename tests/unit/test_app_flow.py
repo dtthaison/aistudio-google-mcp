@@ -38,9 +38,9 @@ class FakePage:
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
                  restore_error=None, follow_error=None, reject_error=None, approve_error=None,
-                 credit_values=(1050, 1040)):
+                 credit_values=(1050, 1040), rejected=1):
         self.calls, self.turn, self.defaults = [], turn, defaults
-        self.credit_values = list(credit_values)
+        self.credit_values, self.rejected = list(credit_values), rejected
         self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
         self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
@@ -56,6 +56,8 @@ class FakePage:
         return PID
 
     async def read_defaults(self, kind):
+        if kind == "image" and self.defaults is OMNI:  # a video model is not an image default
+            return Defaults("Nano Banana 2.1", "16:9", 1, asks=True)
         return self.defaults
 
     async def apply_defaults(self, kind, wanted):
@@ -70,10 +72,11 @@ class FakePage:
         self.calls.append(("submit", text))
         return self.turn
 
-    async def reject(self):
+    async def reject(self, *, expect=True):
         self.calls.append(("reject",))
         if self.reject_error:
             raise self.reject_error
+        return self.rejected
 
     async def approve_and_follow(self, *, count, credits, timeout_s, kind):
         if self.approve_error:  # refused before pressing Approve
@@ -137,7 +140,7 @@ async def test_a_quote_survives_a_failed_reject(logged_in_profile, tmp_path):
                                  model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
     assert result["status"] == "quoted" and result["credits"] == 10
     assert result["declined"] is False
-    assert any("still waiting" in w and "Reject" in w for w in result["warnings"])
+    assert any("still be waiting" in w and "never Approve" in w for w in result["warnings"])
     assert ("approve", 1) not in pages[0].calls
 
 
@@ -409,7 +412,7 @@ async def test_a_free_image_is_downloaded_without_approval(logged_in_profile, tm
     assert [f["media_id"] for f in result["files"]] == ["g1"] and (tmp_path / "x.png").exists()
     assert any("without asking" in w for w in result["warnings"])
     assert any("g2" in w for w in result["warnings"])
-    assert not any(c[0] in ("approve", "reject") for c in pages[0].calls)
+    assert not any(c[0] == "approve" for c in pages[0].calls)  # reject only clears leftovers
 
 
 async def test_a_reply_with_nothing_made_is_still_an_agent_reply(logged_in_profile, tmp_path):
@@ -456,7 +459,8 @@ async def test_a_free_run_restores_the_settings_before_leaving_the_project(logge
     kw, pages, _ = harness(turn=AgentTurn("done", None, generated=made), credit_values=(5, 5))
     await flow_generate(logged_in_profile(), "image", "a lemon", count=2, out=tmp_path, **kw)
     calls = pages[0].calls
-    restore = max(i for i, c in enumerate(calls) if c == ("apply", OMNI))
+    image_defaults = Defaults("Nano Banana 2.1", "16:9", 1, asks=True)
+    restore = max(i for i, c in enumerate(calls) if c == ("apply", image_defaults))
     assert restore < max(i for i, c in enumerate(calls) if c == ("credits",))
 
 
@@ -471,3 +475,46 @@ async def test_a_free_run_names_the_settings_model_when_flow_does_not(logged_in_
     result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
                                  out=tmp_path / "x.png", **kw)
     assert result["model"] == "nano-banana-2.1"
+
+
+
+async def test_a_quote_flow_did_not_show_is_not_declined(logged_in_profile, tmp_path):
+    # Plan F review I2: pressing nothing must not be reported as declined.
+    kw, _, _ = harness(rejected=0)
+    result = await flow_generate(logged_in_profile(), "video", "an apple",
+                                 model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
+    assert result["declined"] is False
+    assert any("never Approve" in w for w in result["warnings"])
+
+
+async def test_a_free_run_needs_something_of_the_kind_asked(logged_in_profile, tmp_path):
+    # Plan F review I1: an image made for a video run is not "done".
+    from aistudio._flow.rows import Generated
+
+    made = (Generated("g1", "success", "image", "Nano Banana 2.1", "16:9"),)
+    kw, pages, _ = harness(turn=AgentTurn("done", None, generated=made), credit_values=(5, 5))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, out=tmp_path / "a.mp4", **kw)
+    assert "no video" in info.value.message and "g1" in info.value.message
+
+
+async def test_a_free_run_declines_anything_left_waiting(logged_in_profile, tmp_path):
+    from aistudio._flow.rows import Generated
+
+    made = (Generated("g1", "success", "image", "Nano Banana 2.1", "16:9"),)
+    kw, pages, _ = harness(turn=AgentTurn("done", None, generated=made), credit_values=(5, 5),
+                           defaults=Defaults("Nano Banana 2.1", "16:9", 1, asks=True))
+    await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                        out=tmp_path / "x.png", **kw)
+    assert ("reject",) in pages[0].calls and not any(c[0] == "approve" for c in pages[0].calls)
+
+
+async def test_an_unmeasured_image_model_is_refused(logged_in_profile, tmp_path):
+    # Plan F review I3: Flow may generate without asking, so an unmeasured model could charge
+    # with no budget at all.
+    kw, pages, _ = harness(defaults=Defaults("Nano Banana Pro", "16:9", 1, asks=True))
+    with pytest.raises(ValidationError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+    assert "Nano Banana Pro" in info.value.message and "nano-banana-2.1" in info.value.hint
+    assert not any(c[0] == "submit" for c in pages[0].calls)

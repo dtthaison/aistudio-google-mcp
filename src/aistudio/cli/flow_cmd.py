@@ -88,7 +88,8 @@ def _command(kind: str) -> click.Command:
     @click.option("--count", type=click.IntRange(1, 4), help="Outputs (default: your Flow "
                                                              "default).")
     @click.option("--max-credits", type=click.IntRange(0), help="Spend at most this many "
-                  "credits; without it Flow's quote is shown and nothing is spent.")
+                  "credits; without it a paid model only shows Flow's quote (the free Nano "
+                  "Banana 2.1 generates at once, 0 credits).")
     @click.option("--project", help="Flow project id or link (default: an 'aistudio' project).")
     @click.option("-o", "--out", type=click.Path(path_type=Path),
                   help="Output file, or a folder for several outputs.")
@@ -132,8 +133,10 @@ def _command(kind: str) -> click.Command:
                                help="Start frame: an image file or a Flow media id.")(command)
         command = click.option("--duration", type=int, help="Seconds (per the model: Veo "
                                "3.1 Lite/Fast 4/6/8, Quality 8, Omni 4/6/8/10).")(command)
-    help_text = (f"Generate {kind}s with Google Flow. Without --max-credits it only shows "
-                 "Flow's quote and spends nothing.")
+    help_text = (f"Generate {kind}s with Google Flow. Without --max-credits a paid model only "
+                 "shows Flow's quote and spends nothing"
+                 + ("; the free Nano Banana 2.1 generates at once (0 credits)." if kind == "image"
+                    else "."))
     return flow.command(kind, help=help_text)(command)
 
 

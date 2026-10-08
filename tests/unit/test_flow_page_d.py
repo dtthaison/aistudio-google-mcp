@@ -93,11 +93,22 @@ async def test_attach_character_searches_then_picks_it(fake_ui):
     # name is searched first; the search leaves it as the only, highlighted option.
     from aistudio._flow.page import SEARCH_ASSETS
 
-    ui = fake_ui()
+    ui = fake_ui(labels={("option", "."): [["Paper boat"]]})
     await FlowPage(ui).attach_character("Paper boat")
-    assert [op for op in ui.ops if op[0] in ("activate", "dispatch", "type")] == [
+    assert [op for op in ui.ops if op[0] in ("activate", "dispatch", "fill")] == [
         ("activate", "button", INGREDIENTS, 0), ("dispatch", "tab", CHARACTERS_TAB.pattern),
-        ("type", SEARCH_ASSETS, "Paper boat"), ("dispatch", "option", "Paper boat")]
+        ("fill", SEARCH_ASSETS, "Paper boat"), ("dispatch", "option", "Paper boat")]
+
+
+async def test_attach_character_refuses_when_another_name_comes_first(fake_ui):
+    # Plan F review M3: "Robo" also finds "Robo 2"; the panel acts on the first option.
+    from aistudio.exceptions import ValidationError
+
+    ui = fake_ui(labels={("option", "."): [["Robo 2", "Robo"]]})
+    with pytest.raises(ValidationError) as info:
+        await FlowPage(ui).attach_character("Robo")
+    assert "rename" in info.value.hint
+    assert not any(op[:2] == ("dispatch", "option") for op in ui.ops)
 
 
 async def test_the_quote_reports_the_characters_it_was_sent_with(fake_ui):

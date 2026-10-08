@@ -11,6 +11,7 @@ from typing import Any
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
 from aistudio._flow.models import (
+    FREE_WITHOUT_ASKING,
     MODEL_KEYS,
     Decision,
     Expect,
@@ -113,6 +114,12 @@ async def flow_generate(
         wanted = Defaults(flow_model.label if flow_model else previous.model,
                           aspect or previous.aspect, count or previous.count)
         _check_output(out, wanted.count, overwrite)  # the count may come from Flow's defaults
+        if kind == "image" and wanted.model not in FREE_WITHOUT_ASKING:
+            raise ValidationError(
+                f"aistudio has not measured whether Flow asks before generating with "
+                f"{wanted.model}; it could charge with no quote",
+                hint="nothing was sent; use -m nano-banana-2.1 (free), or set it as Flow's image "
+                     "default")
         if duration is not None and flow_model is None:  # check against the default model
             check_options(kind, model_by_label(previous.model), None, None, duration)
         uploads: list[dict[str, str]] = []
@@ -149,6 +156,9 @@ async def flow_generate(
             if turn.quote is None:  # a free model: Flow generated without asking (live)
                 free = await _free_run(page, turn, kind, wanted.count, flow_model, aspect,
                                        attached_ids, [c.id for c in chosen])
+                waiting = await _reject_noting(page, expect=False)  # a later ask for the rest
+                if waiting:
+                    free[1].append(waiting[2:])
             else:
                 if list(dict.fromkeys(turn.media)) != list(dict.fromkeys(attached_ids)):
                     waiting = await _reject_noting(page)
@@ -171,27 +181,25 @@ async def flow_generate(
                 if decision is Decision.QUOTE_ONLY:
                     # Declined in Flow too: a waiting request could later be approved there with
                     # the restored settings, not the quoted ones.
-                    declined = True
-                    try:
-                        await page.reject()
-                    except BrowserError:
-                        declined = False
-                        wrong = [*wrong, "Flow's request is still waiting: press Reject on it in "
-                                         "Flow, do not approve it (the settings were restored)"]
+                    note = await _reject_noting(page)
+                    declined = not note
+                    if note:
+                        wrong = [*wrong, f"{note[2:]} (the settings were restored)"]
                     return {"status": "quoted", "declined": declined, "credits": turn.quote.credits,
                             "count": turn.quote.count, "plan": turn.text, "project": project_id,
                             **({"uploads": uploads} if uploads else {}),
                             **({"warnings": wrong} if wrong else {})}
                 if decision is Decision.REJECT_MISMATCH:
-                    await page.reject()
-                    raise PlanMismatchError("; ".join(wrong), hint="nothing was spent; adjust "
-                                                                   "the flags or the prompt")
+                    waiting = await _reject_noting(page)
+                    raise PlanMismatchError("; ".join(wrong), hint=f"nothing was spent; adjust "
+                                                                   f"the flags or the prompt"
+                                                                   f"{waiting}")
                 if decision is Decision.REJECT_OVER_BUDGET:
-                    await page.reject()
+                    waiting = await _reject_noting(page)
                     raise OverBudgetError(f"Flow quotes {turn.quote.credits} credits, over "
                                           f"--max-credits {max_credits}",
                                           hint=f"nothing was spent; re-run with --max-credits "
-                                               f"{turn.quote.credits} to accept")
+                                               f"{turn.quote.credits} to accept{waiting}")
                 try:
                     outcome = await page.approve_and_follow(count=wanted.count,
                                                             credits=turn.quote.credits,
@@ -260,7 +268,14 @@ async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any
     """What Flow made without asking: the media with links, and notes. Credits are read later,
     after the settings are restored (reading them leaves the project page)."""
     notes = ["Flow generated without asking (free model), so there was no quote to check"]
-    made = [g for g in turn.generated if g.status == "success"]
+    made = [g for g in turn.generated if g.status == "success" and g.kind == kind]
+    if not made:
+        reported = ", ".join(f"{g.media_id} ({g.kind}, {g.status or 'unknown'})"
+                             for g in turn.generated)
+        raise AgentReplyError(f"Flow made no {kind}; it reported {reported}",
+                              hint="check the project in Flow before re-running")
+    notes += [f"Flow also made {g.media_id}, a {g.kind}, which was not downloaded"
+              for g in turn.generated if g.status == "success" and g.kind != kind]
     notes += [f"Flow reported {g.media_id} as {g.status or 'unknown'}, not made"
               for g in turn.generated if g.status != "success"]
     if len(made) != count:
@@ -367,13 +382,17 @@ def _attachment_titles(contents: ProjectContents | None,
     return titles, set(contents.titles) | {m.media_id for m in contents.media}
 
 
-async def _reject_noting(page: Any) -> str:
-    """Reject Flow's waiting request; if that fails, the hint must say it is still waiting."""
+_STILL_WAITING = "Flow's request may still be waiting: press Reject on it in Flow, never Approve"
+
+
+async def _reject_noting(page: Any, *, expect: bool = True) -> str:
+    """Reject Flow's waiting request(s). The note is empty only when one was pressed, or none
+    was expected; otherwise the person must check Flow's chat."""
     try:
-        await page.reject()
+        pressed = await page.reject(expect=expect)
     except BrowserError:
-        return "; Flow's request is still waiting: press Reject on it in Flow, never Approve"
-    return ""
+        return f"; {_STILL_WAITING}"
+    return f"; {_STILL_WAITING}" if expect and not pressed else ""
 
 
 _NAME_MAX = 100

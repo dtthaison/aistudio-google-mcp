@@ -78,7 +78,8 @@ class FakePage:
         return value
 
     async def read_defaults(self, kind):
-        return Defaults("Omni 1.1 Flash", "16:9", 1, asks=True)
+        model = "Nano Banana 2.1" if kind == "image" else "Omni 1.1 Flash"
+        return Defaults(model, "16:9", 1, asks=True)
 
     async def apply_defaults(self, kind, wanted):
         self.calls.append(("apply", wanted))
@@ -103,8 +104,9 @@ class FakePage:
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
                          Quote(1, "video", 10), media=tuple(media))
 
-    async def reject(self):
+    async def reject(self, *, expect=True):
         self.calls.append(("reject",))
+        return 1 if expect else 0
 
     async def extend_label(self, pid, workflow_id):
         self.calls.append(("extend_label", workflow_id))

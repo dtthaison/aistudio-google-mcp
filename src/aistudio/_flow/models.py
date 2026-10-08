@@ -130,6 +130,9 @@ def _norm(label: str | None) -> str:
 # Direct-spend actions: Flow charges without a quote, so aistudio keeps measured prices
 # (docs/wire/findings.md, "measured costs"). Add a row only after measuring it.
 PRICES = {("character", "Nano Banana 2.1"): 0, ("extend", "Veo 3.1 - Lite"): 10}
+# Image models Flow's agent is known to generate with at once (no quote), and their price.
+# Another image model may also skip the quote, at an unknown price, so it is refused.
+FREE_WITHOUT_ASKING = {"Nano Banana 2.1": 0}
 
 
 def check_direct_spend(action: str, model_label: str, max_credits: int | None) -> int:

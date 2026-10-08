@@ -59,7 +59,7 @@ quotes and write each `'` as `'\''`.
 | Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
-| Flow video / image quote (free: shows the credit cost, spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
+| Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
@@ -80,8 +80,8 @@ quotes and write each `'` as `'\''`.
 - **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow
   does not ask, so `flow image` without `--max-credits` already makes and downloads the images
   (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
-  the user wants the images. Video models quote first (verified); whether Nano Banana Pro
-  asks first is not measured, so treat it like a free run that may also charge.
+  the user wants the images. Video models quote first (verified). Other image models are
+  refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
      request is declined (nothing waits in Flow). If `"declined": false`, Flow's request is still

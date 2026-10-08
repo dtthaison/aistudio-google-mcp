@@ -272,8 +272,8 @@ async def test_approve_refuses_two_waiting_requests(fake_ui):
 
 
 async def test_reject_presses_every_waiting_request_and_only_those(fake_ui):
-    ui = fake_ui(enabled={("radio", "Reject"): [[False, True, True], [False, False, True],
-                                                [False, False, False]]})
+    ui = fake_ui(enabled={("radio", "Reject"): [[False, True, True], [False, True, True],
+                                                [False, False, True], [False, False, False]]})
     await FlowPage(ui).reject()
     assert [op for op in ui.ops if op[0] == "activate"] == [
         ("activate", "radio", "Reject", 1), ("activate", "radio", "Reject", 2)]
@@ -312,3 +312,34 @@ async def test_a_permission_request_wins_over_generated_results(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert turn.quote is not None and turn.quote.credits == 10
+
+
+
+async def test_reject_waits_for_the_request_and_says_how_many(fake_ui):
+    # Plan F review I2: the permission message can render after the stream ends.
+    ui = fake_ui(enabled={("radio", "Reject"): [[], [], [True], [True], [False]]})
+    assert await FlowPage(ui).reject() == 1  # two polls, then it showed and was pressed
+    ui = fake_ui(enabled={("radio", "Reject"): [[]]})
+    assert await FlowPage(ui).reject() == 0
+    ui = fake_ui(enabled={("radio", "Reject"): [[]]}, record_pauses=True)
+    assert await FlowPage(ui).reject(expect=False) == 0
+    assert len([op for op in ui.ops if op[0] == "pause"]) == 0
+
+
+async def test_approve_presses_only_the_newest_request(fake_ui):
+    # Plan F review M1: the cost read is the newest message's; the radio pressed must be too.
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(enabled={("radio", "Approve"): [[True, False]]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    page = FlowPage(ui, now=Clock())
+    with pytest.raises(BrowserError):
+        await page.approve_and_follow(count=1, credits=10, timeout_s=5, kind="video")
+    assert not page.started
+
+
+async def test_the_last_permission_in_a_stream_is_the_quote(fake_ui):
+    ui = fake_ui({"StreamChat": [chat(stream(permission(cost=10), permission(cost=20)))]},
+                 texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
+    assert turn.quote.credits == 20
