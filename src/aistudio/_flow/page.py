@@ -76,6 +76,7 @@ START = "Start generation"
 ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
+CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
 EXTEND_PANEL = "What happens next?"  # the Extend box's placeholder (the edit box differs)
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
@@ -496,6 +497,33 @@ class FlowPage:
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character")
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
         return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+
+    async def open_body(self, project_id: str, character_id: str) -> str:
+        """Open the character's page in body mode; return the image model it will use."""
+        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character/{character_id}")
+        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        if not self._ui.current_url().split("?", 1)[0].endswith(f"/character/{character_id}"):
+            raise BrowserError("Flow opened another page than the character; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        label = _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+        await self._ui.dispatch_click("button", CREATE_BODY)
+        await self._ui.pause(2000)
+        return label
+
+    async def start_body(self, prompt: str) -> list[FlowMedia]:
+        """Call after open_body. Generates the body image (a direct spend: priced first)."""
+        await self._ui.type_text(EDITOR_LAST, prompt)
+        await self._wait_for_prompt(EDITOR_LAST, prompt)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            self.started = True
+            await self._ui.click("button", START, exact=True, nth=-1)
+            image = await log.next("ogiZ0b", timeout_s=180.0)
+        media = media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")) if image else []
+        if not media:
+            raise BrowserError("Flow sent no body image",
+                               hint="check the character in Flow before re-running")
+        self.paid_media = [m.media_id for m in media]
+        return media
 
     async def choose_character_model(self, label: str) -> None:
         """Pick the image model in the character page's "Select model family" (findings)."""

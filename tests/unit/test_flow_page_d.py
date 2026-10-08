@@ -160,3 +160,27 @@ async def test_stitch_give_up_names_an_unreadable_reply(fake_ui):
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=10_000)
     assert "unreadable" in info.value.message
+
+
+
+async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
+    from aistudio._flow.page import CHARACTER_MODEL, EDITOR_LAST
+    from tests.unit.test_flow_page_b import IMAGE_ROW
+
+    picker = "\U0001f34c Nano Banana 2.1 arrow_drop_down"
+    ui = fake_ui({"ogiZ0b": [rpc("ogiZ0b", [[IMAGE_ROW]])]},
+                 inner={("button", CHARACTER_MODEL): [picker]},
+                 texts={EDITOR_LAST: ["full body on a dock"]},
+                 url=f"https://flow.google.com/project/{PID}/character/c1")
+    page = FlowPage(ui, now=Clock())
+    assert await page.open_body(PID, "c1") == "Nano Banana 2.1"
+    assert ("dispatch", "button", "Create body") in ui.ops
+    media = await page.start_body("full body on a dock")
+    assert [m.media_id for m in media] == ["i1"] and page.started and page.paid_media == ["i1"]
+
+
+async def test_body_needs_the_characters_own_page(fake_ui):
+    ui = fake_ui(url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError):
+        await FlowPage(ui, now=Clock()).open_body(PID, "c1")
+    assert ("dispatch", "button", "Create body") not in ui.ops

@@ -774,6 +774,47 @@ async def flow_rename_character(profile: Profile, character_id: str, name: str, 
     return {"character_id": character_id, "name": name, "project": project_id}
 
 
+async def flow_character_body(profile: Profile, character_id: str, prompt: str, *,
+                              max_credits: int | None = None, project: str | None = None,
+                              out: Path | None = None, overwrite: bool = False,
+                              visible: bool = False, browser: Callable[..., Any] = open_browser,
+                              downloader: Callable[[str], Any] = download_signed,
+                              now: Callable[[], datetime] = datetime.now,
+                              page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """A full-body image for a character ("Create body"; a direct spend priced from the table)."""
+    prompt = " ".join(prompt.split())
+    if not prompt:
+        raise ValidationError("nothing to make: the body prompt is empty")
+    project_id = _project_id(project) if project else None
+    _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        before = await page.credits()
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        if not any(c.id == character_id for c in contents.characters):
+            raise NotFoundError(f"no character {character_id} in this Flow project",
+                                hint='see "aistudio flow character list"')
+        label = await page.open_body(project_id, character_id)
+        price = check_direct_spend("body", label, max_credits)  # before any spend
+        try:
+            media = await page.start_body(prompt)
+        except Exception as exc:
+            if not page.started:  # a check before Start: nothing was made
+                raise
+            raise _spent(exc, page.paid_media, project_id) from exc
+        after, read_notes = await _credits_after(page, None)
+    spent, warnings = _cost_warning(before, after, price)
+    warnings = read_notes + warnings
+    files, saved_notes = await _save_all("image", media, out=out, overwrite=overwrite,
+                                         downloader=downloader, stamp=now(),
+                                         project_url=PROJECT_URL.format(id=project_id))
+    warnings += saved_notes
+    return {"status": "done", "character_id": character_id, "files": files,
+            "credits_spent": spent, "credits_left": after, "model": label_to_id(label),
+            "project": project_id, **({"warnings": warnings} if warnings else {})}
+
+
 async def flow_set_personality(profile: Profile, character_id: str, text: str, *,
                                project: str | None = None, visible: bool = False,
                                browser: Callable[..., Any] = open_browser,

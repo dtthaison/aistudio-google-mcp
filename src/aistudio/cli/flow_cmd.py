@@ -10,6 +10,7 @@ import click
 
 from aistudio._app.flow import (
     flow_character,
+    flow_character_body,
     flow_characters,
     flow_credits,
     flow_download,
@@ -289,6 +290,29 @@ def character_rename(state: CliState, character_id: str, name: str, project: str
                                                project=project, visible=visible))
     emit(result, json_output=json_output, render=lambda d: stdout.print(
         f"Renamed {d['character_id']} to {d['name']}", markup=False))
+
+
+@character.command("body")
+@click.argument("character_id")
+@click.argument("prompt")
+@click.option("--max-credits", type=click.IntRange(0),
+              help="Needed only when aistudio's price table says the body costs credits.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("-o", "--out", type=click.Path(path_type=Path), help="Output image file.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_body(state: CliState, character_id: str, prompt: str, max_credits: int | None,
+                   project: str | None, out: Path | None, force: bool, visible: bool,
+                   json_output: bool) -> None:
+    """A full-body image for a character, described by PROMPT ("Create body"; 0 credits on
+    Nano Banana 2.1, Flow charges without a quote)."""
+    state.require_browser()
+    _finish(asyncio.run(flow_character_body(state.profile(), character_id, prompt,
+                                            max_credits=max_credits, project=project, out=out,
+                                            overwrite=force, visible=visible)), json_output)
 
 
 @character.command("personality")

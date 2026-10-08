@@ -2,6 +2,7 @@ import pytest
 
 from aistudio._app.flow import (
     flow_character,
+    flow_character_body,
     flow_characters,
     flow_extend,
     flow_generate,
@@ -65,6 +66,15 @@ class FakePage(PlanBPage):
         self.calls.append(("submit", text))
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",
                          Quote(1, "video", 10), self.turn_characters, tuple(self.attached))
+
+    async def open_body(self, pid, cid):
+        self.calls.append(("open_body", cid))
+        return self.character_model_label
+
+    async def start_body(self, prompt):
+        self.calls.append(("body", prompt))
+        self.started, self.paid_media = True, ["b1"]
+        return [media("b1", video=False)]
 
     async def choose_character_model(self, label):
         self.calls.append(("choose", label))
@@ -459,3 +469,21 @@ async def test_character_with_a_chosen_model(logged_in_profile, tmp_path):
         await flow_character(profile, "Robot", "a robot", model="veo-3.1-lite",
                              out=tmp_path / "s.png", **kw)
     assert opened == []
+
+
+
+async def test_character_body_is_priced_and_downloaded(logged_in_profile, tmp_path):
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010))
+    result = await flow_character_body(profile, "c1", "  full body,  on a dock ",
+                                       out=tmp_path / "b.png", **kw)
+    assert ("body", "full body, on a dock") in pages[0].calls
+    assert result["credits_spent"] == 0 and (tmp_path / "b.png").exists()
+    assert result["character_id"] == "c1" and result["model"] == "nano-banana-2.1"
+    kw, pages, _ = harness(character_model="Nano Banana Pro")  # body on Pro: not measured
+    with pytest.raises(ValidationError):
+        await flow_character_body(profile, "c1", "x", out=tmp_path / "c.png", **kw)
+    assert not any(c[0] == "body" for c in pages[0].calls)
+    kw, _, _ = harness()
+    with pytest.raises(NotFoundError):
+        await flow_character_body(profile, "c9", "x", out=tmp_path / "d.png", **kw)

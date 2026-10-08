@@ -267,3 +267,14 @@ def test_personality_options(logged_in_profile, monkeypatch):
     res = CliRunner().invoke(cli, ["flow", "character", "create", "A", "a robot",
                                    "--personality", "Calm"])
     assert res.exit_code == 0 and calls[-1][1]["personality"] == "Calm"
+
+
+
+def test_character_body_command(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character_body",
+                        fake({"status": "done", "character_id": "c1", "files": [],
+                              "credits_spent": 0, "credits_left": 5, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "body", "c1", "full body", "--json"])
+    assert res.exit_code == 0 and calls[-1][0] == ("c1", "full body")
