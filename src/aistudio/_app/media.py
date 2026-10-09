@@ -280,15 +280,46 @@ def _segment(segment: Any) -> dict[str, Any]:
 
 
 def _transcript_file(transcript: Transcript) -> str:
-    """Plain text, or one line per segment with times and speaker when the reply has them."""
+    """Plain text, or timed lines with the speaker when the reply has them."""
     if not any(s.speaker or s.start is not None for s in transcript.segments):
         return transcript.text
+    return "\n".join(transcript_lines([_segment(s) for s in transcript.segments])) + "\n"
+
+
+_SENTENCE_ENDS = (".", "!", "?", "…")
+_CLOSERS = "\"')]»”’"
+MAX_LINE_WORDS = 40  # a stretch with no sentence end is broken here
+
+
+def transcript_lines(segments: list[dict[str, Any]]) -> list[str]:
+    """``[start - end] speaker: text`` lines, one per sentence (live: a 3-minute speaker turn is
+    one segment). The text is split where a word ends a sentence, and each line takes its times
+    from the word timings. A segment whose words do not line up with its text (e.g. text without
+    spaces) stays one line."""
     lines = []
-    for s in transcript.segments:
-        when = (f"[{_clock(s.start)} - {_clock(s.end)}] " if s.start is not None else "")
-        who = f"{s.speaker}: " if s.speaker else ""
-        lines.append(f"{when}{who}{s.text}")
-    return "\n".join(lines) + "\n"
+    for segment in segments:
+        who = f"{segment['speaker']}: " if segment.get("speaker") else ""
+        for start, end, text in _sentences(segment):
+            when = f"[{_clock(start)} - {_clock(end)}] " if start is not None else ""
+            lines.append(f"{when}{who}{text}")
+    return lines
+
+
+def _sentences(segment: dict[str, Any]) -> list[tuple[float | None, float | None, str]]:
+    start, end, text = segment.get("start"), segment.get("end"), segment["text"]
+    words, tokens = segment.get("words") or [], segment["text"].split()
+    if not words or len(words) != len(tokens):
+        return [(start, end, text)]
+    out, first = [], 0
+    for index, token in enumerate(tokens):
+        last = index == len(tokens) - 1
+        if (token.rstrip(_CLOSERS).endswith(_SENTENCE_ENDS) or last
+                or index - first + 1 >= MAX_LINE_WORDS):
+            begin = words[first][1] if words[first][1] is not None else start
+            finish = words[index][2] if words[index][2] is not None else end
+            out.append((begin, finish, " ".join(tokens[first:index + 1])))
+            first = index + 1
+    return out
 
 
 def _clock(seconds: float | None) -> str:

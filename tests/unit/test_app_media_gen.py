@@ -637,3 +637,48 @@ async def test_transcribe_without_out_needs_no_writable_folder(logged_in_profile
     result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
                                   live_body(("Xin chào.", None, [])))
     assert result["text"] == "Xin chào."
+
+
+def test_a_long_segment_is_split_into_timed_sentences():
+    # Live: a 174 s single-speaker clip came back as one segment, so the -o file was one line.
+    from aistudio._app.media import transcript_lines
+
+    words = [["Đoạn", 0.0, 0.3], ["một.", 0.3, 0.9], ["Đoạn", 1.0, 1.3], ["hai", 1.3, 1.6],
+             ["nhé!", 1.6, 2.4], ["Hết", 2.5, 2.9]]
+    segment = {"speaker": "spk:0", "start": 0.0, "end": 2.9,
+               "text": "Đoạn một. Đoạn hai nhé! Hết", "words": words}
+    assert transcript_lines([segment]) == ["[0:00.0 - 0:00.9] spk:0: Đoạn một.",
+                                           "[0:01.0 - 0:02.4] spk:0: Đoạn hai nhé!",
+                                           "[0:02.5 - 0:02.9] spk:0: Hết"]
+
+
+def test_segments_that_cannot_be_split_stay_whole():
+    from aistudio._app.media import transcript_lines
+
+    # Text without spaces (words do not line up with the text): one line, as before
+    cjk = {"speaker": None, "start": 0.0, "end": 2.0, "text": "你好。谢谢。",
+           "words": [["你好。", 0.0, 1.0], ["谢", 1.0, 1.5], ["谢。", 1.5, 2.0]]}
+    assert transcript_lines([cjk]) == ["[0:00.0 - 0:02.0] 你好。谢谢。"]
+    plain = {"speaker": None, "start": None, "end": None, "text": "Just text. More."}
+    assert transcript_lines([plain]) == ["Just text. More."]
+    # No sentence end for a long stretch: break every 40 words
+    many = [[f"w{i}", float(i), i + 0.5] for i in range(90)]
+    run_on = {"speaker": None, "start": 0.0, "end": 89.5,
+              "text": " ".join(w for w, _, _ in many), "words": many}
+    lines = transcript_lines([run_on])
+    assert [len(line.split("] ", 1)[1].split()) for line in lines] == [40, 40, 10]
+    assert lines[1].startswith("[0:40.0 - 1:19.5] ")
+
+
+@respx.mock
+async def test_the_timed_file_and_screen_show_one_line_per_sentence(logged_in_profile, make_client,
+                                                                     fake_ui, captured, tmp_path):
+    serve_catalog(captured)
+    words = [["Xin", [None, 100000000], [None, 400000000]], ["chào.", [None, 400000000], ["1"]],
+             ["Tạm", ["2"], ["2", 300000000]], ["biệt.", ["2", 300000000], ["3"]]]
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  live_body(("Xin chào. Tạm biệt.", "spk:0", words)),
+                                  out=tmp_path / "t.txt")
+    assert (tmp_path / "t.txt").read_text(encoding="utf-8") == (
+        "[0:00.1 - 0:01.0] spk:0: Xin chào.\n[0:02.0 - 0:03.0] spk:0: Tạm biệt.\n")
+    assert len(result["segments"]) == 1  # the JSON keeps AI Studio's segments

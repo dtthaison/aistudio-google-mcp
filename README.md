@@ -36,7 +36,8 @@ uv run aistudio generate speech "Hello! <laugh> Nice to meet you." --voice Tova 
 uv run aistudio generate image "a red apple on a white table" -o apple.jpg
 uv run aistudio generate music "calm solo piano, slow tempo" -o piano.mp3
 uv run aistudio generate image "make the red squares blue" --image board.png -o blue.jpg   # edit an image
-uv run aistudio transcribe talk.m4a --vocabulary "Yuri Handmade" -o talk.txt              # speech to text
+uv run aistudio transcribe talk.m4a -o talk.txt         # speech to text: one timed line per sentence
+uv run aistudio transcribe talk.m4a --vocabulary "Yuri Handmade" -o talk.txt   # names; plain text
 uv run aistudio flow credits
 uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8   # shows the quote
 uv run aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8 --max-credits 10 -o apple.mp4

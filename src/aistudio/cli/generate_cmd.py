@@ -19,6 +19,7 @@ from aistudio._app.media import (
     generate_speech,
     list_voices,
     transcribe,
+    transcript_lines,
 )
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.inputs import read_text
@@ -147,11 +148,6 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
                                        markup=False))
 
 
-def _clock(seconds: float | None) -> str:
-    seconds = seconds or 0.0
-    return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
-
-
 @click.command("transcribe")
 @click.argument("audio", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-m", "--model", default=DEFAULT_TRANSCRIBE_MODEL, show_default=True,
@@ -187,12 +183,8 @@ def transcribe_cmd(state: CliState, audio: Path, model: str, timestamps: bool | 
                                                          json_output)))
 
     def render(data: dict[str, Any]) -> None:
-        for segment in data.get("segments") or [{"text": data["text"], "speaker": None,
-                                                 "start": None, "end": None}]:
-            when = (f"[{_clock(segment['start'])} - {_clock(segment['end'])}] "
-                    if segment.get("start") is not None else "")
-            who = f"{segment['speaker']}: " if segment.get("speaker") else ""
-            stdout.print(f"{when}{who}{segment['text']}", markup=False)
+        for line in transcript_lines(data.get("segments") or [{"text": data["text"]}]):
+            stdout.print(line, markup=False)
         if data.get("file"):
             stderr.print(f"Wrote {data['file']['path']}", markup=False)
         for warning in data.get("warnings", []):

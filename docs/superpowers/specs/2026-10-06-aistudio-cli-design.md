@@ -426,6 +426,9 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 > - **2026-10-09:** each browser run copies the browser's refreshed cookies back into the
 >   storage state (signed-in only, account and origins kept), so plain-HTTP commands do not go
 >   stale (§4.4).
+> - **2026-10-09 (plan K):** the `transcribe` screen output and `-o` file show one
+>   `[start - end] speaker: text` line per sentence, timed from the words. JSON `segments` keep
+>   AI Studio's own segments.
 > - The table below is the original plan. `--count`, `--aspect`, `--lyrics`, `--duration` and
 >   job commands were not built.
 

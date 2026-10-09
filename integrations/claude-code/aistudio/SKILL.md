@@ -82,7 +82,8 @@ quotes and write each `'` as `'\''`.
 - `--image` and `transcribe` upload the file to the user's Google Drive (AI Studio's folder):
   say so when the file is private. `--vocabulary` turns timestamps and speaker labels off
   (AI Studio cannot combine them); pass brand or person names there, or they may be dropped.
-  Without it, AI Studio's defaults return `segments` with speakers and word times. A long
+  Without it, AI Studio's defaults return `segments` with speakers and word times (the `-o`
+  file has one timed line per sentence). A long
   recording may need `--timeout`; a transcript cut off at the output limit comes with a warning.
   Audio may be .mp3, .wav, .m4a, .flac, .ogg/.opus, .aac or .aiff, or audio-only .mp4/.webm up
   to 50 MB (for larger ones or video files, ask the user to convert to .m4a/.mp3). A warning that AI Studio "replied with plain text, not a transcript" means it may
