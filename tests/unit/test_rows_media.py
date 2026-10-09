@@ -121,3 +121,10 @@ def test_decode_text_reads_the_reply():
         decode_text(text_response())
     with pytest.raises(ServerError):
         decode_text(text_response("partial", finish=3))  # stopped early (e.g. safety)
+
+
+def test_decode_text_reads_a_transcript_part():
+    # Live: the transcribe model puts its text in slot 22 of the part, not slot 1.
+    part = [None] * 22 + [["Xin chào, đây là cửa hàng Yuri Handmade."]]
+    response = [[chunk([part]), chunk([[None, ""]], 1)]]
+    assert decode_text(response) == "Xin chào, đây là cửa hàng Yuri Handmade."

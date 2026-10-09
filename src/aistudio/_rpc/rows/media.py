@@ -94,7 +94,7 @@ def decode_text(response: Any) -> str:
     finish = finish_reason(response)
     if finish is not None and finish != _FINISHED:
         raise _stopped(finish)
-    text = "".join(_texts(response))
+    text = "".join(_texts(response)) or "".join(_texts(response, slot=_TRANSCRIPT_SLOT))
     if not text.strip():
         raise SchemaDriftError(METHOD, (), "text parts")
     if finish is None:
@@ -102,8 +102,12 @@ def decode_text(response: Any) -> str:
     return text
 
 
-def _texts(response: Any) -> list[str]:
-    """Text parts: ``chunk[0][c][0][0][p][1]`` for every candidate c and part p."""
+_TRANSCRIPT_SLOT = 22  # the transcribe model's part: ``[None × 22, [text]]`` (live)
+
+
+def _texts(response: Any, *, slot: int = 1) -> list[str]:
+    """Text parts: ``chunk[0][c][0][0][p][1]`` for every candidate c and part p (a transcript
+    part keeps its text in ``[22][0]``)."""
     out: list[str] = []
     chunks = opt_index(response, 0)
     for chunk in chunks if isinstance(chunks, list) else []:
@@ -111,7 +115,7 @@ def _texts(response: Any) -> list[str]:
         for candidate in candidates if isinstance(candidates, list) else []:
             parts = opt_index(candidate, 0, 0)
             for part in parts if isinstance(parts, list) else []:
-                text = opt_index(part, 1)
+                text = opt_index(part, 1) if slot == 1 else opt_index(part, slot, 0)
                 if isinstance(text, str) and text:
                     out.append(text)
     return out
