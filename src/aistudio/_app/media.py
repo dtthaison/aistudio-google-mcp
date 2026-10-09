@@ -189,12 +189,13 @@ async def transcribe(
     """Speech to text with AI Studio's transcribe model (page-driven; uses the user's quota)."""
     (path,) = _inputs([audio], AUDIO_INPUTS, "an audio file")
     vocabulary = " ".join(vocabulary.split())
-    # AI Studio refuses both together: "custom_vocabulary is incompatible with word timestamps".
-    if vocabulary and timestamps:
-        raise ValidationError("--vocabulary cannot be combined with --timestamps",
+    # AI Studio refuses these together (live): "custom_vocabulary is incompatible with word
+    # timestamps" and "… with diarization". The page turns both on by default.
+    if vocabulary and (timestamps or diarize):
+        raise ValidationError("--vocabulary cannot be combined with --timestamps or --diarize",
                               hint="drop one of them; nothing was sent")
     if vocabulary:
-        timestamps = False  # the page turns timestamps on by default
+        timestamps = diarize = False
     if out is not None and out.exists() and not overwrite:
         raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
     _check_folder(out.parent if out is not None and str(out.parent) else Path("."))

@@ -441,16 +441,19 @@ async def test_vocabulary_turns_timestamps_off(logged_in_profile, make_client, f
     ui = fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200,
                                                        transcript_body("ok"), "[]")]},
                  labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]},
-                 checks={("switch", "Word timestamps", 0): [True]})
+                 checks={("switch", "Word timestamps", 0): [True],
+                         ("switch", "Speaker labels", 0): [True]})
     await transcribe(logged_in_profile(), audio, vocabulary="Yuri Handmade",
                      client_factory=lambda p: make_client(), browser=browser_with(ui, []))
     assert ("activate", "switch", "Word timestamps", 0) in ui.ops
-    opened = []
-    with pytest.raises(ValidationError):
-        await transcribe(logged_in_profile(), audio, vocabulary="Yuri", timestamps=True,
-                         client_factory=lambda p: make_client(),
-                         browser=browser_with(fake_ui(), opened))
-    assert opened == []
+    assert ("activate", "switch", "Speaker labels", 0) in ui.ops  # live: "…with diarization"
+    for clash in ({"timestamps": True}, {"diarize": True}):
+        opened = []
+        with pytest.raises(ValidationError):
+            await transcribe(logged_in_profile(), audio, vocabulary="Yuri",
+                             client_factory=lambda p: make_client(),
+                             browser=browser_with(fake_ui(), opened), **clash)
+        assert opened == []
 
 
 @respx.mock

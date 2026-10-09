@@ -157,7 +157,9 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
               help="Speaker labels (default: AI Studio's own setting).")
 @click.option("--smart/--no-smart", default=None,
               help="Smart transcription (default: AI Studio's own setting).")
-@click.option("--vocabulary", default="", help="Words to expect, e.g. names or brands.")
+@click.option("--vocabulary", default="",
+              help="Words to expect, e.g. names or brands (turns timestamps and speaker labels "
+                   "off: AI Studio cannot combine them).")
 @click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path),
               help="Also write the text to this file.")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
