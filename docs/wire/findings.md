@@ -615,6 +615,19 @@ blocked; the RPCs that went through are free.
 - The remaining difference is a paid video still queued, which was not re-run, to avoid spending.
 - **Change:** a failed restore is retried once on a freshly loaded project, and the warning now
   carries the reason. `flow video` also waits 1,200 s by default (images still 600 s).
+- **Paid re-test (2026-10-09, user-approved, 10 credits).**
+  - Run: Veo 3.1 Lite, 9:16, `--max-credits 10 --timeout 30`. aistudio stopped waiting while the
+    clip was still generating (`status: timeout`).
+  - The restore (Lite 9:16 → Omni 1.1 Flash 16:9) worked on the first try, in 8.6 s, with no
+    warning. The clip finished and downloaded.
+  - So a paid video still generating does not by itself break the restore. What remains is the
+    original case: about 10 minutes of waiting with a Fast clip queued.
+  - That cannot be forced (a Lite clip finishes in a minute or two), so the retry and the reason
+    stay as the mitigation.
+  - Free quotes vary: one of two identical quotes planned "2 generations, mixed" (likely a start
+    image plus the video) for 10 credits. aistudio flagged the kind and count mismatch, which is
+    why a paid run would have rejected that plan.
+  - Flow's balance rose from 970 to 1,010 over this run, so balances cannot confirm a charge.
 
 ## AI Studio transcription and image editing (2026-10-09, free: GenerateContent blocked)
 
