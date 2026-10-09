@@ -265,3 +265,29 @@ async def test_a_signed_out_browser_never_overwrites_the_session(logged_in_profi
             Chromium(Context(state=None)))):  # reading the state fails: the run still ends
         pass
     assert profile.storage_state.read_text() == before
+
+
+async def test_set_files_labels_given_types(tmp_path):
+    # Live: AI Studio's audio input takes audio/* only; Playwright labels .mp4/.webm video/*.
+    clip, other = tmp_path / "talk.mp4", tmp_path / "talk.wav"
+    clip.write_bytes(b"mp4 bytes")
+    other.write_bytes(b"RIFF")
+    given = []
+
+    class Input:
+        async def set_input_files(self, files, timeout=None):
+            given.append(files)
+
+    class FilePage(Page):
+        def locator(self, selector):
+            return type("L", (), {"first": Input()})()
+
+    ui = PlaywrightUi(FilePage())
+    await ui.set_files("input[type=file]", [str(clip)], {".mp4": "audio/mp4"})
+    assert given[-1] == [{"name": "talk.mp4", "mimeType": "audio/mp4", "buffer": b"mp4 bytes"}]
+    await ui.set_files("input[type=file]", [str(other)], {".mp4": "audio/mp4"})
+    assert given[-1] == [str(other)]  # nothing to relabel: Playwright's own type
+    await ui.set_files("input[type=file]", [str(clip), str(other)], {".mp4": "audio/mp4"})
+    first, second = given[-1]
+    assert first["mimeType"] == "audio/mp4" and second["name"] == "talk.wav"
+    assert second["mimeType"].startswith("audio/")  # the platform's guess for .wav

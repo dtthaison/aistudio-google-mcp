@@ -146,3 +146,17 @@ def test_decode_transcript_plain_and_cut_off():
     assert (cut.text, cut.finish) == ("partial", 2)  # slot 22 wins over blank slot-1 text
     empty = decode_transcript([[chunk([[None, ""]], 1)]])
     assert empty.text == "" and empty.segments == ()
+
+
+def test_decode_transcript_marks_plain_text():
+    # Every live transcript came in slot 22 (with or without word times). Text only in slot 1
+    # is a chat-style reply, e.g. a refusal, and must not pass silently as a transcript.
+    from aistudio._rpc.rows.media import decode_transcript
+
+    chat = decode_transcript([[chunk([[None, "I can't transcribe this."]]),
+                               chunk([[None, ""]], 1)]])
+    assert chat.text == "I can't transcribe this." and chat.plain is True
+    live = decode_transcript([[chunk([LIVE_PART]), chunk([[None, ""]], 1)]])
+    assert live.plain is False
+    bare = decode_transcript([[chunk([[None] * 22 + [["Just text."]]]), chunk([[None, ""]], 1)]])
+    assert bare.plain is False

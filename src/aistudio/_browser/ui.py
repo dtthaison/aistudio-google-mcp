@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import mimetypes
 import re
 import sys
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 from urllib.parse import parse_qs, urlparse
 
@@ -106,7 +108,8 @@ class Ui(Protocol):
 
     async def choose_file(self, role: str, name: Name, path: Any) -> None: ...
 
-    async def set_files(self, selector: str, paths: list[str]) -> None: ...
+    async def set_files(self, selector: str, paths: list[str],
+                        types: Mapping[str, str] | None = None) -> None: ...
 
     async def hover_text(self, text: str) -> None: ...
 
@@ -391,11 +394,21 @@ class PlaywrightUi:
         await self._act(role, name, lambda: locator.dispatch_event("click",
                                                                    timeout=CONTROL_TIMEOUT_MS))
 
-    async def set_files(self, selector: str, paths: list[str]) -> None:
-        """Give a page's file input these files (AI Studio's upload input; no chooser needed)."""
+    async def set_files(self, selector: str, paths: list[str],
+                        types: Mapping[str, str] | None = None) -> None:
+        """Give a page's file input these files (AI Studio's upload input; no chooser needed).
+        ``types`` relabels files by suffix: Playwright guesses from the name, so .mp4/.webm audio
+        reach the page as video/*, which AI Studio's audio input refuses."""
+        files: Any = paths
+        if types and any(Path(p).suffix.lower() in types for p in paths):
+            files = [{"name": Path(p).name,
+                      "mimeType": types.get(Path(p).suffix.lower())
+                      or mimetypes.guess_type(p)[0] or "application/octet-stream",
+                      "buffer": await asyncio.to_thread(Path(p).read_bytes)} for p in paths]
+
         async def run() -> None:
             await self._page.locator(selector).first.set_input_files(
-                paths, timeout=CONTROL_TIMEOUT_MS)
+                files, timeout=CONTROL_TIMEOUT_MS)
 
         await self._act("file input", selector, run)
 

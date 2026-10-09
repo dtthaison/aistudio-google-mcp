@@ -215,11 +215,12 @@ async def flow_generate(
                 decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
                 if decision is Decision.QUOTE_ONLY:
                     # Declined in Flow too: a waiting request could later be approved there with
-                    # the restored settings, not the quoted ones.
+                    # other settings than the quoted ones. The note claims nothing about the
+                    # restore, which runs later and may fail (it adds its own warning).
                     note = await _reject_noting(page)
                     declined = not note
                     if note:
-                        wrong = [*wrong, f"{note} (the settings were restored)"]
+                        wrong = [*wrong, note]
                     wrong = wrong + [f"Flow also made {g.media_id} without asking (free)"
                                      for g in turn.generated]
                     warnings += wrong

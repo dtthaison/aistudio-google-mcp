@@ -156,6 +156,18 @@ async def test_a_quote_survives_a_failed_reject(logged_in_profile, tmp_path):
     assert ("approve", 1) not in pages[0].calls
 
 
+async def test_a_waiting_quote_never_claims_a_restore(logged_in_profile, tmp_path):
+    # Plan I deferred minor: the note said "(the settings were restored)" before the restore
+    # ran, next to a later "could not restore" warning (or when nothing needed restoring).
+    kw, _, _ = harness(reject_error=BrowserError("radio 'Reject' not found"),
+                       restore_error=BrowserError("tune panel did not open"))
+    result = await flow_generate(logged_in_profile(), "video", "an apple",
+                                 model="veo-3.1-lite", duration=8, out=tmp_path / "a.mp4", **kw)
+    assert any("never Approve" in w for w in result["warnings"])
+    assert any("could not restore" in w for w in result["warnings"])
+    assert not any("were restored" in w for w in result["warnings"])
+
+
 async def test_approved_video_is_downloaded_and_defaults_restored(logged_in_profile, tmp_path):
     kw, pages, _ = harness()
     out = tmp_path / "a.mp4"

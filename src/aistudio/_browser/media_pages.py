@@ -29,6 +29,8 @@ GENERATE = "Generate"
 FILE_INPUT = "input[type=file]"
 REMOVE_MEDIA = "Remove media"  # one chip per attached file
 TRANSCRIBE = "Transcribe"
+# Sent with these types (live: as video/* the page took neither; as audio both transcribed)
+AUDIO_TYPES = {".mp4": "audio/mp4", ".webm": "audio/webm"}
 VOCABULARY = "Custom vocabulary"
 SWITCHES = {"timestamps": "Word timestamps", "speakers": "Speaker labels",
             "smart": "Smart transcription"}
@@ -51,11 +53,11 @@ async def _await_generation(log: ResponseLog, kind: str, timeout_s: float) -> Ca
 
 
 async def _attach(ui: Ui, paths: list[str], now: Callable[[], float],
-                  ready: tuple[str, Any]) -> None:
+                  ready: tuple[str, Any], types: dict[str, str] | None = None) -> None:
     """Give the page's file input these files, wait for each chip, then for the page's action
     button: the chip shows at once, but the button stays disabled until the Drive upload ends
     (live), and pressing earlier would send the request without the files."""
-    await ui.set_files(FILE_INPUT, paths)
+    await ui.set_files(FILE_INPUT, paths, types)
     deadline = now() + ATTACH_TIMEOUT_S
     while len(await ui.labels("button", REMOVE_MEDIA)) < len(paths):
         if now() >= deadline:
@@ -115,7 +117,7 @@ class TranscribePage:
         await self._ui.goto(_url(model_id))
 
     async def attach(self, paths: list[str]) -> None:
-        await _attach(self._ui, paths, self._now, ("button", TRANSCRIBE))
+        await _attach(self._ui, paths, self._now, ("button", TRANSCRIBE), AUDIO_TYPES)
 
     async def options(self, **wanted: bool | None) -> None:
         """Set each run-settings switch that was asked for; press it only when it differs."""

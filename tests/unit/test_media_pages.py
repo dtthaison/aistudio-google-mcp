@@ -103,6 +103,19 @@ async def test_transcribe_page_sets_options_then_runs(fake_ui):
 
 
 
+async def test_audio_types_are_sent_as_audio(fake_ui):
+    # Live: .mp4/.webm audio were refused as video/*; labelled audio/mp4 and audio/webm they
+    # transcribed.
+    from aistudio._browser.media_pages import AUDIO_TYPES, FILE_INPUT
+
+    ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
+    await TranscribePage(ui, now=Clock()).attach(["/talk.webm"])
+    assert AUDIO_TYPES == {".mp4": "audio/mp4", ".webm": "audio/webm"}
+    assert ("set_files", FILE_INPUT, ("/talk.webm",), tuple(sorted(AUDIO_TYPES.items()))) in ui.ops
+    await ImagePage(ui, now=Clock()).attach(["/a.png"])
+    assert ("set_files", FILE_INPUT, ("/a.png",)) in ui.ops  # images keep their own types
+
+
 async def test_attach_waits_until_the_upload_lets_the_page_run(fake_ui):
     # Live: the chip shows at once, but Run stays disabled until the Drive upload finishes.
     ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})

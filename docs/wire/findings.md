@@ -649,6 +649,28 @@ blocked; the RPCs that went through are free.
     `[null, null, ["<mime>", "<base64>"]]` (slot 2), not a Drive file id in slot 5. The run
     settings carried `[null, null, null, null, 1, 1]` in generation-config slot 31. aistudio's
     request check counts both forms as a sent file.
+  - A 174 s, 7.7 MB AIFF (24 numbered paragraphs) was also sent **inline** (10.2 M base64
+    characters). The reply was one slot-22 part with the whole transcript (504 words, end time
+    174.1 s), plus an empty final chunk with the finish reason. Nothing was missing or repeated.
+  - Every live transcript came in slot 22, also with the switches off. Text only in slot 1 would
+    be a chat-style reply (e.g. a refusal); aistudio warns about it.
+- **Audio types (2026-10-09, small quota).**
+  - The transcribe page's input accepts
+    `audio/*,.aac,.aif,.aiff,.alaw,.flac,.m4a,.mp3,.mulaw,.oga,.ogg,.opus,.wav,.mpeg,.mpg,audio/mpeg`.
+  - Playwright labels files by name, so `.mp4` and `.webm` arrive as `video/*`. The page showed no
+    chip for them ("did not take 1 file").
+  - Labelled `audio/mp4` and `audio/webm`, both transcribed. The request carried
+    `[null, null, ["audio/mp4" | "audio/webm", <base64>]]`.
+- **Drive copies (2026-10-09, free probes, no run).**
+  - Attaching a file still uploads it to Drive (`GetAppFolder`, then `POST
+    content.googleapis.com/upload/drive/v3/files?uploadType=…&key=…`), even when the request then
+    sends the audio inline. The reply is `{kind: "drive#file", id, name, mimeType}`.
+  - The upload carries `Authorization: Bearer …` (an OAuth token the page fetches itself).
+    `gapi.client.drive` is loaded, but `gapi.client.getToken()` is empty, and a direct
+    `gapi.client.drive.files.get` returned 401.
+  - So aistudio cannot trash its uploads without handling an OAuth token or the signed session
+    against Drive. The session's permission check refused that, so the copies stay (README).
+  - Runs did not appear in `aistudio prompt list`: these copies belong to no saved prompt.
 
 ## Session cookies go stale after browser runs (2026-10-09)
 

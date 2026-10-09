@@ -420,6 +420,9 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 >   Both upload the input to the user's Google Drive (AI Studio's folder). `--vocabulary` turns
 >   timestamps and speaker labels off, because AI Studio refuses those combinations. A transcript
 >   cut off at the model's output limit is kept, with a warning.
+> - **2026-10-09 (plan J):** `transcribe` also takes `.mp4` and `.webm` audio (sent labelled
+>   `audio/mp4` / `audio/webm`). A reply with plain text instead of a transcript is kept, with a
+>   warning that it may be a refusal.
 > - The table below is the original plan. `--count`, `--aspect`, `--lyrics`, `--duration` and
 >   job commands were not built.
 

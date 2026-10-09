@@ -38,8 +38,8 @@ DEFAULT_MUSIC_MODEL = "lyria-3-clip-preview"  # cheapest Lyria model, verified l
 DEFAULT_TRANSCRIBE_MODEL = "gemini-3.5-transcribe"  # AI Studio's speech-to-text model
 # Inputs go through the page's file input (findings): what it accepts, and a size cap.
 IMAGE_INPUTS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".gif"}
-AUDIO_INPUTS = {".aac", ".aif", ".aiff", ".flac", ".m4a", ".mp3", ".mpeg", ".mpg", ".oga", ".ogg",
-                ".opus", ".wav"}
+AUDIO_INPUTS = {".aac", ".aif", ".aiff", ".flac", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpg", ".oga",
+                ".ogg", ".opus", ".wav", ".webm"}
 MAX_INPUT_BYTES = 100 * 1024 * 1024
 _AUDIO_HINT = 'see "aistudio models list --category audio"'
 _IMAGE_HINT = 'see "aistudio models list --category images"'
@@ -253,10 +253,14 @@ def _transcript_problems(transcript: Transcript) -> list[str]:
     if not transcript.text:
         raise ServerError("no speech was transcribed",
                           hint="check that the audio has speech in it")
+    warnings = []
+    if transcript.plain:
+        warnings.append("AI Studio replied with plain text, not a transcript (it may be a "
+                        "refusal); check it")
     if transcript.finish == _MAX_TOKENS:
-        return ["the transcript was cut off at the model's output limit; split the audio into "
-                "shorter files"]
-    return []
+        warnings.append("the transcript was cut off at the model's output limit; split the "
+                        "audio into shorter files")
+    return warnings
 
 
 def _segment(segment: Any) -> dict[str, Any]:

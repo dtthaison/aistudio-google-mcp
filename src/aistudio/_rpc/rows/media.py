@@ -107,6 +107,7 @@ class Transcript:
     text: str
     segments: tuple[Segment, ...]
     finish: int | None
+    plain: bool = False  # text only in slot 1: a chat-style reply, not a transcript
 
 
 def decode_transcript(response: Any) -> Transcript:
@@ -114,8 +115,10 @@ def decode_transcript(response: Any) -> Transcript:
     start, end], …]?]`` with times as ``[seconds?, nanos?]``. Never raises: the caller words the
     errors (empty, cut off, stopped)."""
     segments: list[Segment] = []
+    transcribed = False
     for part in _parts(response):
         slot = opt_index(part, _TRANSCRIPT_SLOT)
+        transcribed = transcribed or isinstance(slot, list)
         text = opt_index(slot, 0) if isinstance(slot, list) else opt_index(part, 1)
         if not isinstance(text, str) or not text.strip():
             continue
@@ -126,7 +129,7 @@ def decode_transcript(response: Any) -> Transcript:
                                 words[0][1] if words else None, words[-1][2] if words else None,
                                 words))
     return Transcript(" ".join(s.text for s in segments), tuple(segments),
-                      finish_reason(response))
+                      finish_reason(response), plain=bool(segments) and not transcribed)
 
 
 def _seconds(value: Any) -> float | None:

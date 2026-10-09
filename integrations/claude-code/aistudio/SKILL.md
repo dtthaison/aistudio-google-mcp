@@ -84,6 +84,9 @@ quotes and write each `'` as `'\''`.
   (AI Studio cannot combine them); pass brand or person names there, or they may be dropped.
   Without it, AI Studio's defaults return `segments` with speakers and word times. A long
   recording may need `--timeout`; a transcript cut off at the output limit comes with a warning.
+  Audio may be .mp3, .wav, .m4a, .mp4, .webm, .flac, .ogg/.opus, .aac or .aiff (.mp4/.webm: the
+  audio track). A warning that AI Studio "replied with plain text, not a transcript" means it may
+  have refused: show the user the text, do not present it as a transcript.
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
 - **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow

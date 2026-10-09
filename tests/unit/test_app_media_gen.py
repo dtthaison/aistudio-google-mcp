@@ -524,6 +524,30 @@ async def run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path, body
 
 
 @respx.mock
+async def test_mp4_and_webm_audio_are_accepted(logged_in_profile, make_client, fake_ui,
+                                               captured, tmp_path):
+    serve_catalog(captured)
+    for name in ("talk.mp4", "talk.webm"):
+        audio = tmp_path / name
+        audio.write_bytes(b"synthetic")
+        ui = transcribe_ui(fake_ui, live_body(("Xin chào.", "spk:0", WORDS)))
+        result = await transcribe(logged_in_profile(), audio,
+                                  client_factory=lambda p: make_client(),
+                                  browser=browser_with(ui, []))
+        assert result["text"] == "Xin chào."
+
+
+@respx.mock
+async def test_a_plain_text_reply_is_flagged(logged_in_profile, make_client, fake_ui, captured,
+                                             tmp_path):
+    serve_catalog(captured)
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  transcript_body("I can't transcribe this."))
+    assert result["text"] == "I can't transcribe this."
+    assert any("plain text, not a transcript" in w for w in result["warnings"])
+
+
+@respx.mock
 async def test_transcribe_returns_segments_and_a_timed_file(logged_in_profile, make_client,
                                                             fake_ui, captured, tmp_path):
     # Plan I review I1: with AI Studio's defaults the reply carries speakers and word times.
