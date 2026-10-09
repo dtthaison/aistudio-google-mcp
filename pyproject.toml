@@ -1,7 +1,7 @@
 [project]
 name = "aistudio-py"
 version = "0.1.0"
-description = "Unofficial CLI and MCP server that automates the Google AI Studio web app"
+description = "Unofficial CLI that automates the Google AI Studio web app and Google Flow"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
