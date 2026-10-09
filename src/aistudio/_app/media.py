@@ -400,13 +400,20 @@ def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None,
     expected = {"model": f"models/{model_id}", "text": text, "voice": voice, "files": files}
     actual = {
         "model": wire.opt_index(sent, 0),
-        # the text part; input files (Drive ids in slot 5) come before it
+        # the text part; input files come before it
         "text": next((p[1] for p in parts if isinstance(wire.opt_index(p, 1), str)), None),
         "voice": wire.opt_index(sent, 3, 15, 0, 0, 0),
-        "files": sum(1 for p in parts if isinstance(wire.opt_index(p, 5), list)),
+        "files": sum(1 for p in parts if _is_file(p)),
     }
     return [f"{k}: expected {_short(v)}, sent {_short(actual[k])}"
             for k, v in expected.items() if v is not None and actual[k] != v]
+
+
+def _is_file(part: Any) -> bool:
+    """A Drive file id sits in slot 5; a small file goes inline as [mime, base64] in slot 2."""
+    inline = wire.opt_index(part, 2)
+    return isinstance(wire.opt_index(part, 5), list) or (
+        isinstance(inline, list) and isinstance(wire.opt_index(inline, 0), str))
 
 
 def _confirm(sent: Any, *, model_id: str, text: str, voice: str | None) -> None:

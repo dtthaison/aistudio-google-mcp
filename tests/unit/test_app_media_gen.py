@@ -490,6 +490,17 @@ def test_a_request_with_images_is_checked_by_its_text_part_and_file_count():
         "files: expected 3, sent 2"]
 
 
+def test_an_inline_file_counts_as_sent():
+    # Live: a 5 s clip went inline ([mime, base64] in part slot 2), not as a Drive file id, and
+    # the transcript warned "files: expected 1, sent 0".
+    from aistudio._app.media import _mismatches
+
+    sent = ["models/m", [[[[None, None, ["audio/aiff", "UklGRg=="]]], "user"]]]
+    assert _mismatches(sent, model_id="m", text=None, voice=None, files=1) == []
+    assert _mismatches(sent, model_id="m", text=None, voice=None, files=2) == [
+        "files: expected 2, sent 1"]
+
+
 
 def live_body(*segments, finish=1):
     def chunk(parts, done=None):

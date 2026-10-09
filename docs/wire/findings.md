@@ -645,6 +645,10 @@ blocked; the RPCs that went through are free.
   - With the vocabulary "Yuri Handmade", the brand was transcribed correctly.
   - An edit of a red/white checkerboard ("make the red squares blue") came back blue and white,
     and otherwise unchanged.
+  - A run with the default switches (all on) sent the 270 KB clip **inline**: part
+    `[null, null, ["<mime>", "<base64>"]]` (slot 2), not a Drive file id in slot 5. The run
+    settings carried `[null, null, null, null, 1, 1]` in generation-config slot 31. aistudio's
+    request check counts both forms as a sent file.
 
 ## Session cookies go stale after browser runs (2026-10-09)
 
