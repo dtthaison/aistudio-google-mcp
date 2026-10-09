@@ -645,3 +645,14 @@ blocked; the RPCs that went through are free.
   - With the vocabulary "Yuri Handmade", the brand was transcribed correctly.
   - An edit of a red/white checkerboard ("make the red squares blue") came back blue and white,
     and otherwise unchanged.
+
+## Session cookies go stale after browser runs (2026-10-09)
+
+- HTTP commands read `storage_state.json`, which only `aistudio login` wrote. Chrome rotates the
+  Google session cookies while it runs, so after some browser runs the saved copy stopped
+  working: a GenerateContent call failed with "Request had invalid authentication credentials"
+  (`AUTH_ERROR`), although the Chrome profile was still signed in.
+- Fix: `open_browser` copies the context's storage state into `storage_state.json` when it
+  closes. It keeps the saved account (`email`, `authuser`), never replaces a saved session with
+  one missing `SID`/`SAPISID` (signed out), and ignores a failed save. No cookie values are
+  logged.

@@ -95,10 +95,16 @@ class Cdp:
 
 
 class Context:
-    def __init__(self):
+    def __init__(self, state=None):
         self.pages = ["page"]
         self.closed = False
         self.cdp = Cdp()
+        self.state = state
+
+    async def storage_state(self):
+        if self.state is None:
+            raise RuntimeError("no state")
+        return self.state
 
     async def new_cdp_session(self, page):
         return self.cdp
@@ -221,3 +227,41 @@ async def test_navigation_failures_are_browser_errors():
         await PlaywrightUi(Broken()).goto("https://aistudio.google.com/apps")
     assert "ERR_INTERNET_DISCONNECTED" in info.value.message
 
+
+
+
+def cookie(name, value):
+    return {"name": name, "value": value, "domain": ".google.com", "path": "/", "expires": -1,
+            "httpOnly": True, "secure": True, "sameSite": "Lax"}
+
+
+async def test_a_browser_run_saves_the_refreshed_session(logged_in_profile):
+    # Live: browser runs rotate Google's cookies, and the stored copy (used by plain HTTP
+    # commands) went stale hours after a login: "Request had invalid authentication credentials".
+    import json
+
+    profile = logged_in_profile(authuser=1)
+    profile.chrome_dir.mkdir(parents=True, exist_ok=True)
+    fresh = {"cookies": [cookie("SID", "new-sid"), cookie("SAPISID", "new-sapisid")],
+             "origins": []}
+    async with open_browser(profile, playwright_factory=lambda: Playwright(
+            Chromium(Context(state=fresh)))):
+        pass
+    saved = json.loads(profile.storage_state.read_text())
+    assert {c["name"]: c["value"] for c in saved["cookies"]}["SID"] == "new-sid"
+    assert saved["aistudio"]["authuser"] == 1  # the account stays as it was
+
+
+async def test_a_signed_out_browser_never_overwrites_the_session(logged_in_profile):
+    profile = logged_in_profile()
+    profile.chrome_dir.mkdir(parents=True, exist_ok=True)
+    before = profile.storage_state.read_text()
+    signed_out = {"cookies": [cookie("NID", "x")], "origins": []}
+    async with open_browser(profile, playwright_factory=lambda: Playwright(
+            Chromium(Context(state=signed_out)))):
+        pass
+    assert profile.storage_state.read_text() == before
+    async with open_browser(profile, playwright_factory=lambda: Playwright(
+            Chromium(Context(state=None)))):  # reading the state fails: the run still ends
+        pass
+    assert profile.storage_state.read_text() == before

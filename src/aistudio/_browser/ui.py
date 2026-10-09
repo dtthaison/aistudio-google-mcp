@@ -18,6 +18,13 @@ from typing import Any, Protocol, TypeVar
 from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
+from aistudio._auth.storage import (
+    account_info,
+    filter_state,
+    load_state,
+    missing_cookies,
+    save_state,
+)
 from aistudio.exceptions import AIStudioError, AuthError, BrowserError
 from aistudio.paths import Profile
 
@@ -491,6 +498,22 @@ async def _maximize(context: Any, page: Any) -> None:
         pass  # cosmetic
 
 
+async def _save_session(profile: Profile, context: Any) -> None:
+    """Google rotates the session cookies while Chrome runs; copy them to the storage state
+    that HTTP commands use, so those do not fall back to stale ones. Only a signed-in state
+    replaces a saved one, and a failed save never fails the run."""
+    try:
+        if not profile.storage_state.exists():
+            return
+        account = account_info(load_state(profile))
+        state = await context.storage_state()
+        if missing_cookies(filter_state(state)):
+            return
+        save_state(profile, state, account)
+    except Exception:
+        pass
+
+
 @contextlib.asynccontextmanager
 async def open_browser(
     profile: Profile,
@@ -520,6 +543,7 @@ async def open_browser(
                 await _maximize(context, page)
             yield PlaywrightUi(page)
         finally:
+            await _save_session(profile, context)
             try:
                 await context.close()
             except Exception:  # the user may have closed the window already
