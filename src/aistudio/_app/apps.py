@@ -137,7 +137,8 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
                      progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
     """Download a Build app's latest code into ``dest``, verified by SHA-256 (findings).
 
-    ``progress(done, total)`` is called after each file downloads and verifies.
+    ``progress(0, total)`` is called before the downloads, then ``progress(done, total)`` after
+    each file downloads and verifies.
     """
     app = pick(await client.apps.list(), lambda a: a.id, app_ref, noun="app",
                hint='see "aistudio app list"')
@@ -168,6 +169,8 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
             progress(len(done), len(targets))
         return data
 
+    if progress is not None:
+        progress(0, len(targets))  # the count first: a slow link never looks stuck at once
     contents = await asyncio.gather(*(fetch(rel, digest) for rel, digest in targets))
     try:
         for (rel, _), data in zip(targets, contents, strict=True):

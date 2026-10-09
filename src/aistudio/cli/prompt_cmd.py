@@ -21,7 +21,12 @@ def prompt() -> None:
 
 
 def _render_list(data: dict[str, Any]) -> None:
-    table = Table("id", "type", "modified", "title")
+    # Ids must never be cut (piped output is laid out at 80 columns): they are copied back
+    table = Table()
+    table.add_column("id", no_wrap=True,
+                     min_width=max((len(p["id"]) for p in data["prompts"]), default=2))
+    for name in ("type", "modified", "title"):
+        table.add_column(name)
     for p in data["prompts"]:
         table.add_row(*cells(p["id"], p["type"], p["modified"] or "", p["title"] or ""))
     stdout.print(table)
@@ -29,7 +34,7 @@ def _render_list(data: dict[str, Any]) -> None:
 
 @prompt.command("list")
 @click.option("--limit", type=click.IntRange(1, 1000), default=100, show_default=True,
-              help="How many prompts to request from AI Studio; --type filters within them.")
+              help="How many prompts to list; --type looks through up to 1000.")
 @click.option("--type", "prompt_type", type=click.Choice(["chat", "video"]),
               help="Only chat prompts or only Veo (video) prompts.")
 @json_option

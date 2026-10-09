@@ -20,7 +20,11 @@ def test_prompt_list_filters_by_type(logged_in_profile, captured):
     data = json.loads(result.stdout)
     assert data["count"] == 7
     assert {p["type"] for p in data["prompts"]} == {"video"}
-    assert route.calls.last.request.content == b"[50]"
+    # Deferred minor #10: --type looks through up to 1000, then keeps --limit of them
+    assert route.calls.last.request.content == b"[1000]"
+    result = CliRunner().invoke(cli, ["prompt", "list", "--type", "video", "--limit", "3",
+                                      "--json"])
+    assert json.loads(result.stdout)["count"] == 3
 
 
 @respx.mock
@@ -55,4 +59,19 @@ def test_prompt_list_limit_help_explains_paging():
     from aistudio.cli.main import cli
 
     res = CliRunner().invoke(cli, ["prompt", "list", "--help"])
-    assert "--type filters within them" in " ".join(res.output.split())
+    assert "--type looks through up to 1000" in " ".join(res.output.split())
+
+
+@respx.mock
+def test_prompt_list_ids_survive_a_pipe(logged_in_profile):
+    # Deferred minor #69: piped output is laid out at 80 columns and cut the id column.
+    from aistudio._rpc import wire
+
+    logged_in_profile()
+    long_id = "1KPVaNJbLQRQEs0-eBwZW3lHi1z2vWUwX"
+    rows = [[f"prompts/{long_id}", None, None, None, ["A rather long title " * 4]]]
+    respx.post(method_url("ListPrompts")).mock(
+        return_value=httpx.Response(200, text=wire.encode([rows])))
+    result = CliRunner().invoke(cli, ["prompt", "list"])
+    assert result.exit_code == 0, result.output
+    assert long_id in result.stdout

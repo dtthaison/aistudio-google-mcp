@@ -172,3 +172,23 @@ async def test_blank_ref_does_not_pick_the_only_app(logged_in_profile, make_clie
         await prompt_app(logged_in_profile(), "  ", "make it blue",
                          client_factory=lambda p: make_client(), browser=browser_recording(opened))
     assert opened == []
+
+
+@respx.mock
+async def test_build_notice_comes_after_the_checks(logged_in_profile, make_client, build_page):
+    # Deferred minor #20: "Building… 5-7 minutes" printed, then NOT_FOUND at once.
+    serve_apps()
+    build_page(BuildOutcome(APP, RUN, DONE))
+    order = []
+    opened = browser_recording(order)
+    with pytest.raises(NotFoundError):
+        await prompt_app(logged_in_profile(), "nosuch", "x", browser=opened,
+                         client_factory=lambda p: make_client(),
+                         on_start=lambda: order.append("notice"))
+    with pytest.raises(ValidationError):
+        await create_app(logged_in_profile(), " ", browser=opened,
+                         on_start=lambda: order.append("notice"))
+    assert order == []
+    await create_app(logged_in_profile(), "a counter", client_factory=lambda p: make_client(),
+                     browser=opened, now=clock(), on_start=lambda: order.append("notice"))
+    assert order == ["notice", "minimized"]

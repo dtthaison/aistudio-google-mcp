@@ -25,12 +25,15 @@ async def create_app(
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], float] = time.monotonic,
+    on_start: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not idea.strip():
         raise ValidationError("nothing to build: the idea is empty")
     started = now()
     async with client_factory(profile) as client:
         await client.apps.list(1)  # fails fast with AUTH_ERROR before any browser opens
+    if on_start:  # after every check: the notice promises a build
+        on_start()
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         outcome = await BuildPage(ui).create(idea, timeout_s=timeout_s)
     return await _result(profile, outcome, started, now, client_factory)
@@ -46,6 +49,7 @@ async def prompt_app(
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], float] = time.monotonic,
+    on_start: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not text.strip():
         raise ValidationError("nothing to change: the prompt is empty")
@@ -59,6 +63,8 @@ async def prompt_app(
             "aistudio can only update Build-store apps",
             hint="open it at https://aistudio.google.com/apps",
         )
+    if on_start:
+        on_start()
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         outcome = await BuildPage(ui).prompt(app.id, text, timeout_s=timeout_s)
     return await _result(profile, outcome, started, now, client_factory)

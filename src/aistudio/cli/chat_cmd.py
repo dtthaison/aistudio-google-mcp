@@ -16,6 +16,8 @@ from aistudio.cli.output import emit, json_option, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
 
+COUNT_MAX_BYTES = 50 * 1024 * 1024
+
 
 @click.command("count-tokens")
 @click.argument("text", required=False)
@@ -29,8 +31,9 @@ def count_tokens(state: CliState, text: str | None, model: str, prompt_file: Pat
                  json_output: bool) -> None:
     """Count the tokens TEXT uses with a model."""
     state.require_http()
-    # Counting large documents is the point here: no size cap.
-    content = read_text(text, prompt_file, arg="TEXT", option="--prompt-file", max_bytes=None)
+    # Counting large documents is the point here, so the cap is far above any model's context
+    content = read_text(text, prompt_file, arg="TEXT", option="--prompt-file",
+                        max_bytes=COUNT_MAX_BYTES)
     profile = state.profile()
 
     async def run() -> dict[str, Any]:

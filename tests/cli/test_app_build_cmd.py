@@ -12,6 +12,8 @@ RESULT = {"app_id": "a1", "run_id": "r1", "url": "https://aistudio.google.com/ap
 def fake(result, calls):
     async def run(profile, *args, **kwargs):
         calls.append((profile.name, args, kwargs))
+        if kwargs.get("on_start"):  # the real use case calls it once its checks pass
+            kwargs["on_start"]()
         return result
 
     return run
@@ -25,7 +27,21 @@ def test_app_create(logged_in_profile, monkeypatch):
                                    "--visible", "--json"])
     assert res.exit_code == 0, res.output
     assert json.loads(res.stdout) == RESULT
-    assert calls == [("default", ("a pomodoro timer",), {"timeout_s": 300, "visible": True})]
+    assert calls == [("default", ("a pomodoro timer",), {"timeout_s": 300, "visible": True,
+                                                          "on_start": calls[0][2]["on_start"]})]
+
+
+def test_the_build_notice_waits_for_the_checks(logged_in_profile, monkeypatch):
+    from aistudio.exceptions import NotFoundError
+
+    logged_in_profile()
+
+    async def refused(profile, *args, on_start=None, **kwargs):
+        raise NotFoundError("no app matches 'nosuch'")
+
+    monkeypatch.setattr("aistudio.cli.app_cmd.prompt_app", refused)
+    res = CliRunner().invoke(cli, ["app", "prompt", "nosuch", "x"])
+    assert res.exit_code == 1 and "Building in" not in res.stderr
 
 
 def test_app_prompt_human_output(logged_in_profile, monkeypatch):

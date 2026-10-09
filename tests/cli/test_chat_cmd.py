@@ -73,3 +73,16 @@ def test_count_tokens_accepts_a_large_prompt_file(logged_in_profile, captured, t
     big.write_text("word " * 300_000)  # 1.5 MB
     res = CliRunner().invoke(cli, ["count-tokens", "--prompt-file", str(big), "--json"])
     assert res.exit_code == 0, res.output
+
+
+@respx.mock  # nothing may be sent, even when the check is missing
+def test_count_tokens_refuses_huge_files(logged_in_profile, tmp_path):
+    # Deferred minor #6: no cap meant reading, encoding and (on a write timeout) re-sending any
+    # size. 50 MB is far above any model's context.
+    logged_in_profile()
+    huge = tmp_path / "huge.log"
+    with huge.open("wb") as fh:
+        fh.truncate(50 * 1024 * 1024 + 1)  # sparse
+    res = CliRunner().invoke(cli, ["count-tokens", "--prompt-file", str(huge), "--json"])
+    assert res.exit_code == 1, res.output
+    assert "larger than 50 MB" in json.loads(res.stdout)["message"]

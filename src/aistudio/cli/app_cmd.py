@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import cells, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
+
+_now = time.monotonic
+PROGRESS_EVERY_S = 5.0  # export progress also prints at least this often
 
 
 def _run(state: CliState, use_case: Callable[[AIStudioClient], Awaitable[dict[str, Any]]]
@@ -163,11 +167,15 @@ def _render_build(d: dict[str, Any]) -> None:
 def _build(state: CliState, run: Callable[..., Awaitable[dict[str, Any]]], *args: Any,
            timeout: int, visible: bool, json_output: bool) -> None:
     state.require_browser()
-    if not json_output:
-        window = "visible" if visible else "minimized"
-        stderr.print(f"Building in a {window} Chrome window; this usually takes 5-7 minutes…",
-                     markup=False)
-    result = asyncio.run(run(state.profile(), *args, timeout_s=timeout, visible=visible))
+
+    def notice() -> None:
+        if not json_output:
+            window = "visible" if visible else "minimized"
+            stderr.print(f"Building in a {window} Chrome window; this usually takes 5-7 "
+                         "minutes…", markup=False)
+
+    result = asyncio.run(run(state.profile(), *args, timeout_s=timeout, visible=visible,
+                             on_start=notice))
     emit(result, json_output=json_output, render=_render_build)
     if result["status"] != "done":
         raise SystemExit(2)
@@ -212,9 +220,18 @@ def app_prompt(state: CliState, app_id: str, text: str, timeout: int, visible: b
 @handle_errors
 def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_output: bool) -> None:
     """Download an app's latest code into DEST (verified; no browser)."""
+    last: list[float | None] = [None]
+
     def progress(done: int, total: int) -> None:
-        if done == total or done % 10 == 0:
+        now = _now()
+        last[0] = now if last[0] is None else last[0]
+        if done == 0:
+            stderr.print(f"Downloading {total} files…", markup=False)
+        elif done == total or done % 10 == 0 or now - last[0] >= PROGRESS_EVERY_S:
             stderr.print(f"Downloaded {done}/{total} files", markup=False)
+        else:
+            return
+        last[0] = now
 
     data = _run(state, lambda c: export_app(c, app_id, dest, force=force,
                                             progress=None if json_output else progress))

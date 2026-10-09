@@ -41,3 +41,21 @@ def test_app_export_shows_progress_only_for_people(logged_in_profile, monkeypatc
     assert "Downloaded 3/12" not in human.stderr
     js = CliRunner().invoke(cli, ["app", "export", "a1", str(tmp_path / "p"), "--json"])
     assert js.stderr == ""
+
+
+def test_app_export_announces_and_keeps_reporting(logged_in_profile, monkeypatch, tmp_path):
+    # Deferred minor #24: a small app on a slow link printed nothing for minutes.
+    logged_in_profile()
+    ticks = iter([0.0, 1.0, 7.0, 8.0, 20.0])
+    monkeypatch.setattr("aistudio.cli.app_cmd._now", lambda: next(ticks))
+
+    async def fake(client, app_ref, dest, *, force=False, progress=None):
+        for done in range(0, 5):
+            progress(done, 4)
+        return {"app_id": "a1", "title": "T", "dir": str(dest), "count": 4, "bytes": 1,
+                "files": []}
+
+    monkeypatch.setattr("aistudio.cli.app_cmd.export_app", fake)
+    res = CliRunner().invoke(cli, ["app", "export", "a1", str(tmp_path / "o")])
+    lines = res.stderr.splitlines()
+    assert lines == ["Downloading 4 files…", "Downloaded 2/4 files", "Downloaded 4/4 files"]

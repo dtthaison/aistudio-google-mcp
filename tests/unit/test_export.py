@@ -182,4 +182,5 @@ async def test_export_reports_progress_per_verified_file(make_client, tmp_path):
     async with make_client() as client:
         await export_app(client, "d6d4", tmp_path / "out",
                          progress=lambda done, total: seen.append((done, total)))
-    assert sorted(seen) == [(1, 2), (2, 2)]
+    # Deferred minor #24: the count comes first, so a slow export never looks stuck at once
+    assert seen[0] == (0, 2) and sorted(seen[1:]) == [(1, 2), (2, 2)]
