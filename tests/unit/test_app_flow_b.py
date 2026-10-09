@@ -122,6 +122,10 @@ class FakePage:
         self.calls.append(("extend_label", workflow_id))
         return self.label
 
+    async def extend_label_in_scene(self, pid, scene_id, last_prompt):
+        self.calls.append(("extend_label_in_scene", scene_id, last_prompt))
+        return self.label
+
     async def extend(self, prompt, *, timeout_s):
         self.calls.append(("extend", prompt))
         self.started = True

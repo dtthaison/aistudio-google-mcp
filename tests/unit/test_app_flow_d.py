@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from aistudio._app.flow import (
@@ -718,3 +720,26 @@ async def test_a_failed_credit_read_does_not_block_edit_or_body(logged_in_profil
     kw, _, _ = harness(credits=(BrowserError("no account menu"), 1010))
     result = await flow_character_body(profile, "c1", "full body", out=tmp_path / "b.png", **kw)
     assert result["status"] == "done"
+
+
+EXT = "9a1b2c3d-1111-4222-8333-944455556666"  # an extension: no workflow of its own
+
+
+async def test_an_extension_is_extended_through_its_scene(logged_in_profile, tmp_path):
+    # Plan L: "flow extend" on an extension failed with "no visible [contenteditable=true]".
+    profile = profile_with_project(logged_in_profile)
+    ext = dataclasses.replace(listed(media(EXT)), prompt="the bunny is finished")
+    chain = FlowScene("s7", "Untitled Scene", 300,
+                      [SceneClip(VID, "apple", 0, 8), SceneClip(EXT, "bunny", 0, 8)])
+    contents = ProjectContents(FULL.titles, [*FULL.media, ext], FULL.workflows, CHARS,
+                               [SCENE, chain])
+    kw, pages, _ = harness(contents=contents)
+    result = await flow_extend(profile, EXT, "it waves", max_credits=10,
+                               out=tmp_path / "e.mp4", **kw)
+    assert ("extend_label_in_scene", "s7", "the bunny is finished") in pages[0].calls
+    assert not any(c[0] == "extend_label" for c in pages[0].calls)
+    assert result["status"] == "done"
+    # A listed clip keeps its own editor, even as the last clip of a scene (VID ends SCENE)
+    kw, pages, _ = harness(contents=contents)
+    await flow_extend(profile, VID, "it rolls", max_credits=10, out=tmp_path / "f.mp4", **kw)
+    assert ("extend_label", "w1") in pages[0].calls

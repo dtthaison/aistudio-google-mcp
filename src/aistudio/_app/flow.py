@@ -28,7 +28,7 @@ from aistudio._flow.models import (
     model_by_label,
 )
 from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
-from aistudio._flow.rows import FlowCharacter, ProjectContents, parse_plan
+from aistudio._flow.rows import FlowCharacter, FlowScene, ProjectContents, parse_plan
 from aistudio._fs import read_json, write_private_json
 from aistudio._media.save import check_folder, free_name, write_file
 from aistudio.exceptions import (
@@ -666,8 +666,13 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
                                 hint='see "aistudio flow media"')
         if _media_kind(source) != "video" or source.status != 3:
             raise ValidationError(f"media {media_id} is not a finished video")
-        workflow_id = await _workflow_of(page, contents, media_id)
-        label = await page.extend_label(project_id, workflow_id)  # opens that exact clip
+        holder = _scene_ending_with(contents, media_id)
+        if media_id not in contents.workflows and holder is not None:
+            # an extension: it has no editor of its own, so extend its scene's last clip (live)
+            label = await page.extend_label_in_scene(project_id, holder.id, source.prompt)
+        else:
+            workflow_id = await _workflow_of(page, contents, media_id)
+            label = await page.extend_label(project_id, workflow_id)  # opens that exact clip
         price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
         try:
             outcome = await page.extend(prompt, timeout_s=timeout_s)
@@ -1106,6 +1111,12 @@ def _stitched(data: bytes, args: list[list[Any]], *, out: Path | None, overwrite
             "clips": [{"media_id": a[0], "start": (a[2] or [0])[0], "end": a[3][0]}
                       for a in args],
             "project": project_id, **({"warnings": warnings} if warnings else {})}
+
+
+def _scene_ending_with(contents: ProjectContents, media_id: str) -> FlowScene | None:
+    """The scene whose last clip is this media, if any."""
+    return next((s for s in contents.scenes if s.clips and s.clips[-1].media_id == media_id),
+                None)
 
 
 async def _scene_holding(page: Any, project_id: str, media_ids: list[str]) -> str | None:

@@ -158,6 +158,9 @@ class FakeUi:
     async def labels(self, role, name):
         return self._answer(self._labels, (role, self._key(name)), [])
 
+    async def click_selector(self, selector):
+        self.ops.append(("click_selector", selector))
+
     async def set_files(self, selector, paths, types=None):
         self.ops.append(("set_files", selector, tuple(paths))
                         + ((tuple(sorted(types.items())),) if types else ()))

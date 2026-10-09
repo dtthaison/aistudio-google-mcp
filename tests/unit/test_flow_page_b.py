@@ -2,7 +2,13 @@
 import pytest
 
 from aistudio._browser.ui import CapturedResponse
-from aistudio._flow.page import EDITOR_ANY, EDITOR_LAST, FlowPage
+from aistudio._flow.page import (
+    EDITOR_ANY,
+    EDITOR_LAST,
+    LAST_CLIP,
+    LAST_CLIP_SELECTED,
+    FlowPage,
+)
 from tests.unit.test_flow_page import PID, Clock, poll
 from tests.unit.test_flow_rows import CREATED, MEDIA, batch, record
 
@@ -328,3 +334,47 @@ async def test_media_details_returns_the_record_asked_for(fake_ui):
     ui = fake_ui({"as29s": [poll("as29s", [[record(media_id="other"), record(media_id=MEDIA)]])]})
     media = await FlowPage(ui).media_details(MEDIA)
     assert media.media_id == MEDIA
+
+
+LAST_PROMPT = "Satisfying fast time-lapse: the same hands crochet the same pastel pink yarn"
+
+
+def scene_ui(fake_ui, *, scene="s7", missing=(), shown=True):
+    return fake_ui(inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
+                                                    "Lite)"]},
+                   url=f"https://flow.google.com/project/{PID}/scene/{scene}", missing=missing,
+                   # the side panel shows the selected clip's prompt, cut short (live)
+                   texts={"body": ["Untitled Scene\n" + (LAST_PROMPT[:50] + "…" if shown
+                                                           else "Vertical 9:16 first shot…")]})
+
+
+async def test_a_scene_extension_selects_the_last_clip_first(fake_ui):
+    # Live (findings, "Extending an extension"): an extension has no editor of its own; its scene
+    # opens with the FIRST clip selected, and Extend continues the selected clip.
+    ui = scene_ui(fake_ui)
+    assert await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT) == "Veo 3.1 - Lite"
+    steps = [op[:2] for op in ui.ops if op[0] in ("goto", "click_selector", "wait_for", "dispatch")]
+    assert steps == [("goto", f"https://flow.google.com/project/{PID}/scene/s7"),
+                     ("wait_for", EDITOR_ANY), ("click_selector", LAST_CLIP),
+                     ("wait_for", LAST_CLIP_SELECTED), ("dispatch", "button")]
+
+
+async def test_a_scene_extension_is_refused_unless_the_last_clip_is_selected(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    for ui in (scene_ui(fake_ui, missing={LAST_CLIP_SELECTED}), scene_ui(fake_ui, shown=False),
+               scene_ui(fake_ui, scene="other")):
+        with pytest.raises(BrowserError) as info:
+            await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT)
+        assert "nothing was spent" in info.value.message
+        assert not any(op[0] == "dispatch" for op in ui.ops)  # Add clip never pressed
+
+
+async def test_a_clip_without_an_editor_says_what_to_do(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(url=f"https://flow.google.com/project/{PID}/edit/w9", missing={EDITOR_ANY})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).extend_label(PID, "w9")
+    assert "last clip of its scene" in info.value.message
+    assert "nothing was spent" in info.value.message

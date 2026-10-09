@@ -115,6 +115,8 @@ class Ui(Protocol):
     async def set_files(self, selector: str, paths: list[str],
                         types: Mapping[str, str] | None = None) -> None: ...
 
+    async def click_selector(self, selector: str) -> None: ...
+
     async def hover_text(self, text: str) -> None: ...
 
     async def click_text(self, text: str) -> None: ...
@@ -402,6 +404,14 @@ class PlaywrightUi:
         locator = self._role(role, name, exact).first
         await self._act(role, name, lambda: locator.dispatch_event("click",
                                                                    timeout=CONTROL_TIMEOUT_MS))
+
+    async def click_selector(self, selector: str) -> None:
+        """Click the first element matching a CSS selector, for controls with no role or name
+        (Flow's timeline clips); Playwright scrolls it into view first."""
+        async def run() -> None:
+            await self._page.locator(selector).first.click(timeout=CONTROL_TIMEOUT_MS)
+
+        await self._act("element", selector, run)
 
     async def set_files(self, selector: str, paths: list[str],
                         types: Mapping[str, str] | None = None) -> None:

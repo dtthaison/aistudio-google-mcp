@@ -124,6 +124,8 @@ quotes and write each `'` as `'\''`.
   re-run. A character's image id is not an ingredient: use `--character` instead.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   `scene_id` can be null when Flow had not listed the scene yet: find it with `flow scene list`.
+  To make it longer, run `flow extend` again on the newest clip (the scene's last clip). Each
+  extension adds about 7 s.
   Stitch trims are whole seconds (`<id>@2-5`).
 - `flow edit` costs 20 credits with no quote: ask the user before passing `--max-credits 20`.
   Only 8-second Veo 3.1 Lite clips have a measured price. Flow always extends with Veo 3.1 Lite

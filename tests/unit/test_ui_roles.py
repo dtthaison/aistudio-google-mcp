@@ -278,3 +278,12 @@ async def test_set_files_reaches_the_input():
     page.locator = lambda selector: box
     await PlaywrightUi(page).set_files("input[type=file]", ["/a.png", "/b.png"])
     assert box.files == ["/a.png", "/b.png"]
+
+
+async def test_click_selector_clicks_the_first_match():
+    # Plan L: Flow's timeline clips are plain elements (no role or name), found by class.
+    clip, other = El(), El()
+    page = Page({})
+    page.locator = lambda selector: Loc([clip, other] if selector == ".clip.is-last" else [])
+    await PlaywrightUi(page).click_selector(".clip.is-last")
+    assert clip.actions == ["click"] and other.actions == []

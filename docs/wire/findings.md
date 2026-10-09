@@ -740,6 +740,10 @@ blocked; the RPCs that went through are free.
 - With the last clip selected, the normal `FlowPage.extend` steps ran (10 credits). The scene
   now joins three clips, and `flow scene download` gives one 23 s file (the clips are 8 s, 8 s
   and 7 s).
-- To do in the CLI: when the clip has no listed workflow and its scene is known, extend through
-  the scene page with the last clip selected. Verify the selection by the side panel's prompt
-  before Start.
+- Done in the CLI (plan L, 2026-10-10).
+  - A clip with no listed workflow that is the last clip of a scene is extended through the
+    scene page. aistudio clicks `.clip.is-last .clip-body`, requires `.clip.is-last.selected`
+    and the clip's prompt in the panel, then reads "Extend (…)".
+  - Any other clip without an editor gets "extend the last clip of its scene instead".
+  - Live (free, no `--max-credits`): the newest clip went through the scene path and stopped at
+    OVER_BUDGET "costs 10 credits". The middle clip got the new message.
