@@ -471,3 +471,16 @@ async def test_a_refused_option_gets_an_accurate_hint(logged_in_profile, make_cl
         await transcribe(logged_in_profile(), audio, client_factory=lambda p: make_client(),
                          browser=browser_with(ui, []))
     assert "paid tier" not in (info.value.hint or "")
+
+
+def test_a_request_with_images_is_checked_by_its_text_part_and_file_count():
+    # Live: the edit warned "sent None" because the first part is the image, not the text.
+    from aistudio._app.media import _mismatches
+
+    sent = ["models/m", [[[[None, None, None, None, None, ["drive1"]],
+                           [None, None, None, None, None, ["drive2"]],
+                           [None, "make it blue"]], "user"]]]
+    assert _mismatches(sent, model_id="m", text="make it blue", voice=None) == []
+    assert _mismatches(sent, model_id="m", text="make it blue", voice=None, files=2) == []
+    assert _mismatches(sent, model_id="m", text="make it blue", voice=None, files=3) == [
+        "files: expected 3, sent 2"]

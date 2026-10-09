@@ -269,7 +269,8 @@ async def _generate_media(
     if captured.status >= 400:
         raise _refused(captured.status, captured.text, name)
     # The run is paid for by now: a mismatch is reported, never a reason to drop the result.
-    wrong = _mismatches(_sent(captured.request_body), model_id=model_id, text=prompt, voice=None)
+    wrong = _mismatches(_sent(captured.request_body), model_id=model_id, text=prompt, voice=None,
+                        files=len(inputs) if inputs else None)
     warnings = ([f"the request AI Studio sent did not match ({'; '.join(wrong)}); the result was "
                  "kept, check it"] if wrong else [])
     try:
@@ -337,12 +338,17 @@ def _short(value: Any) -> str:
     return text if len(text) <= 80 else text[:77] + "…"
 
 
-def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None) -> list[str]:
-    expected = {"model": f"models/{model_id}", "text": text, "voice": voice}
+def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None,
+                files: int | None = None) -> list[str]:
+    parts = wire.opt_index(sent, 1, 0, 0)
+    parts = parts if isinstance(parts, list) else []
+    expected = {"model": f"models/{model_id}", "text": text, "voice": voice, "files": files}
     actual = {
         "model": wire.opt_index(sent, 0),
-        "text": wire.opt_index(sent, 1, 0, 0, 0, 1),
+        # the text part; input files (Drive ids in slot 5) come before it
+        "text": next((p[1] for p in parts if isinstance(wire.opt_index(p, 1), str)), None),
         "voice": wire.opt_index(sent, 3, 15, 0, 0, 0),
+        "files": sum(1 for p in parts if isinstance(wire.opt_index(p, 5), list)),
     }
     return [f"{k}: expected {_short(v)}, sent {_short(actual[k])}"
             for k, v in expected.items() if v is not None and actual[k] != v]
