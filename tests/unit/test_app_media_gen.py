@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import respx
 
-from aistudio._app.media import generate_image, generate_music
+from aistudio._app.media import generate_image, generate_music, transcribe
 from aistudio._browser.media_pages import IMAGE_PROMPT, MUSIC_PROMPT
 from aistudio._browser.ui import CapturedResponse
 from aistudio.exceptions import BotGuardError, ValidationError
@@ -331,3 +331,98 @@ async def test_an_unknown_model_fails_before_the_browser(logged_in_profile, make
                   opened, make_client, model="no-such-model", out=tmp_path / "a.jpg",
                   on_start=lambda: started.append(1))
     assert opened == [] and started == []
+
+
+
+def png_file(tmp_path, name="in.png"):
+    path = tmp_path / name
+    path.write_bytes(b"\x89PNG\r\n\x1a\n synthetic")
+    return path
+
+
+@respx.mock
+async def test_generate_image_with_inputs(logged_in_profile, make_client, fake_ui, captured,
+                                          tmp_path):
+    # Plan I: each --image is attached (and shows its chip) before the prompt runs.
+    from aistudio._browser.media_pages import FILE_INPUT, REMOVE_MEDIA
+
+    serve_catalog(captured)
+    raw = captured("GenerateContent", 4).raw
+    ui = fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200,
+                                                       raw["response"]["body"],
+                                                       raw["request"]["body"])]},
+                 labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA] * 2]})
+    first, second = png_file(tmp_path, "a.png"), png_file(tmp_path, "b.png")
+    result = await run(generate_image, logged_in_profile(), "Make the red squares blue.", ui, [],
+                       make_client, images=[first, second], out=tmp_path / "x.jpg")
+    names = [op[0] for op in ui.ops]
+    assert ("set_files", FILE_INPUT, (str(first), str(second))) in ui.ops
+    assert names.index("set_files") < names.index("fill")
+    assert result["files"][0]["path"] == str(tmp_path / "x.jpg")
+
+
+@respx.mock
+async def test_image_inputs_are_checked_before_the_browser(logged_in_profile, make_client,
+                                                          fake_ui, captured, tmp_path):
+    serve_catalog(captured)
+    text = tmp_path / "notes.txt"
+    text.write_text("x")
+    for bad in (tmp_path / "missing.png", text):
+        opened = []
+        with pytest.raises(ValidationError):
+            await run(generate_image, logged_in_profile(), "x", fake_ui(), opened, make_client,
+                      images=[bad], out=tmp_path / "y.jpg")
+        assert opened == []
+
+
+def transcript_body(*texts, finish=1):
+    def chunk(parts, done=None):
+        candidate = [[parts, "model"]] + ([done] if done is not None else [])
+        return [[candidate], None, [9, 1, 10], None, None, None, None, "v1_id"]
+    return json.dumps([[chunk([[None, t]]) for t in texts] + [chunk([[None, ""]], finish)]])
+
+
+def transcribe_ui(fake_ui, body):
+    from aistudio._browser.media_pages import REMOVE_MEDIA
+
+    return fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200, body, "[]")]},
+                   labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]},
+                   checks={("switch", "Word timestamps", 0): [False]})
+
+
+@respx.mock
+async def test_transcribe_writes_text(logged_in_profile, make_client, fake_ui, captured,
+                                      tmp_path):
+    serve_catalog(captured)
+    audio = tmp_path / "talk.wav"
+    audio.write_bytes(b"RIFF0000WAVEfmt synthetic")
+    ui, opened = transcribe_ui(fake_ui, transcript_body("Xin chào ", "Yuri Handmade.")), []
+    result = await transcribe(logged_in_profile(), audio, timestamps=True,
+                              client_factory=lambda p: make_client(),
+                              browser=browser_with(ui, opened), out=tmp_path / "t.txt")
+    assert result["text"] == "Xin chào Yuri Handmade."
+    assert result["model"] == "gemini-3.5-transcribe"
+    assert (tmp_path / "t.txt").read_text(encoding="utf-8") == "Xin chào Yuri Handmade."
+    assert ("activate", "switch", "Word timestamps", 0) in ui.ops and opened == ["minimized"]
+
+
+@respx.mock
+async def test_transcribe_checks_before_the_browser(logged_in_profile, make_client, fake_ui,
+                                                    captured, tmp_path):
+    from aistudio.exceptions import AIStudioError
+
+    serve_catalog(captured)
+    audio = tmp_path / "talk.wav"
+    audio.write_bytes(b"RIFF")
+    existing = tmp_path / "t.txt"
+    existing.write_text("old")
+    cases = [dict(audio=tmp_path / "missing.wav"), dict(audio=tmp_path / "talk.txt"),
+             dict(audio=audio, out=existing), dict(audio=audio, model="gemini-3.8-flash-tts")]
+    (tmp_path / "talk.txt").write_text("x")
+    for case in cases:
+        opened = []
+        with pytest.raises(AIStudioError):
+            await transcribe(logged_in_profile(), case.pop("audio"),
+                             client_factory=lambda p: make_client(),
+                             browser=browser_with(fake_ui(), opened), **case)
+        assert opened == []

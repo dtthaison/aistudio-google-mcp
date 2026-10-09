@@ -13,10 +13,12 @@ from aistudio._app.media import (
     DEFAULT_IMAGE_MODEL,
     DEFAULT_MUSIC_MODEL,
     DEFAULT_SPEECH_MODEL,
+    DEFAULT_TRANSCRIBE_MODEL,
     generate_image,
     generate_music,
     generate_speech,
     list_voices,
+    transcribe,
 )
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.inputs import read_text
@@ -96,15 +98,23 @@ def _media_command(name: str, category: str, default_model: str, help_text: str,
     @click.pass_obj
     @handle_errors
     def command(state: CliState, prompt: str | None, prompt_file: Path | None, model: str,
-                out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
+                out: Path | None, force: bool, visible: bool, json_output: bool,
+                **extra: Any) -> None:
         state.require_browser()
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
         run = generate_image if name == "image" else generate_music
+        inputs = {"images": list(extra["images"])} if extra.get("images") else {}
         result = asyncio.run(run(state.profile(), content, model=model, out=out,
                                  overwrite=force, visible=visible,
-                                 on_start=_notice_for(name, visible, json_output)))
+                                 on_start=_notice_for(name, visible, json_output), **inputs))
         emit(result, json_output=json_output, render=_render_media)
 
+    if name == "image":  # an input image to edit or combine (uploaded to your Drive by AI Studio)
+        command = click.option(
+            "--image", "images", multiple=True,
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="An image to edit or combine (repeatable). AI Studio uploads it to your "
+                 "Google Drive.")(command)
     return command
 
 
@@ -135,3 +145,41 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
     emit(result, json_output=json_output,
          render=lambda d: stdout.print(", ".join(d["voices"]) or "No voices found",
                                        markup=False))
+
+
+@click.command("transcribe")
+@click.argument("audio", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-m", "--model", default=DEFAULT_TRANSCRIBE_MODEL, show_default=True,
+              help='A transcription model (see "aistudio models list --category audio").')
+@click.option("--timestamps/--no-timestamps", default=None,
+              help="Word timestamps (default: AI Studio's own setting).")
+@click.option("--diarize/--no-diarize", default=None,
+              help="Speaker labels (default: AI Studio's own setting).")
+@click.option("--smart/--no-smart", default=None,
+              help="Smart transcription (default: AI Studio's own setting).")
+@click.option("--vocabulary", default="", help="Words to expect, e.g. names or brands.")
+@click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path),
+              help="Also write the text to this file.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
+@json_option
+@click.pass_obj
+@handle_errors
+def transcribe_cmd(state: CliState, audio: Path, model: str, timestamps: bool | None,
+                   diarize: bool | None, smart: bool | None, vocabulary: str, out: Path | None,
+                   force: bool, visible: bool, json_output: bool) -> None:
+    """Turn the speech in AUDIO into text (uses quota; AI Studio uploads the audio to your
+    Google Drive)."""
+    state.require_browser()
+    result = asyncio.run(transcribe(state.profile(), audio, model=model, timestamps=timestamps,
+                                    diarize=diarize, smart=smart, vocabulary=vocabulary, out=out,
+                                    overwrite=force, visible=visible,
+                                    on_start=_notice_for("transcription", visible,
+                                                         json_output)))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(data["text"], markup=False)
+        if data.get("file"):
+            stderr.print(f"Wrote {data['file']['path']}", markup=False)
+
+    emit(result, json_output=json_output, render=render)

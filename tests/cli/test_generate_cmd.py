@@ -168,3 +168,38 @@ def test_no_notice_when_validation_fails(logged_in_profile, monkeypatch):
     res = CliRunner().invoke(cli, ["generate", "image", "x", "-m", "nope"])
     assert res.exit_code == 1
     assert "Generating" not in res.stderr
+
+
+def test_generate_image_passes_input_images(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.generate_cmd.generate_image",
+                        fake({"files": [], "model": "m"}, calls))
+    first, second = tmp_path / "a.png", tmp_path / "b.png"
+    first.write_bytes(b"x")
+    second.write_bytes(b"y")
+    res = CliRunner().invoke(cli, ["generate", "image", "make it blue", "--image", str(first),
+                                   "--image", str(second), "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[0][2]["images"] == [first, second]
+
+
+def test_transcribe_command(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    result = {"text": "Xin chào Yuri Handmade.", "model": "gemini-3.5-transcribe",
+              "audio": "talk.wav"}
+    monkeypatch.setattr("aistudio.cli.generate_cmd.transcribe", fake(result, calls))
+    audio, out = tmp_path / "talk.wav", tmp_path / "t.txt"
+    audio.write_bytes(b"RIFF")
+    res = CliRunner().invoke(cli, ["transcribe", str(audio), "--timestamps", "--diarize",
+                                   "--no-smart", "--vocabulary", "Yuri Handmade", "-o", str(out),
+                                   "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[0][1] == (audio,)
+    assert calls[0][2] == {"model": "gemini-3.5-transcribe", "timestamps": True, "diarize": True,
+                           "smart": False, "vocabulary": "Yuri Handmade", "out": out,
+                           "overwrite": False, "visible": False}
+    res = CliRunner().invoke(cli, ["transcribe", str(audio)])
+    assert "Xin chào Yuri Handmade." in res.stdout
+    assert calls[1][2]["timestamps"] is None  # the page's own setting stays when not asked

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from aistudio._app.models import catalog_with, normalize_model_id
-from aistudio._browser.media_pages import ImagePage, MusicPage
+from aistudio._browser.media_pages import ImagePage, MusicPage, TranscribePage
 from aistudio._browser.speech_page import SpeechPage
 from aistudio._browser.ui import open_browser
 from aistudio._media.save import check_folder as _check_folder
@@ -16,7 +16,7 @@ from aistudio._media.save import free_name as _free_name
 from aistudio._media.save import write_file as _write
 from aistudio._media.wav import pcm_to_wav
 from aistudio._rpc import wire
-from aistudio._rpc.rows.media import decode_media, extension_for
+from aistudio._rpc.rows.media import decode_media, decode_text, extension_for
 from aistudio._rpc.rows.speech import decode_speech
 from aistudio._transport.http import error_for_response
 from aistudio.client import AIStudioClient
@@ -34,12 +34,18 @@ from aistudio.paths import Profile
 DEFAULT_SPEECH_MODEL = "gemini-3.8-flash-tts"
 DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-lite-image"  # cheapest image model, verified live
 DEFAULT_MUSIC_MODEL = "lyria-3-clip-preview"  # cheapest Lyria model, verified live
+DEFAULT_TRANSCRIBE_MODEL = "gemini-3.5-transcribe"  # AI Studio's speech-to-text model
+# Inputs go through the page's file input (findings): what it accepts, and a size cap.
+IMAGE_INPUTS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".gif"}
+AUDIO_INPUTS = {".aac", ".aif", ".aiff", ".flac", ".m4a", ".mp3", ".mpeg", ".mpg", ".oga", ".ogg",
+                ".opus", ".wav"}
+MAX_INPUT_BYTES = 100 * 1024 * 1024
 _AUDIO_HINT = 'see "aistudio models list --category audio"'
 _IMAGE_HINT = 'see "aistudio models list --category images"'
 _MUSIC_HINT = 'see "aistudio models list --category music"'
 _TIER_HINT = "this model may need a paid tier or may be unavailable to your account"
 # Catalog commands this CLI actually offers; hints never name anything else.
-_OFFERED_COMMANDS = {"generate speech", "generate image", "generate music"}
+_OFFERED_COMMANDS = {"generate speech", "generate image", "generate music", "transcribe"}
 
 
 def default_output(now: datetime) -> Path:
@@ -149,6 +155,67 @@ async def generate_music(profile: Profile, prompt: str, *, model: str = DEFAULT_
                                  what="a music model", hint=_MUSIC_HINT, **options)
 
 
+def _inputs(values: list[Path | str], suffixes: set[str], what: str) -> list[Path]:
+    """Local files to upload, checked before Chrome opens."""
+    out = []
+    for value in values:
+        path = Path(value).expanduser()
+        if not path.is_file():
+            raise ValidationError(f"{path} is not a file")
+        if path.suffix.lower() not in suffixes:
+            raise ValidationError(f"{path} is not {what} ({', '.join(sorted(suffixes))})")
+        if path.stat().st_size > MAX_INPUT_BYTES:
+            raise ValidationError(f"{path} is larger than {MAX_INPUT_BYTES // (1024 * 1024)} MB")
+        out.append(path)
+    return out
+
+
+async def transcribe(
+    profile: Profile,
+    audio: Path | str,
+    *,
+    model: str = DEFAULT_TRANSCRIBE_MODEL,
+    timestamps: bool | None = None,
+    diarize: bool | None = None,
+    smart: bool | None = None,
+    vocabulary: str = "",
+    out: Path | None = None,
+    overwrite: bool = False,
+    visible: bool = False,
+    client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
+    browser: Callable[..., Any] = open_browser,
+    on_start: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Speech to text with AI Studio's transcribe model (page-driven; uses the user's quota)."""
+    (path,) = _inputs([audio], AUDIO_INPUTS, "an audio file")
+    if out is not None and out.exists() and not overwrite:
+        raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
+    _check_folder(out.parent if out is not None and str(out.parent) else Path("."))
+    async with client_factory(profile) as client:
+        model_id = await check_model(client, profile, model, command="transcribe",
+                                     what="a transcription model", hint=_AUDIO_HINT)
+    if on_start:
+        on_start()
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = TranscribePage(ui)
+        await page.open(model_id)
+        await page.attach([str(path)])
+        await page.options(timestamps=timestamps, speakers=diarize, smart=smart)
+        await page.vocabulary(" ".join(vocabulary.split()))
+        captured = await page.run()
+    if captured.status >= 400:
+        raise _refused(captured.status, captured.text, "transcription")
+    try:
+        text = decode_text(wire.decode(captured.text))
+    except ValueError as exc:  # truncated or non-JSON body
+        raise SchemaDriftError("GenerateContent", (), "a JSON transcription") from exc
+    result: dict[str, Any] = {"text": text, "model": model_id, "audio": str(path)}
+    if out is not None:
+        saved = _write(out, text.encode("utf-8"), overwrite=overwrite)
+        result["file"] = {"path": str(saved), "bytes": saved.stat().st_size}
+    return result
+
+
 async def _generate_media(
     profile: Profile,
     prompt: str,
@@ -167,10 +234,12 @@ async def _generate_media(
     browser: Callable[..., Any] = open_browser,
     now: Callable[[], datetime] = datetime.now,
     on_start: Callable[[], None] | None = None,
+    images: list[Path | str] | None = None,
 ) -> dict[str, Any]:
     prompt = prompt.strip()  # e.g. a --prompt-file's trailing newline
     if not prompt:
         raise ValidationError(f"nothing to generate: the {name} prompt is empty")
+    inputs = _inputs(images or [], IMAGE_INPUTS, "an image")
     if out is not None and out.exists() and not overwrite:
         raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
     _check_folder(out.parent if out is not None and str(out.parent) else Path("."))
@@ -182,6 +251,8 @@ async def _generate_media(
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_class(ui)
         await page.open(model_id)
+        if inputs:  # edits: every input is attached (uploaded to Drive) before the prompt runs
+            await page.attach([str(path) for path in inputs])
         await page.set_prompt(prompt)
         captured = await page.run()
     if captured.status >= 400:

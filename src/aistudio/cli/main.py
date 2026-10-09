@@ -55,6 +55,7 @@ cli.add_command(app_cmd.gallery)
 cli.add_command(status_cmd.status)
 cli.add_command(generate_cmd.generate)
 cli.add_command(generate_cmd.voices)
+cli.add_command(generate_cmd.transcribe_cmd)
 cli.add_command(flow_cmd.flow)
 
 
