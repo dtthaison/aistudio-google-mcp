@@ -723,3 +723,23 @@ blocked; the RPCs that went through are free.
   a non-empty box and no `visibility: hidden`). The library is read until two reads agree, and
   each group until exactly N voices show.
 - Two runs after the fix both returned the same 70 voices; the earlier 63 had missed 7.
+
+## Extending an extension (2026-10-09; free probes, one approved 10-credit run)
+
+- `aistudio flow extend <id>` fails for a clip that is itself an extension: "no visible
+  '[contenteditable=true]'", before Start, so nothing is spent.
+  - The clip is not in the project list's workflows. Its own record names workflow `8263e7a5…`.
+  - `/edit/<that workflow>` opens an empty editor (black stage, no clip, no prompt box).
+- Extensions live in their **scene**. `/project/<pid>/scene/<scene-id>` has the prompt box and
+  "Add clip" → "Extend (Veo 3.1 - Lite)".
+  - The scene opens with the **first** clip selected: "Add clip" sits after it, and an Extend
+    there would continue from clip 1.
+  - Clicking a thumbnail of the last clip in the timeline (images below the player; clips are not
+    buttons) selects it. The side panel then shows that clip's prompt, and "Add clip" moves to
+    the end of the timeline.
+- With the last clip selected, the normal `FlowPage.extend` steps ran (10 credits). The scene
+  now joins three clips, and `flow scene download` gives one 23 s file (the clips are 8 s, 8 s
+  and 7 s).
+- To do in the CLI: when the clip has no listed workflow and its scene is known, extend through
+  the scene page with the last clip selected. Verify the selection by the side panel's prompt
+  before Start.
