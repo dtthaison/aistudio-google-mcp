@@ -127,14 +127,19 @@ async def test_run_without_a_response_is_a_browser_error(fake_ui):
     assert "no speech" in info.value.message
 
 
+LIBRARY = ["Favorite Bodi", "Remove from favorites Tova", "Favorite Fola"]
+
+
 async def test_list_voices_walks_every_group(fake_ui):
+    # Live: after "View all N" the library view stays for a moment, then the group's N voices
+    # show. Reading at once took the stale library and lost voices (63, 53, 52 of 70).
     ui = fake_ui(labels={
         ("button", FAVORITE.pattern): [
-            ["Favorite Bodi", "Remove from favorites Tova", "Favorite Fola"],
-            ["Favorite Bodi", "Favorite Zephyr"],
-            ["Favorite Sulafat"],
+            LIBRARY, LIBRARY,                         # the library, read until two reads agree
+            LIBRARY, ["Favorite Bodi", "Favorite Zephyr"],  # stale view, then "View all 2"
+            ["Favorite Sulafat"],                     # "View all 1"
         ],
-        ("button", VIEW_ALL.pattern): [["View all 7", "View all 5"]],
+        ("button", VIEW_ALL.pattern): [["View all 2", "View all 1"]],
     })
     assert await SpeechPage(ui).list_voices() == ["Bodi", "Fola", "Sulafat", "Tova", "Zephyr"]
     clicks = [op for op in ui.ops if op[0] == "click"]
@@ -168,17 +173,27 @@ def test_back_is_the_exact_voice_panel_button():
 
 async def test_list_voices_requires_the_group_list_after_going_back(fake_ui):
     ui = fake_ui(labels={("button", FAVORITE.pattern): [["Favorite Bodi"]],
-                         ("button", VIEW_ALL.pattern): [["View all 7"], []]})
-    with pytest.raises(BrowserError):
+                         ("button", VIEW_ALL.pattern): [["View all 1"], []]})
+    with pytest.raises(BrowserError) as info:
         await SpeechPage(ui).list_voices()
+    assert "group list" in info.value.message
+
+
+async def test_a_group_that_never_shows_its_count_is_an_error(fake_ui):
+    ui = fake_ui(labels={("button", FAVORITE.pattern): [["Favorite Bodi", "Favorite Tova"]],
+                         ("button", VIEW_ALL.pattern): [["View all 4"]]})
+    with pytest.raises(BrowserError) as info:
+        await SpeechPage(ui).list_voices()
+    assert "showed 2 of 4 voices" in info.value.message
 
 
 async def test_list_voices_waits_for_names_to_load(fake_ui):
     ui = fake_ui(labels={
-        ("button", FAVORITE.pattern): [[], [], ["Favorite Tova"], ["Favorite Zephyr"]],
+        ("button", FAVORITE.pattern): [[], [], ["Favorite Tova"], ["Favorite Tova"],
+                                       ["Favorite Zephyr", "Favorite Kore", "Favorite Aoede"]],
         ("button", VIEW_ALL.pattern): [["View all 3"]],
     })
-    assert await SpeechPage(ui).list_voices() == ["Tova", "Zephyr"]
+    assert await SpeechPage(ui).list_voices() == ["Aoede", "Kore", "Tova", "Zephyr"]
 
 
 async def test_a_voice_panel_that_never_loads_is_an_error_not_zero_voices(fake_ui):

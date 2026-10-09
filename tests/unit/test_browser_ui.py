@@ -359,3 +359,24 @@ async def test_set_files_labels_given_types(tmp_path):
     first, second = given[-1]
     assert first["mimeType"] == "audio/mp4" and second["name"] == "talk.wav"
     assert second["mimeType"].startswith("audio/")  # the platform's guess for .wav
+
+
+async def test_labels_are_read_in_one_step():
+    # Live: the voice panel swapped views between listing its buttons and reading each one, and
+    # reading a vanished button waited out the timeout ("did not show what aistudio expected").
+    scripts = []
+
+    class Buttons:
+        async def all(self):
+            raise AssertionError("per-element reads race with the page")
+
+        async def evaluate_all(self, script):
+            scripts.append(script)
+            return ["Favorite  Bodi", " View all\n7 "]
+
+    class RolePage(Page):
+        def get_by_role(self, role, name=None, exact=False):
+            return Buttons()
+
+    assert await PlaywrightUi(RolePage()).labels("button", "x") == ["Favorite Bodi", "View all 7"]
+    assert "getBoundingClientRect" in scripts[0] and "aria-label" in scripts[0]

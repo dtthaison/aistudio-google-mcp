@@ -691,3 +691,18 @@ blocked; the RPCs that went through are free.
   `ok` without a new login.
 - If the user signs into another account in aistudio's Chrome, HTTP commands now follow it (the
   saved `authuser` stays).
+
+## Voice panel reads (2026-10-09, free probes)
+
+- `voices list` returned 63, 53 and 52 voices on three runs, and once failed with "the page did
+  not show what aistudio expected in time".
+- The panel opens on a library view with 31 voice buttons and 10 "View all N" groups (N = 7, 5,
+  8, 6, 6, 11, 7, 7, 6, 7).
+- After "View all N", the library's 31 buttons stay for about 0.25 s, then the group's N show.
+  The reader took the first non-empty read, which was often the stale library.
+- `labels()` listed the buttons, then read each one. When the view swapped in between, reading a
+  vanished button waited out Playwright's timeout, which caused the error.
+- Fix: `labels()` reads all visible labels in one `evaluate_all` (Playwright's visibility rule:
+  a non-empty box and no `visibility: hidden`). The library is read until two reads agree, and
+  each group until exactly N voices show.
+- Two runs after the fix both returned the same 70 voices; the earlier 63 had missed 7.

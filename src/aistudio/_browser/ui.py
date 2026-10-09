@@ -116,6 +116,12 @@ class Ui(Protocol):
     async def dispatch_click_near(self, role: str, name: Name, text: str) -> None: ...
 
 
+# Playwright's visibility rule: a non-empty box and no visibility:hidden
+_VISIBLE_LABELS_JS = """els => els.filter(e => {
+  const box = e.getBoundingClientRect();
+  return box.width > 0 && box.height > 0 && getComputedStyle(e).visibility !== 'hidden';
+}).map(e => e.getAttribute('aria-label') || e.innerText || '')"""
+
 _BATCH_RPC_JS = """async ([rpcid, args]) => {
   const g = window.WIZ_global_data || {};
   const params = new URLSearchParams({
@@ -317,13 +323,12 @@ class PlaywrightUi:
         return await self._read(read)
 
     async def labels(self, role: str, name: Name) -> list[str]:
+        """Visible matches' aria-label (else text), read in one step in the page: reading one
+        element at a time raced with views that swap their buttons (live: the voice panel), and
+        a vanished element waited out the timeout."""
         async def read() -> list[str]:
-            out: list[str] = []
-            for element in await self._role(role, name).all():
-                if await element.is_visible():
-                    text = await element.get_attribute("aria-label") or await element.inner_text()
-                    out.append(" ".join((text or "").split()))
-            return out
+            texts = await self._role(role, name).evaluate_all(_VISIBLE_LABELS_JS)
+            return [" ".join((text or "").split()) for text in texts]
 
         return await self._read(read)
 

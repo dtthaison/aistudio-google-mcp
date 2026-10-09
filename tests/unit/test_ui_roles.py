@@ -51,6 +51,10 @@ class Loc:
     async def all(self):
         return self._elements
 
+    async def evaluate_all(self, script):
+        # what the page script returns: visible elements' aria-label, else their text
+        return [e._label or e._text for e in self._elements if e._visible]
+
 
 class Keyboard:
     def __init__(self):
@@ -130,6 +134,9 @@ class BrokenLoc(Loc):
         raise Exception("Target page, context or browser has been closed")
 
     async def all(self):
+        raise Exception("Target page, context or browser has been closed")
+
+    async def evaluate_all(self, script):
         raise Exception("Target page, context or browser has been closed")
 
 

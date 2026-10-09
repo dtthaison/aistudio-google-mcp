@@ -22,7 +22,8 @@ SPEAKER = re.compile(r"^Speaker 1 - ")
 VOICE_SEARCH = "Search voices"
 STYLE_BUTTON = "Style"
 STYLE_BOX = "Describe the voice style"
-VIEW_ALL = re.compile(r"^View all \d+")
+VIEW_ALL = re.compile(r"^View all \d+")  # a voice group (no groups: it is a role-name selector)
+GROUP_SIZE = re.compile(r"^View all (\d+)")
 BACK = re.compile(r"^Back to library$")  # the voice-group view's back button
 POLLS = 8  # x 250 ms: the panel's search filters asynchronously
 LOAD_POLLS = 20  # x 250 ms: voice names render ~1 s after the panel opens (live probe)
@@ -102,10 +103,10 @@ class SpeechPage:
     async def list_voices(self) -> list[str]:
         await self._ui.click("button", SPEAKER)
         names = await self._voice_names_loaded()
-        groups = len(await self._ui.labels("button", VIEW_ALL))
-        for index in range(groups):
+        groups = await self._ui.labels("button", VIEW_ALL)
+        for index, group in enumerate(groups):
             await self._ui.click("button", VIEW_ALL, nth=index)
-            names += await self._voice_names_loaded()
+            names += await self._group_names(group)
             await self._ui.click("button", BACK)
             if not await self._loaded("button", VIEW_ALL):
                 raise BrowserError("the voice panel did not return to its group list",
@@ -123,11 +124,33 @@ class SpeechPage:
         return []
 
     async def _voice_names_loaded(self) -> list[str]:
-        labels = await self._loaded("button", FAVORITE)
-        if not labels:
+        """The library view: names render ~1 s after the panel opens; read until two reads
+        agree, so a half-rendered list is not taken."""
+        last: list[str] = []
+        for _ in range(LOAD_POLLS):
+            labels = await self._ui.labels("button", FAVORITE)
+            if labels and labels == last:
+                break
+            last = labels
+            await self._ui.pause(250)
+        if not last:
             raise BrowserError("the voice panel showed no voices",
                                hint="re-run; if it persists, the AI Studio UI changed")
-        return _names(labels)
+        return _names(last)
+
+    async def _group_names(self, group: str) -> list[str]:
+        """After "View all N" the library view stays for a moment (live): wait for the group's
+        own N voices."""
+        match = GROUP_SIZE.match(group)
+        want = int(match.group(1)) if match else None
+        labels: list[str] = []
+        for _ in range(LOAD_POLLS):
+            labels = await self._ui.labels("button", FAVORITE)
+            if labels and (want is None or len(labels) == want):
+                return _names(labels)
+            await self._ui.pause(250)
+        raise BrowserError(f"the voice group {group!r} showed {len(labels)} of {want} voices",
+                           hint="re-run; if it persists, the AI Studio UI changed")
 
     async def _eventually_visible(self, role: str, name: Name, *, exact: bool = False) -> bool:
         for _ in range(POLLS):
