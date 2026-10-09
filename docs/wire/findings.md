@@ -636,3 +636,12 @@ blocked; the RPCs that went through are free.
 - **Uploads go to Google Drive.** Setting a file calls `GetAppFolder` and Drive's `files` upload
   (and `CheckImage` for images), so the request names a Drive file id. AI Studio keeps the
   uploads in the user's Drive.
+- **Live runs (2026-10-09, small quota).**
+  - Transcription of a 5 s Vietnamese clip (macOS `say -v Linh`) returned its text in the part's
+    **slot 22**, `[None × 22, [text]]`, not in slot 1.
+  - "Custom vocabulary" is refused together with word timestamps ("custom_vocabulary is
+    incompatible with word timestamps") and with speaker labels ("… with diarization"). The page
+    turns both on by default.
+  - With the vocabulary "Yuri Handmade", the brand was transcribed correctly.
+  - An edit of a red/white checkerboard ("make the red squares blue") came back blue and white,
+    and otherwise unchanged.
