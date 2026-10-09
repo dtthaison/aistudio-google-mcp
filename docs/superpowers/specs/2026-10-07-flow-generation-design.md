@@ -54,7 +54,7 @@ aistudio flow image  (PROMPT | --prompt-file F)
      [-m nano-banana-2.1 | nano-banana-pro | nano-banana-2-lite]
      [--aspect 16:9|4:3|1:1|3:4|9:16] [--count 1-4]
      [--ingredient FILE|media-id]... [--character NAME]...
-aistudio flow extend <video-media-id> (PROMPT | --prompt-file F) [--duration SECONDS]
+aistudio flow extend <video-media-id> PROMPT   (as shipped: no --prompt-file or --duration)
 aistudio flow scene  <media-id>[@START-END]... -o out.mp4
 aistudio flow character create NAME (PROMPT | --photo FILE) [-m nano-banana-…]
 aistudio flow character list
@@ -70,7 +70,8 @@ Options for every generating command (video, image, extend, scene, character cre
   Chrome opens. The table's duration and resolution rules are filled in by the discovery tasks
   in §9.
 - **Project.** A Flow project titled **"aistudio"** is created once and reused. `--project`
-  takes a project id, an id prefix or an exact title; every write goes there.
+  takes a full project id or a project link (as shipped; no prefixes or titles); every write
+  goes there.
 - **Input files.** `--prompt-file` follows the existing rules (UTF-8, at most 1 MB).
   Frame, ingredient and photo files must exist, be images (videos for video ingredients), and be
   readable before Chrome opens.

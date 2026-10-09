@@ -545,6 +545,10 @@ blocked; the RPCs that went through are free.
 - **Personality.** The character page's "Character personality" text box sends `rzMKMb`
   `[[project_id, character_id, null, [1, null, [null, null, "<text>"]]],
   [["entity_info.character_info.personality_notes"]]]` (blocked in the probe).
+  - Reply (2026-10-09, free; "Paper boat"'s own text written back): the character record
+    `[[project_id, id, null, [1, name, [refs, null, "<notes>"]], null, null, [created],
+    [updated]]]`. aistudio compares the notes at `[0][3][2][2]` with what it sent.
+  - The project read (`Zzl0ze` `[5]`) keeps the same record, so the notes are at row `[3][2][2]`.
 - **Voice.** Choosing a voice in "Select a voice" (30 voices, plus a "Describe the voice
   performance style" box) sent nothing, and neither did "Close" or "Done". No save call was
   found.

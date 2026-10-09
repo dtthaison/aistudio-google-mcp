@@ -171,3 +171,11 @@ def test_flow_payloads_reject_nan():
     bad_outer = '[["wrb.fr", "y", "[2]", Infinity]]'
     good = json.dumps([["wrb.fr", "z", "[3]"]])
     assert payloads(")]}'\n\n" + "\n".join([bad_inner, bad_outer, good])) == [("z", [3])]
+
+
+def test_personality_notes_come_from_the_character_record():
+    from aistudio._flow.rows import personality_notes
+
+    record = [["p", "c1", None, [1, "Paper boat", [[["r1"]], None, "Calm, curious"]]]]
+    assert personality_notes(record) == "Calm, curious"
+    assert personality_notes([["p", "c1", None, [1, "Boat", [[["r1"]]]]]]) is None

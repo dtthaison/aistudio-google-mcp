@@ -201,6 +201,11 @@ def character_name(payload: Any) -> str | None:
     return _str(opt_index(payload, 0, 3, 1))
 
 
+def personality_notes(payload: Any) -> str | None:
+    """``rzMKMb`` reply (live): the character record, with the notes at ``[0][3][2][2]``."""
+    return _str(opt_index(payload, 0, 3, 2, 2))
+
+
 def character_id(payload: Any) -> str | None:
     return _str(opt_index(payload, 0, 1))
 

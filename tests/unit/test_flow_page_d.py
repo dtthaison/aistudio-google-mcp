@@ -143,7 +143,7 @@ async def test_link_photo_hint_is_accurate(fake_ui):
 
 async def test_personality_sends_its_field_mask(fake_ui):
     text = 'Calm, "curious"\nand kind ' + "x" * 2000
-    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [[PID, "c1", None, [1, "Boat", []]]])]})
+    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [[PID, "c1", None, [1, "Boat", [[], None, text]]]])]})
     await FlowPage(ui).set_personality(PID, "c1", text)
     assert ("batch_rpc", "rzMKMb", json.dumps(
         [[PID, "c1", None, [1, None, [None, None, text]]],
@@ -151,6 +151,21 @@ async def test_personality_sends_its_field_mask(fake_ui):
     ui = fake_ui({"rzMKMb": [rpc("rzMKMb", [], status=500)]})
     with pytest.raises(BrowserError):
         await FlowPage(ui).set_personality(PID, "c1", "Calm")
+
+
+async def test_personality_is_read_back(fake_ui):
+    # Deferred minor #76, live (free; a test character's own text written back): the reply is the
+    # character record, with the stored notes at [0][3][2][2].
+    live = [[PID, "c1", None, [1, "Paper boat", [[["r1"], ["r2"]], None, "Calm and brave"]], None,
+             None, [1791429159, 582571000], [1791558975, 355956000]]]
+    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", live)]})
+    await FlowPage(ui).set_personality(PID, "c1", "Calm and brave")
+    for stored in ("Calm and br", None):
+        changed = [[PID, "c1", None, [1, "Paper boat", [[], None, stored]]]]
+        ui = fake_ui({"rzMKMb": [rpc("rzMKMb", changed)]})
+        with pytest.raises(BrowserError) as info:
+            await FlowPage(ui).set_personality(PID, "c1", "Calm and brave")
+        assert "did not save the personality" in info.value.message
 
 
 

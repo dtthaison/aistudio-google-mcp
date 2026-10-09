@@ -28,6 +28,22 @@ async def test_live_catalog_decodes_with_known_categories(profile):
     assert not [(m.id, c) for m in models for c in m.categories if c.startswith("code:")]
 
 
+async def test_live_catalog_categories_match_model_families(profile):
+    # Deferred minor #11: renumbered category codes would still decode, just wrongly (Veo as
+    # music, Lyria refused by "generate music"). Families pin the meaning of each code.
+    async with AIStudioClient.from_profile(profile) as client:
+        models = await client.models.list()
+    rules = [(lambda i: i.startswith("veo-"), "video"),
+             (lambda i: i.startswith("lyria-") and "realtime" not in i, "music"),
+             (lambda i: i.startswith("gemma-"), "gemma"),
+             (lambda i: i.endswith("-tts"), "audio")]
+    wrong = [(m.id, m.categories) for m in models for match, category in rules
+             if match(m.id) and category not in m.categories]
+    assert not wrong
+    assert any(m.id.startswith("veo-") for m in models)
+    assert any(m.id.startswith("lyria-") for m in models)
+
+
 async def test_live_prompt_list_decodes(profile):
     async with AIStudioClient.from_profile(profile) as client:
         prompts = await client.prompts.list()

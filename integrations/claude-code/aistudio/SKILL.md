@@ -105,8 +105,8 @@ quotes and write each `'` as `'\''`.
   3. Re-run with `--max-credits <credits>`.
 
   For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
-  and nothing was spent. For `flow extend`/`flow character create`, `OVER_BUDGET` is aistudio's own
-  refusal before anything was sent.
+  and nothing was spent. For `flow extend`, `flow edit`, `flow character create` and
+  `flow character body`, `OVER_BUDGET` is aistudio's own refusal before anything was sent.
   A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
   `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
   `"status": "timeout"` means credits were spent: give the user `project_url`.

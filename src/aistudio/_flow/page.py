@@ -37,6 +37,7 @@ from aistudio._flow.rows import (
     linked_image,
     media_records,
     parse_permission,
+    personality_notes,
     sent_characters,
     sent_media,
     stitch_job,
@@ -462,10 +463,14 @@ class FlowPage:
         """The character page's "Character personality" (free; findings, plan F)."""
         args = [[project_id, character_id, None, [1, None, [None, None, text]]],
                 [["entity_info.character_info.personality_notes"]]]
-        status, _ = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
+        status, reply = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
         if status >= 400:
             raise BrowserError(f"Flow did not save the personality of character {character_id} "
                                f"(HTTP {status})", hint="re-run; nothing else changed")
+        if personality_notes(decode_batch(reply).get("rzMKMb")) != text:  # read back (live)
+            raise BrowserError(f"Flow did not save the personality of character {character_id} "
+                               "as sent", hint="check it on the character's page in Flow; "
+                                               "re-run to retry")
 
     async def create_character_record(self, project_id: str, name: str) -> tuple[str, str]:
         """An empty, named character (free; what "Add from project" sends first): its id and
