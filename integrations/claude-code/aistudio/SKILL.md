@@ -94,8 +94,8 @@ quotes and write each `'` as `'\''`.
   does not ask, so `flow image` without `--max-credits` already makes and downloads the images
   (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
   the user wants the images. A `TIMEOUT` error saying Flow "was still generating without asking"
-  means Flow may still finish the images: tell the user to check the project in Flow, never
-  re-run it blindly. Video models quote first (verified). Other image models are
+  or "had not finished replying" means Flow may still finish the images: tell the user to check
+  the project in Flow, never re-run it blindly. Video models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
@@ -123,6 +123,7 @@ quotes and write each `'` as `'\''`.
   was rejected and nothing was spent. Tell the user to check the prompt box in Flow before a
   re-run. A character's image id is not an ingredient: use `--character` instead.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
+  `scene_id` can be null when Flow had not listed the scene yet: find it with `flow scene list`.
   Stitch trims are whole seconds (`<id>@2-5`).
 - `flow edit` costs 20 credits with no quote: ask the user before passing `--max-credits 20`.
   Only 8-second Veo 3.1 Lite clips have a measured price. Flow always extends with Veo 3.1 Lite

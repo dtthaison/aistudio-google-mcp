@@ -178,6 +178,9 @@ async def flow_generate(
                 waiting = await _reject_noting(page, expect=False)
                 still = ("Flow's agent had not finished replying" if not turn.answered
                          else "Flow was still generating without asking")
+                if not turn.answered:  # a quote may still arrive after the browser closes
+                    waiting = _with_note(waiting, "if Flow asks to approve something from this "
+                                                  "run, press Reject, never Approve")
                 raise WaitTimeoutError(f"{still} when aistudio stopped waiting: "
                                        f"{turn.text[-300:]}",
                                        hint=_with_note("Flow may still finish it; check the "
@@ -1095,8 +1098,8 @@ def _stitched(data: bytes, args: list[list[Any]], *, out: Path | None, overwrite
     path = out if out is not None else free_name(Path(f"flow-scene-{stamp:%Y%m%d-%H%M%S}{ext}"))
     warnings = ([f"{out} holds {mime} data; its extension says otherwise"]
                 if out is not None and _normal_suffix(out.suffix) != ext else [])
-    if ext == ".bin":
-        warnings.append("Flow's reply was not a video; check the scene in Flow")
+    if not mime.startswith("video/"):
+        warnings.append(f"Flow's reply was not a video ({mime}); check the scene in Flow")
     saved = write_file(path, data, overwrite=overwrite and path == out)
     return {"status": "done",
             "files": [{"path": str(saved), "mime_type": mime, "bytes": len(data)}],
@@ -1187,9 +1190,12 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
             else:
                 suffix = f"-{i + 1}" if len(media) > 1 else ""
                 path = free_name(folder / f"flow-{kind}-{stamp:%Y%m%d-%H%M%S}{suffix}{ext}")
-                if ext == ".bin":
+                if ext == ".bin" and kind != "video":
                     warnings.append(f"the type of {item.media_id} was not recognised; it was "
                                     f"saved as {path.name}")
+            if kind == "video" and not mime.startswith("video/"):
+                warnings.append(f"Flow's file for {item.media_id} is {mime}, not a video; it was "
+                                f"saved as {path.name}")
             saved = write_file(path, data, overwrite=overwrite and path == out)
             files.append({"path": str(saved), "mime_type": mime, "bytes": len(data),
                           "media_id": item.media_id})

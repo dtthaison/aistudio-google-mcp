@@ -225,10 +225,11 @@ def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_outpu
     def progress(done: int, total: int) -> None:
         now = _now()
         last[0] = now if last[0] is None else last[0]
+        files = "file" if total == 1 else "files"
         if done == 0:
-            stderr.print(f"Downloading {total} files…", markup=False)
+            stderr.print(f"Downloading {total} {files}…", markup=False)
         elif done == total or done % 10 == 0 or now - last[0] >= PROGRESS_EVERY_S:
-            stderr.print(f"Downloaded {done}/{total} files", markup=False)
+            stderr.print(f"Downloaded {done}/{total} {files}", markup=False)
         else:
             return
         last[0] = now

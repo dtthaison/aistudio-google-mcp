@@ -8,11 +8,16 @@ on:
 permissions:
   contents: read
 
+concurrency:  # a newer push to the same branch or PR replaces a running check
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     # Unit tests and lint only: live tests (marked live / live_slow) need a signed-in Google
     # session and are deselected by pytest's addopts.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

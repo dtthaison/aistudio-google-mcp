@@ -682,3 +682,24 @@ async def test_the_timed_file_and_screen_show_one_line_per_sentence(logged_in_pr
     assert (tmp_path / "t.txt").read_text(encoding="utf-8") == (
         "[0:00.1 - 0:01.0] spk:0: Xin chào.\n[0:02.0 - 0:03.0] spk:0: Tạm biệt.\n")
     assert len(result["segments"]) == 1  # the JSON keeps AI Studio's segments
+
+
+def test_a_sentence_without_a_start_time_follows_the_previous_line():
+    # Plan K review M2: it took the segment start and began before the line above it.
+    from aistudio._app.media import transcript_lines
+
+    words = [["One", 0.0, 1.0], ["two.", 1.0, 2.0], ["Three", None, None], ["four.", 11.0, 12.0]]
+    segment = {"speaker": None, "start": 0.0, "end": 12.0, "text": "One two. Three four.",
+               "words": words}
+    assert transcript_lines([segment]) == ["[0:00.0 - 0:02.0] One two.",
+                                           "[0:02.0 - 0:12.0] Three four."]
+
+
+def test_other_scripts_sentence_ends_split_lines():
+    # Plan K review M3: Hindi, Arabic and Urdu use spaces, so their words line up.
+    from aistudio._app.media import transcript_lines
+
+    words = [["नमस्ते।", 0.0, 1.0], ["धन्यवाद।", 1.0, 2.0], ["كيف", 2.0, 2.5], ["حالك؟", 2.5, 3.0]]
+    segment = {"speaker": None, "start": 0.0, "end": 3.0, "text": "नमस्ते। धन्यवाद। كيف حالك؟",
+               "words": words}
+    assert len(transcript_lines([segment])) == 3

@@ -694,3 +694,4 @@ async def test_an_unfinished_reply_is_a_timeout_not_nothing_spent(logged_in_prof
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "had not finished replying" in info.value.message
     assert "check the project in Flow" in info.value.hint
+    assert "never Approve" in info.value.hint  # a quote may still arrive (review M7)

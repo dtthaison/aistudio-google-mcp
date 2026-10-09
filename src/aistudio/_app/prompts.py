@@ -6,7 +6,7 @@ from typing import Any
 
 from aistudio.client import AIStudioClient
 
-TYPE_SCAN = 1000  # AI Studio's largest page
+TYPE_SCAN = 1000  # page size accepted live (2026-10-09); `app list` asks for 1000 too
 
 
 async def list_prompts(

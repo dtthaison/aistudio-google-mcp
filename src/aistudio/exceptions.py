@@ -85,6 +85,10 @@ class BrowserError(AIStudioError):
     code = "BROWSER_ERROR"
 
 
+class WindowClosedError(BrowserError):
+    """Chrome's window or page closed mid-run: never retried or counted as a slow reply."""
+
+
 class WaitTimeoutError(AIStudioError):
     code = "TIMEOUT"
 

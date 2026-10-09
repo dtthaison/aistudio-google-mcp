@@ -229,3 +229,33 @@ async def test_a_stitch_poll_error_counts_toward_the_limit(fake_ui):
 
     ui.batch_rpc = flaky
     assert await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=60) == data
+
+
+async def test_clearing_a_personality_is_read_back_as_empty(fake_ui):
+    # Plan K review I1: "" clears the notes (CLI help); the read-back saw None != "" and failed.
+    for stored in ("", None):
+        cleared = [[PID, "c1", None, [1, "Paper boat", [[["r1"]], None, stored]]]]
+        ui = fake_ui({"rzMKMb": [rpc("rzMKMb", cleared)]})
+        await FlowPage(ui).set_personality(PID, "c1", "")
+    other = [[PID, "c2", None, [1, "Other", [[["r1"]], None, ""]]]]
+    ui = fake_ui({"rzMKMb": [rpc("rzMKMb", other)]})
+    with pytest.raises(BrowserError):  # a reply about another character proves nothing
+        await FlowPage(ui).set_personality(PID, "c1", "")
+
+
+async def test_a_closed_window_ends_a_stitch_at_once(fake_ui):
+    # Plan K review M1: the poll's BrowserError catch swallowed "window closed", and the next
+    # pause raised Playwright's raw error (UNEXPECTED_ERROR).
+    from aistudio.exceptions import WindowClosedError
+
+    ui = fake_ui({"GjQLTd": [rpc("GjQLTd", [None, [[JOB]]])]})
+    real = ui.batch_rpc
+
+    async def closed(rpcid, args_json):
+        if rpcid == "IxdSwd":
+            raise WindowClosedError("the browser window was closed before aistudio finished")
+        return await real(rpcid, args_json)
+
+    ui.batch_rpc = closed
+    with pytest.raises(WindowClosedError):
+        await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=60)

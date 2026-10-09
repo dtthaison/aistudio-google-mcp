@@ -695,3 +695,26 @@ async def test_a_failed_credit_read_does_not_block_direct_spend(logged_in_profil
     kw, _, _ = harness(credits=(BrowserError("no account menu"), 1010))
     result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
     assert result["status"] == "done"
+
+
+def test_a_video_that_came_back_as_an_image_is_named(tmp_path, monkeypatch):
+    # Plan K review M4: a thumbnail for a "video" was saved as .jpg without a word.
+    from aistudio._app.flow import _stitched
+
+    monkeypatch.chdir(tmp_path)
+    result = _stitched(b"\xff\xd8\xff\xe0jpeg", [["m1", None, [], [8]]], out=None,
+                       overwrite=False, stamp=NOW, project_id=PROJECT)
+    assert result["files"][0]["path"].endswith(".jpg")
+    assert any("not a video" in w for w in result["warnings"])
+
+
+async def test_a_failed_credit_read_does_not_block_edit_or_body(logged_in_profile, tmp_path):
+    # Plan K review nit: the edit and body paths share the helper; pin them too.
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(credits=(BrowserError("no account menu"), 980))
+    result = await flow_edit(profile, VID, "make it blue", max_credits=20,
+                             out=tmp_path / "e.mp4", **kw)
+    assert result["status"] == "done" and any("not verified" in w for w in result["warnings"])
+    kw, _, _ = harness(credits=(BrowserError("no account menu"), 1010))
+    result = await flow_character_body(profile, "c1", "full body", out=tmp_path / "b.png", **kw)
+    assert result["status"] == "done"

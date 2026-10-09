@@ -379,3 +379,12 @@ async def test_labels_are_read_in_one_step():
 
     assert await PlaywrightUi(RolePage()).labels("button", "x") == ["Favorite Bodi", "View all 7"]
     assert "getBoundingClientRect" in scripts[0] and "aria-label" in scripts[0]
+
+
+def test_a_closed_window_is_its_own_browser_error():
+    from aistudio._browser.ui import _window_closed
+    from aistudio.exceptions import BrowserError, WindowClosedError
+
+    error = _window_closed()
+    assert isinstance(error, WindowClosedError) and isinstance(error, BrowserError)
+    assert error.code == "BROWSER_ERROR"

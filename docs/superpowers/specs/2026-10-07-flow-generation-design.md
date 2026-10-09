@@ -333,8 +333,9 @@ character to `flow video`/`flow image`, which keeps the normal quote-and-budget 
    - `scene list` gives `id`, `title`, `created` and `clips` (`media_id`, `title`, `seconds`) in
      order.
 7. **Extend's `scene_id`** comes from the project's scene clips after the job (the scene holding
-   the new clip). The `rqZuUc` reply is used only if the contents do not show it, because that
-   reply's shape was never seen live (plan C review M2).
+   the new clip). When the contents do not show it yet, `scene_id` is null and a warning points
+   to `flow scene list`. The `rqZuUc` reply is not used, because its shape was never seen live
+   (plan K, deferred minor #51).
 
 ## 12. Amendments from plan E (2026-10-08)
 

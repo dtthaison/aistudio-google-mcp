@@ -286,7 +286,7 @@ def _transcript_file(transcript: Transcript) -> str:
     return "\n".join(transcript_lines([_segment(s) for s in transcript.segments])) + "\n"
 
 
-_SENTENCE_ENDS = (".", "!", "?", "…")
+_SENTENCE_ENDS = (".", "!", "?", "…", "।", "؟", "۔", "。", "！", "？", "։", "።")
 _CLOSERS = "\"')]»”’"
 MAX_LINE_WORDS = 40  # a stretch with no sentence end is broken here
 
@@ -310,13 +310,19 @@ def _sentences(segment: dict[str, Any]) -> list[tuple[float | None, float | None
     words, tokens = segment.get("words") or [], segment["text"].split()
     if not words or len(words) != len(tokens):
         return [(start, end, text)]
-    out, first = [], 0
+    out: list[tuple[float | None, float | None, str]] = []
+    first = 0
     for index, token in enumerate(tokens):
         last = index == len(tokens) - 1
         if (token.rstrip(_CLOSERS).endswith(_SENTENCE_ENDS) or last
                 or index - first + 1 >= MAX_LINE_WORDS):
-            begin = words[first][1] if words[first][1] is not None else start
-            finish = words[index][2] if words[index][2] is not None else end
+            # A word without a time takes the line before's end (never an earlier time)
+            begin = words[first][1]
+            if begin is None:
+                begin = out[-1][1] if out else start
+            finish = words[index][2]
+            if finish is None:
+                finish = end if last else begin
             out.append((begin, finish, " ".join(tokens[first:index + 1])))
             first = index + 1
     return out

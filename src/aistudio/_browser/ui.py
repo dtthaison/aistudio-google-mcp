@@ -22,7 +22,13 @@ from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
 from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
-from aistudio.exceptions import AIStudioError, AuthError, BrowserError, ValidationError
+from aistudio.exceptions import (
+    AIStudioError,
+    AuthError,
+    BrowserError,
+    ValidationError,
+    WindowClosedError,
+)
 from aistudio.paths import Profile
 
 log = logging.getLogger(__name__)
@@ -156,7 +162,7 @@ async def _aria_checked(locator: Any) -> bool:
 
 
 def _window_closed() -> BrowserError:
-    return BrowserError(
+    return WindowClosedError(
         "the browser window was closed before aistudio finished",
         hint="re-run and leave the (minimized) Chrome window open until aistudio is done",
     )

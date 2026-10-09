@@ -43,6 +43,7 @@ from aistudio._flow.rows import (
     stitch_job,
     stitch_state,
 )
+from aistudio._flow.rows import character_id as record_character_id
 from aistudio._flow.wire import decode_batch, payloads
 from aistudio.exceptions import (
     BrowserError,
@@ -51,6 +52,7 @@ from aistudio.exceptions import (
     ServerError,
     ValidationError,
     WaitTimeoutError,
+    WindowClosedError,
 )
 
 HOME_URL = "https://flow.google.com/"
@@ -467,7 +469,9 @@ class FlowPage:
         if status >= 400:
             raise BrowserError(f"Flow did not save the personality of character {character_id} "
                                f"(HTTP {status})", hint="re-run; nothing else changed")
-        if personality_notes(decode_batch(reply).get("rzMKMb")) != text:  # read back (live)
+        record = decode_batch(reply).get("rzMKMb")  # the character record (live)
+        if (record_character_id(record) != character_id
+                or (personality_notes(record) or "") != text):  # "" clears the notes
             raise BrowserError(f"Flow did not save the personality of character {character_id} "
                                "as sent", hint="check it on the character's page in Flow; "
                                                "re-run to retry")
@@ -510,6 +514,8 @@ class FlowPage:
             await self._ui.pause(STITCH_POLL_MS)
             try:
                 status, text = await self._ui.batch_rpc("IxdSwd", json.dumps([[[job]]]))
+            except WindowClosedError:
+                raise
             except BrowserError:  # one failed poll counts like an unreadable reply
                 status, text = 0, ""
             state, data = (stitch_state(decode_batch(text).get("IxdSwd")) if status < 400

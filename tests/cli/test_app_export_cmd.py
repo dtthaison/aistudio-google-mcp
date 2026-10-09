@@ -59,3 +59,17 @@ def test_app_export_announces_and_keeps_reporting(logged_in_profile, monkeypatch
     res = CliRunner().invoke(cli, ["app", "export", "a1", str(tmp_path / "o")])
     lines = res.stderr.splitlines()
     assert lines == ["Downloading 4 files…", "Downloaded 2/4 files", "Downloaded 4/4 files"]
+
+
+def test_app_export_counts_one_file(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+
+    async def fake(client, app_ref, dest, *, force=False, progress=None):
+        progress(0, 1)
+        progress(1, 1)
+        return {"app_id": "a1", "title": "T", "dir": str(dest), "count": 1, "bytes": 1,
+                "files": []}
+
+    monkeypatch.setattr("aistudio.cli.app_cmd.export_app", fake)
+    res = CliRunner().invoke(cli, ["app", "export", "a1", str(tmp_path / "o")])
+    assert res.stderr.splitlines() == ["Downloading 1 file…", "Downloaded 1/1 file"]
