@@ -57,6 +57,8 @@ quotes and write each `'` as `'\''`.
 | TTS voices (opens a hidden Chrome; no quota) | `aistudio voices list --json [--search T]` |
 | Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
 | Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
+| Edit or combine images (same price) | the same command plus `--image <file>` (repeatable) |
+| Speech to text (uses quota, a fraction of a cent per short clip) | `aistudio transcribe <audio file> [--timestamps] [--diarize] [--vocabulary '<names>'] -o out.txt --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
@@ -77,6 +79,9 @@ quotes and write each `'` as `'\''`.
   not be read. Say "unknown", not "not starred".
 - An AI Studio tab open at the same time can overwrite a star change.
 - Speech: expression tags such as `<laugh>` go inside the text.
+- `--image` and `transcribe` upload the file to the user's Google Drive (AI Studio's folder):
+  say so when the file is private. `--vocabulary` turns timestamps and speaker labels off
+  (AI Studio cannot combine them).
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
 - **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow
