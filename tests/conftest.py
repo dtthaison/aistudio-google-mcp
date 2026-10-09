@@ -158,6 +158,9 @@ class FakeUi:
     async def labels(self, role, name):
         return self._answer(self._labels, (role, self._key(name)), [])
 
+    async def set_files(self, selector, paths):
+        self.ops.append(("set_files", selector, tuple(paths)))
+
     async def has_text(self, text):
         return self._answer(self._shown, text, True)
 

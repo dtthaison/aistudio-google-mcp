@@ -2,12 +2,16 @@ import pytest
 
 from aistudio._browser.media_pages import (
     CHAT_URL,
+    FILE_INPUT,
     GENERATE,
     IMAGE_PROMPT,
     MUSIC_EDITOR,
     MUSIC_PROMPT,
+    REMOVE_MEDIA,
+    TRANSCRIBE,
     ImagePage,
     MusicPage,
+    TranscribePage,
 )
 from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse
 from aistudio.exceptions import BrowserError
@@ -53,3 +57,46 @@ async def test_no_response_is_a_browser_error(fake_ui, page_class, kind):
     assert kind in info.value.message
     assert "--visible" in info.value.hint
     assert "charged" in info.value.hint  # never invite a blind second paid run (review #6)
+
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        self.t += 1.0
+        return self.t
+
+
+async def test_image_page_attaches_every_file(fake_ui):
+    # Plan I: every input image must show its "Remove media" chip before Run.
+    ui = fake_ui(labels={("button", REMOVE_MEDIA): [[], [REMOVE_MEDIA], [REMOVE_MEDIA] * 2]})
+    await ImagePage(ui, now=Clock()).attach(["/a.png", "/b.png"])
+    assert ("set_files", FILE_INPUT, ("/a.png", "/b.png")) in ui.ops
+
+
+async def test_a_file_ai_studio_never_takes_is_an_error_before_run(fake_ui):
+    ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
+    with pytest.raises(BrowserError) as info:
+        await ImagePage(ui, now=Clock()).attach(["/a.png", "/b.png"])
+    assert "nothing was generated" in info.value.message
+
+
+async def test_transcribe_page_sets_options_then_runs(fake_ui):
+    ui = fake_ui({"GenerateContent": [RESPONSE]},
+                 labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]},
+                 checks={("switch", "Word timestamps", 0): [True],
+                         ("switch", "Speaker labels", 0): [False],
+                         ("switch", "Smart transcription", 0): [True]})
+    page = TranscribePage(ui, now=Clock())
+    await page.open("gemini-3.5-transcribe")
+    await page.attach(["/talk.wav"])
+    await page.options(timestamps=True, speakers=True, smart=False)
+    await page.vocabulary("Yuri Handmade, amigurumi")
+    assert await page.run() is RESPONSE
+    pressed = [op for op in ui.ops if op[0] == "activate"]
+    assert pressed == [("activate", "switch", "Speaker labels", 0),
+                       ("activate", "switch", "Smart transcription", 0)]
+    assert ("fill", "textbox", "Custom vocabulary", "Yuri Handmade, amigurumi") in ui.ops
+    assert ("click", "button", TRANSCRIBE, 0) in ui.ops
