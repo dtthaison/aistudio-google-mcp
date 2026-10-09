@@ -89,6 +89,19 @@ def _collect(node: Any, prefix: str, out: list[tuple[str, str]]) -> None:
         _collect(child, prefix, out)
 
 
+def decode_text(response: Any) -> str:
+    """A text reply (a transcription): every text part, joined, after a normal finish."""
+    finish = finish_reason(response)
+    if finish is not None and finish != _FINISHED:
+        raise _stopped(finish)
+    text = "".join(_texts(response))
+    if not text.strip():
+        raise SchemaDriftError(METHOD, (), "text parts")
+    if finish is None:
+        raise SchemaDriftError(METHOD, (0, -1, 0, 0, 1), "a finish reason")
+    return text
+
+
 def _texts(response: Any) -> list[str]:
     """Text parts: ``chunk[0][c][0][0][p][1]`` for every candidate c and part p."""
     out: list[str] = []

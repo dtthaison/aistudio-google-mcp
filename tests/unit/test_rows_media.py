@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from aistudio._rpc.rows.media import decode_media, extension_for, finish_reason
+from aistudio._rpc.rows.media import decode_media, decode_text, extension_for, finish_reason
 from aistudio.exceptions import SchemaDriftError, ServerError
 
 JPEG = b"\xff\xd8\xff\xe0fakejpeg\xff\xd9"
@@ -107,3 +107,17 @@ def test_a_text_only_reply_is_shown_to_the_person():
 def test_neither_media_nor_text_is_schema_drift():
     with pytest.raises(SchemaDriftError):
         decode_media(text_only("", 1), "audio")
+
+
+
+def text_response(*texts, finish=1):
+    return [[chunk([[None, t]]) for t in texts] + [chunk([[None, ""]], finish)]]
+
+
+def test_decode_text_reads_the_reply():
+    # Plan I: a transcription reply is text parts, possibly over several chunks.
+    assert decode_text(text_response("Hello ", "world.")) == "Hello world."
+    with pytest.raises(SchemaDriftError):
+        decode_text(text_response())
+    with pytest.raises(ServerError):
+        decode_text(text_response("partial", finish=3))  # stopped early (e.g. safety)

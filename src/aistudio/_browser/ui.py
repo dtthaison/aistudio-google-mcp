@@ -99,6 +99,8 @@ class Ui(Protocol):
 
     async def choose_file(self, role: str, name: Name, path: Any) -> None: ...
 
+    async def set_files(self, selector: str, paths: list[str]) -> None: ...
+
     async def hover_text(self, text: str) -> None: ...
 
     async def click_text(self, text: str) -> None: ...
@@ -381,6 +383,14 @@ class PlaywrightUi:
         locator = self._role(role, name, exact).first
         await self._act(role, name, lambda: locator.dispatch_event("click",
                                                                    timeout=CONTROL_TIMEOUT_MS))
+
+    async def set_files(self, selector: str, paths: list[str]) -> None:
+        """Give a page's file input these files (AI Studio's upload input; no chooser needed)."""
+        async def run() -> None:
+            await self._page.locator(selector).first.set_input_files(
+                paths, timeout=CONTROL_TIMEOUT_MS)
+
+        await self._act("file input", selector, run)
 
     async def choose_file(self, role: str, name: Name, path: Any) -> None:
         """Answer the file chooser that clicking this control opens (Flow's Upload media)."""

@@ -251,3 +251,23 @@ async def test_enabled_reads_aria_disabled_in_page_order():
     page = Page({"radio": [Radio(True), Radio(False)]})
     assert await PlaywrightUi(page).enabled("radio", "Approve") == [False, True]
     assert page.asked[-1] == ("radio", "Approve", True)
+
+
+
+async def test_set_files_reaches_the_input():
+    class Input:
+        def __init__(self):
+            self.files = None
+
+        @property
+        def first(self):
+            return self
+
+        async def set_input_files(self, files, timeout=None):
+            self.files = files
+
+    box = Input()
+    page = Page({})
+    page.locator = lambda selector: box
+    await PlaywrightUi(page).set_files("input[type=file]", ["/a.png", "/b.png"])
+    assert box.files == ["/a.png", "/b.png"]
