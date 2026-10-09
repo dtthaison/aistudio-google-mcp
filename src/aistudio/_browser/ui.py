@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import mimetypes
 import re
 import sys
@@ -20,15 +21,12 @@ from typing import Any, Protocol, TypeVar
 from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
-from aistudio._auth.storage import (
-    account_info,
-    filter_state,
-    load_state,
-    missing_cookies,
-    save_state,
-)
-from aistudio.exceptions import AIStudioError, AuthError, BrowserError
+from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
+from aistudio.exceptions import AIStudioError, AuthError, BrowserError, ValidationError
 from aistudio.paths import Profile
+
+log = logging.getLogger(__name__)
+SESSION_SAVE_TIMEOUT_S = 10.0  # reading the cookies at close; never hang the run
 
 TYPE_LIMIT = 200  # longer text is inserted at once (typing 2 KB at 10 ms/key is slow)
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
@@ -401,10 +399,17 @@ class PlaywrightUi:
         reach the page as video/*, which AI Studio's audio input refuses."""
         files: Any = paths
         if types and any(Path(p).suffix.lower() in types for p in paths):
-            files = [{"name": Path(p).name,
-                      "mimeType": types.get(Path(p).suffix.lower())
-                      or mimetypes.guess_type(p)[0] or "application/octet-stream",
-                      "buffer": await asyncio.to_thread(Path(p).read_bytes)} for p in paths]
+            files = []
+            for p in paths:
+                try:
+                    data = await asyncio.to_thread(Path(p).read_bytes)
+                except OSError as exc:
+                    raise ValidationError(f"cannot read {p}: {exc.strerror or exc}",
+                                          hint="nothing was sent") from exc
+                files.append({"name": Path(p).name,
+                              "mimeType": types.get(Path(p).suffix.lower())
+                              or mimetypes.guess_type(p)[0] or "application/octet-stream",
+                              "buffer": data})
 
         async def run() -> None:
             await self._page.locator(selector).first.set_input_files(
@@ -513,18 +518,20 @@ async def _maximize(context: Any, page: Any) -> None:
 
 async def _save_session(profile: Profile, context: Any) -> None:
     """Google rotates the session cookies while Chrome runs; copy them to the storage state
-    that HTTP commands use, so those do not fall back to stale ones. Only a signed-in state
-    replaces a saved one, and a failed save never fails the run."""
+    that HTTP commands use, so those do not fall back to stale ones. Only signed-in cookies
+    replace saved ones; the account and origins stay. The saved file is read after the cookies,
+    just before the write, so a logout from another session meanwhile is not undone. A failed
+    save never fails the run (only its error type is logged, never a value)."""
     try:
-        if not profile.storage_state.exists():
+        # cookies() only: storage_state() opens a helper page for every visited origin
+        cookies = await asyncio.wait_for(context.cookies(), SESSION_SAVE_TIMEOUT_S)
+        if missing_cookies({"cookies": cookies}) or not profile.storage_state.exists():
             return
-        account = account_info(load_state(profile))
-        state = await context.storage_state()
-        if missing_cookies(filter_state(state)):
-            return
-        save_state(profile, state, account)
-    except Exception:
-        pass
+        saved = load_state(profile)
+        save_state(profile, {"cookies": cookies, "origins": saved.get("origins", [])},
+                   account_info(saved))
+    except Exception as exc:
+        log.debug("could not save the browser session (%s)", type(exc).__name__)
 
 
 @contextlib.asynccontextmanager

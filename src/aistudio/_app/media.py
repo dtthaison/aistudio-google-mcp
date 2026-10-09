@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from aistudio._app.models import catalog_with, normalize_model_id
-from aistudio._browser.media_pages import ImagePage, MusicPage, TranscribePage
+from aistudio._browser.media_pages import (
+    AUDIO_TYPES,
+    RELABEL_MAX_BYTES,
+    ImagePage,
+    MusicPage,
+    TranscribePage,
+)
 from aistudio._browser.speech_page import SpeechPage
 from aistudio._browser.ui import open_browser
 from aistudio._media.save import check_folder as _check_folder
@@ -190,6 +196,10 @@ async def transcribe(
 ) -> dict[str, Any]:
     """Speech to text with AI Studio's transcribe model (page-driven; uses the user's quota)."""
     (path,) = _inputs([audio], AUDIO_INPUTS, "an audio file")
+    if path.suffix.lower() in AUDIO_TYPES and path.stat().st_size > RELABEL_MAX_BYTES:
+        raise ValidationError(f"{path} is larger than {RELABEL_MAX_BYTES // (1024 * 1024)} MB, "
+                              f"the most aistudio can send as {path.suffix.lower()} audio",
+                              hint="convert it to .m4a or .mp3 (or split it); nothing was sent")
     vocabulary = " ".join(vocabulary.split())
     # AI Studio refuses these together (live): "custom_vocabulary is incompatible with word
     # timestamps" and "… with diarization". The page turns both on by default.
@@ -414,7 +424,8 @@ def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None,
 
 
 def _is_file(part: Any) -> bool:
-    """A Drive file id sits in slot 5; a small file goes inline as [mime, base64] in slot 2."""
+    """A Drive file id sits in slot 5; an inline file is [mime, base64] in slot 2 (live: audio
+    went inline up to at least 7.7 MB)."""
     inline = wire.opt_index(part, 2)
     return isinstance(wire.opt_index(part, 5), list) or (
         isinstance(inline, list) and isinstance(wire.opt_index(inline, 0), str))

@@ -31,6 +31,8 @@ REMOVE_MEDIA = "Remove media"  # one chip per attached file
 TRANSCRIBE = "Transcribe"
 # Sent with these types (live: as video/* the page took neither; as audio both transcribed)
 AUDIO_TYPES = {".mp4": "audio/mp4", ".webm": "audio/webm"}
+# Relabelled files go as one in-memory upload, and Playwright refuses buffers over 50 MB
+RELABEL_MAX_BYTES = 50 * 1024 * 1024
 VOCABULARY = "Custom vocabulary"
 SWITCHES = {"timestamps": "Word timestamps", "speakers": "Speaker labels",
             "smart": "Smart transcription"}

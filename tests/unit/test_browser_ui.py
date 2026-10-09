@@ -95,16 +95,22 @@ class Cdp:
 
 
 class Context:
-    def __init__(self, state=None):
+    def __init__(self, jar=None, on_cookies=None):
         self.pages = ["page"]
         self.closed = False
         self.cdp = Cdp()
-        self.state = state
+        self.jar, self.on_cookies = jar, on_cookies
+
+    async def cookies(self):
+        if self.on_cookies:
+            await self.on_cookies()
+        if self.jar is None:
+            raise RuntimeError("no cookies")
+        return self.jar
 
     async def storage_state(self):
-        if self.state is None:
-            raise RuntimeError("no state")
-        return self.state
+        # Final review M1: opens a helper page and loads every visited origin; never used
+        raise AssertionError("the session save must read cookies only")
 
     async def new_cdp_session(self, page):
         return self.cdp
@@ -235,36 +241,98 @@ def cookie(name, value):
             "httpOnly": True, "secure": True, "sameSite": "Lax"}
 
 
-async def test_a_browser_run_saves_the_refreshed_session(logged_in_profile):
+FRESH = [cookie("SID", "new-sid"), cookie("SAPISID", "new-sapisid")]
+
+
+async def run_browser(profile, context):
+    profile.chrome_dir.mkdir(parents=True, exist_ok=True)
+    async with open_browser(profile, playwright_factory=lambda: Playwright(Chromium(context))):
+        pass
+    assert context.closed  # a failed save never keeps Chrome open
+
+
+async def test_a_browser_run_saves_the_refreshed_session(aistudio_home):
     # Live: browser runs rotate Google's cookies, and the stored copy (used by plain HTTP
     # commands) went stale hours after a login: "Request had invalid authentication credentials".
     import json
 
-    profile = logged_in_profile(authuser=1)
-    profile.chrome_dir.mkdir(parents=True, exist_ok=True)
-    fresh = {"cookies": [cookie("SID", "new-sid"), cookie("SAPISID", "new-sapisid")],
-             "origins": []}
-    async with open_browser(profile, playwright_factory=lambda: Playwright(
-            Chromium(Context(state=fresh)))):
-        pass
+    from aistudio._auth.storage import AccountInfo, save_state
+    from aistudio.paths import get_profile
+
+    profile = get_profile("default")
+    origin = {"origin": "https://aistudio.google.com", "localStorage": []}
+    save_state(profile, {"cookies": [cookie("SID", "old")], "origins": [origin]},
+               AccountInfo(email="me@example.com", authuser=1))
+    other = {**cookie("track", "x"), "domain": ".example.com"}
+    await run_browser(profile, Context(jar=[*FRESH, other]))
     saved = json.loads(profile.storage_state.read_text())
-    assert {c["name"]: c["value"] for c in saved["cookies"]}["SID"] == "new-sid"
-    assert saved["aistudio"]["authuser"] == 1  # the account stays as it was
+    assert {c["name"]: c["value"] for c in saved["cookies"]} == {"SID": "new-sid",
+                                                                 "SAPISID": "new-sapisid"}
+    assert saved["origins"] == [origin]  # only cookies are refreshed
+    assert saved["aistudio"] == {"email": "me@example.com", "authuser": 1}
 
 
-async def test_a_signed_out_browser_never_overwrites_the_session(logged_in_profile):
+async def test_a_signed_out_browser_never_overwrites_the_session(logged_in_profile, caplog):
+    import logging
+
     profile = logged_in_profile()
-    profile.chrome_dir.mkdir(parents=True, exist_ok=True)
     before = profile.storage_state.read_text()
-    signed_out = {"cookies": [cookie("NID", "x")], "origins": []}
-    async with open_browser(profile, playwright_factory=lambda: Playwright(
-            Chromium(Context(state=signed_out)))):
-        pass
+    await run_browser(profile, Context(jar=[cookie("NID", "x")]))
     assert profile.storage_state.read_text() == before
-    async with open_browser(profile, playwright_factory=lambda: Playwright(
-            Chromium(Context(state=None)))):  # reading the state fails: the run still ends
-        pass
+    with caplog.at_level(logging.DEBUG, logger="aistudio._browser.ui"):
+        await run_browser(profile, Context(jar=None))  # reading fails: the run still ends
     assert profile.storage_state.read_text() == before
+    assert "could not save the browser session (RuntimeError)" in caplog.text
+
+
+async def test_the_session_save_never_creates_or_repairs_a_file(aistudio_home):
+    from aistudio.paths import get_profile
+
+    fresh_profile = get_profile("new")
+    await run_browser(fresh_profile, Context(jar=FRESH))
+    assert not fresh_profile.storage_state.exists()  # never logged in: nothing to refresh
+    broken = get_profile("broken")
+    broken.ensure()
+    broken.storage_state.write_text("not json")
+    await run_browser(broken, Context(jar=FRESH))
+    assert broken.storage_state.read_text() == "not json"
+
+
+async def test_a_logout_during_the_run_is_not_undone(logged_in_profile):
+    # Final review M2: another session's "auth logout" while Chrome runs must stay logged out.
+    profile = logged_in_profile()
+
+    async def logout():
+        profile.storage_state.unlink()
+
+    await run_browser(profile, Context(jar=FRESH, on_cookies=logout))
+    assert not profile.storage_state.exists()
+
+
+async def test_a_hanging_cookie_read_does_not_hang_the_run(logged_in_profile, monkeypatch):
+    import asyncio
+
+    from aistudio._browser import ui as ui_module
+
+    monkeypatch.setattr(ui_module, "SESSION_SAVE_TIMEOUT_S", 0.01)
+    profile = logged_in_profile()
+    before = profile.storage_state.read_text()
+
+    async def hang():
+        await asyncio.sleep(60)
+
+    await asyncio.wait_for(run_browser(profile, Context(jar=FRESH, on_cookies=hang)), 5)
+    assert profile.storage_state.read_text() == before
+
+
+async def test_an_unreadable_file_is_a_clear_error(tmp_path):
+    # Final review M10: the file vanished after the size check.
+    from aistudio.exceptions import ValidationError
+
+    with pytest.raises(ValidationError) as info:
+        await PlaywrightUi(Page()).set_files("input[type=file]", [str(tmp_path / "gone.mp4")],
+                                             {".mp4": "audio/mp4"})
+    assert "cannot read" in info.value.message
 
 
 async def test_set_files_labels_given_types(tmp_path):

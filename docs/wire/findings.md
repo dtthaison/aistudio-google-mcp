@@ -678,7 +678,16 @@ blocked; the RPCs that went through are free.
   Google session cookies while it runs, so after some browser runs the saved copy stopped
   working: a GenerateContent call failed with "Request had invalid authentication credentials"
   (`AUTH_ERROR`), although the Chrome profile was still signed in.
-- Fix: `open_browser` copies the context's storage state into `storage_state.json` when it
-  closes. It keeps the saved account (`email`, `authuser`), never replaces a saved session with
-  one missing `SID`/`SAPISID` (signed out), and ignores a failed save. No cookie values are
-  logged.
+- Fix: `open_browser` copies the browser's cookies (`context.cookies()`, at most 10 s) into
+  `storage_state.json` when it closes. `storage_state()` was not used, because it opens a helper
+  page for every visited origin.
+  - It keeps the saved account (`email`, `authuser`) and origins.
+  - It never replaces a saved session with one missing `SID`/`SAPISID` (signed out), and never
+    creates or repairs the file.
+  - It reads the file after the cookies, just before the write, so a logout from another session
+    meanwhile is not undone.
+  - A failed save only logs its error type; no cookie values are logged.
+- Verified live: after a free browser run, `aistudio auth check --test` went from `AUTH_ERROR` to
+  `ok` without a new login.
+- If the user signs into another account in aistudio's Chrome, HTTP commands now follow it (the
+  saved `authuser` stays).

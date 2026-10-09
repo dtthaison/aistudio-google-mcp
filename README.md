@@ -60,7 +60,9 @@ Generation (`generate speech|image|music`, image edits with `--image`, and `tran
 Studio's own page in a minimized Chrome window and uses your account's quota. No API key is
 needed. Files you pass to `--image` or `transcribe` are uploaded to your Google Drive (AI
 Studio's folder) and stay there until you delete them. `transcribe` takes .mp3, .wav, .m4a,
-.mp4, .webm, .flac, .ogg/.opus, .aac and .aiff audio. Catalog prices on 2026-10-07 were about
+.flac, .ogg/.opus, .aac and .aiff audio, and audio-only .mp4/.webm up to 50 MB. Each browser
+run also refreshes the saved session that the plain-HTTP commands use. If you sign into another
+Google account in aistudio's Chrome, those commands follow that account. Catalog prices on 2026-10-07 were about
 $0.034 per image (`gemini-3.1-flash-lite-image`, the default), $0.04 per clip
 (`lyria-3-clip-preview`, the default) and $0.08 per full song (`-m lyria-3.5`). Video (Veo) needs
 a paid upgrade and Imagen refuses this kind of session, so neither is offered. Chatting with a

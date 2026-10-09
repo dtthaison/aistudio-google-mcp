@@ -375,11 +375,15 @@ async def test_image_inputs_are_checked_before_the_browser(logged_in_profile, ma
         assert opened == []
 
 
-def transcript_body(*texts, finish=1):
+def transcript_body(*texts, finish=1, plain=False):
+    """Live shape: the transcript in slot 22 (``plain``: text only in slot 1, as a refusal)."""
     def chunk(parts, done=None):
         candidate = [[parts, "model"]] + ([done] if done is not None else [])
         return [[candidate], None, [9, 1, 10], None, None, None, None, "v1_id"]
-    return json.dumps([[chunk([[None, t]]) for t in texts] + [chunk([[None, ""]], finish)]])
+
+    def part(t):
+        return [None, t] if plain else [None, t] + [None] * 20 + [[t]]
+    return json.dumps([[chunk([part(t)]) for t in texts] + [chunk([[None, ""]], finish)]])
 
 
 SENT_AUDIO = json.dumps(["models/gemini-3.5-transcribe",
@@ -407,6 +411,7 @@ async def test_transcribe_writes_text(logged_in_profile, make_client, fake_ui, c
     assert result["text"] == "Xin chào Yuri Handmade."
     assert result["model"] == "gemini-3.5-transcribe"
     assert (tmp_path / "t.txt").read_text(encoding="utf-8") == "Xin chào Yuri Handmade."
+    assert "warnings" not in result
     assert ("activate", "switch", "Word timestamps", 0) in ui.ops and opened == ["minimized"]
 
 
@@ -538,11 +543,30 @@ async def test_mp4_and_webm_audio_are_accepted(logged_in_profile, make_client, f
 
 
 @respx.mock
+async def test_large_mp4_and_webm_are_refused_before_the_browser(logged_in_profile, make_client,
+                                                                 fake_ui, captured, tmp_path):
+    # Final review I1: relabelled files go as one in-memory upload, which Playwright caps at
+    # 50 MB; past it the attach failed after Chrome opened with a "page changed" error.
+    from aistudio._browser.media_pages import RELABEL_MAX_BYTES
+
+    serve_catalog(captured)
+    audio = tmp_path / "meeting.webm"
+    with audio.open("wb") as fh:
+        fh.truncate(RELABEL_MAX_BYTES + 1)  # sparse: no 50 MB written
+    opened = []
+    with pytest.raises(ValidationError) as info:
+        await transcribe(logged_in_profile(), audio, client_factory=lambda p: make_client(),
+                         browser=browser_with(transcribe_ui(fake_ui, "[]"), opened))
+    assert "50 MB" in info.value.message and ".m4a" in (info.value.hint or "")
+    assert opened == []
+
+
+@respx.mock
 async def test_a_plain_text_reply_is_flagged(logged_in_profile, make_client, fake_ui, captured,
                                              tmp_path):
     serve_catalog(captured)
     result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
-                                  transcript_body("I can't transcribe this."))
+                                  transcript_body("I can't transcribe this.", plain=True))
     assert result["text"] == "I can't transcribe this."
     assert any("plain text, not a transcript" in w for w in result["warnings"])
 

@@ -421,8 +421,11 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 >   timestamps and speaker labels off, because AI Studio refuses those combinations. A transcript
 >   cut off at the model's output limit is kept, with a warning.
 > - **2026-10-09 (plan J):** `transcribe` also takes `.mp4` and `.webm` audio (sent labelled
->   `audio/mp4` / `audio/webm`). A reply with plain text instead of a transcript is kept, with a
->   warning that it may be a refusal.
+>   `audio/mp4` / `audio/webm`) up to 50 MB, Playwright's limit for such uploads. A reply with
+>   plain text instead of a transcript is kept, with a warning that it may be a refusal.
+> - **2026-10-09:** each browser run copies the browser's refreshed cookies back into the
+>   storage state (signed-in only, account and origins kept), so plain-HTTP commands do not go
+>   stale (§4.4).
 > - The table below is the original plan. `--count`, `--aspect`, `--lyrics`, `--duration` and
 >   job commands were not built.
 
