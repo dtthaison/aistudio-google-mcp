@@ -125,7 +125,7 @@ class FakePage:
     async def extend(self, prompt, *, timeout_s):
         self.calls.append(("extend", prompt))
         self.started = True
-        self.paid_media, self.last_scene_id = ["m2"], "s1"
+        self.paid_media = ["m2"]
         return FlowOutcome([media("m2")], 1021, False)
 
     async def open_character(self, pid):
@@ -246,7 +246,7 @@ async def test_a_cost_different_from_the_table_is_a_warning(logged_in_profile, t
     result = await flow_extend(profile, VID, "rolls off", max_credits=10,
                                out=tmp_path / "x.mp4", **kw)
     assert result["status"] == "done" and result["credits_spent"] == 12
-    assert result["warnings"] == ["credits fell by 12 during this run; aistudio's table says 10"]
+    assert result["warnings"][0] == "credits fell by 12 during this run; aistudio's table says 10"
     assert (tmp_path / "x.mp4").exists() and result["files"][0]["media_id"] == "m2"
 
 
@@ -332,7 +332,7 @@ async def test_extend_reports_the_scene_and_the_cli_model_id(logged_in_profile, 
     kw, _, _ = harness()
     result = await flow_extend(profile, VID, "rolls off", max_credits=10, out=tmp_path / "x.mp4",
                                **kw)
-    assert result["scene_id"] == "s1" and result["model"] == "veo-3.1-lite"
+    assert result["scene_id"] is None and result["model"] == "veo-3.1-lite"  # none listed
 
 
 async def test_a_second_upload_never_takes_the_first_uploads_id(logged_in_profile, tmp_path):

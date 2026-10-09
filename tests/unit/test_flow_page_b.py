@@ -178,15 +178,6 @@ async def test_upload_without_a_rights_dialog_still_completes(fake_ui, tmp_path)
     assert ("dispatch", "button", "I agree") not in ui.ops
 
 
-async def test_extend_reads_the_scene_flow_creates(fake_ui):
-    scene = [["s1", "Untitled Scene", None, [1, 0], [1, 0], 2, None, []]]
-    made = CapturedResponse("rqZuUc", 200, batch("rqZuUc", scene), "")
-    ui = extend_ui(fake_ui, ("rqZuUc", [made]), ("as29s", [poll("as29s", record(media_id="m2"))]))
-    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
-    await page.extend("rolls off", timeout_s=60)
-    assert page.last_scene_id == "s1"
-
-
 async def test_extend_starts_only_once_the_editor_shows_the_prompt(fake_ui):
     # Final review I2: Start spends 10 credits with no quote; a lagging insert sent nothing.
     from aistudio.exceptions import BrowserError
@@ -211,13 +202,14 @@ async def test_character_starts_only_once_the_editor_shows_the_prompt(fake_ui):
     assert not any(op[0] == "click" for op in ui.ops)
 
 
-async def test_extend_reads_the_start_before_the_scene(fake_ui):
-    # Plan C review M2: no 15 s wait for a scene reply that may never come before the spend.
+async def test_extend_does_not_wait_for_an_unverified_scene_reply(fake_ui):
+    # Deferred minor #51: the scene comes from the project itself (the rqZuUc reply's shape was
+    # never seen live), so nothing waits for it.
     ui = extend_ui(fake_ui, ("as29s", [poll("as29s", record(media_id="m2"))]))
-    await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).extend("rolls off", timeout_s=60)
-    methods = [m for m, _ in ui.waits]
-    assert methods.index("fZytfe") < methods.index("rqZuUc")
-    assert dict(ui.waits)["rqZuUc"] <= 2.0
+    page = FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30)
+    await page.extend("rolls off", timeout_s=60)
+    assert "rqZuUc" not in [m for m, _ in ui.waits]
+    assert not hasattr(page, "last_scene_id")
 
 
 async def test_start_character_needs_the_character_page(fake_ui):

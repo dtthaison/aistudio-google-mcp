@@ -683,3 +683,14 @@ async def test_a_retried_restore_says_the_first_attempt_failed(logged_in_profile
                                  duration=8, out=tmp_path / "a.mp4", **kw)
     assert any("restored on a second try" in w and "did not save" in w
                for w in result["warnings"])
+
+
+async def test_an_unfinished_reply_is_a_timeout_not_nothing_spent(logged_in_profile, tmp_path):
+    from aistudio.exceptions import WaitTimeoutError
+
+    kw, _, _ = harness(turn=AgentTurn("Generating…", None, generating=True, answered=False),
+                       defaults=Defaults("Nano Banana 2.1", "16:9", 1, asks=True))
+    with pytest.raises(WaitTimeoutError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+    assert "had not finished replying" in info.value.message
+    assert "check the project in Flow" in info.value.hint

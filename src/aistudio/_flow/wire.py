@@ -10,6 +10,10 @@ import json
 from typing import Any
 
 
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not valid JSON")  # NaN/Infinity: --json output must stay JSON
+
+
 def payloads(text: str) -> list[tuple[str | None, Any]]:
     """Every ``wrb.fr`` entry as ``(rpcid, payload)``, in order (StreamChat's rpcid is None)."""
     out: list[tuple[str | None, Any]] = []
@@ -18,14 +22,14 @@ def payloads(text: str) -> list[tuple[str | None, Any]]:
         if not line.startswith("[["):
             continue
         try:
-            entries = json.loads(line)
+            entries = json.loads(line, parse_constant=_reject_constant)
         except ValueError:
             continue
         for entry in entries if isinstance(entries, list) else []:
             if (isinstance(entry, list) and len(entry) > 2 and entry[0] == "wrb.fr"
                     and isinstance(entry[2], str)):
                 try:
-                    payload = json.loads(entry[2])
+                    payload = json.loads(entry[2], parse_constant=_reject_constant)
                 except ValueError:
                     continue
                 out.append((entry[1] if isinstance(entry[1], str) else None, payload))

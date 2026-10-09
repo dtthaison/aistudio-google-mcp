@@ -197,3 +197,20 @@ async def test_body_mode_must_take_effect_before_anything_is_priced(fake_ui):
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui, now=Clock()).open_body(PID, "c1")
     assert "nothing was spent" in info.value.message
+
+
+async def test_a_stitch_poll_error_counts_toward_the_limit(fake_ui):
+    # Audit (next to #61): one failed poll ended a stitch that was still running.
+    data = b"\x00\x00\x00\x18ftypisom" + b"x" * 50
+    ui = fake_ui({"GjQLTd": [rpc("GjQLTd", [None, [[JOB]]])],
+                  "IxdSwd": [rpc("IxdSwd", [3, "", "", 3, base64.b64encode(data).decode()])]})
+    real, failed = ui.batch_rpc, []
+
+    async def flaky(rpcid, args_json):
+        if rpcid == "IxdSwd" and not failed:
+            failed.append(rpcid)
+            raise BrowserError("the page did not show what aistudio expected in time")
+        return await real(rpcid, args_json)
+
+    ui.batch_rpc = flaky
+    assert await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=60) == data

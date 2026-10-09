@@ -43,7 +43,6 @@ from aistudio._flow.rows import (
     stitch_state,
 )
 from aistudio._flow.wire import decode_batch, payloads
-from aistudio._rpc.wire import opt_index
 from aistudio.exceptions import (
     BrowserError,
     NotFoundError,
@@ -133,6 +132,7 @@ class AgentTurn:
     media: tuple[str, ...] = ()  # attached media ids sent with it
     generated: tuple[Generated, ...] = ()  # made without asking (free models)
     generating: bool = False  # a free generation was still running when the wait ended
+    answered: bool = True  # a StreamChat reply ended; False: the stream was still open
 
 
 @dataclass(frozen=True)
@@ -179,7 +179,6 @@ class FlowPage:
         self._clock = clock  # wall clock, compared with Flow's job creation times
         self._poll_s = poll_s
         self.paid_media: list[str] = []  # media ids of the approved job, as soon as seen
-        self.last_scene_id: str | None = None  # the scene an extension creates
         self.started = False  # Start was pressed: from here on, failures may have spent
 
     async def open_project(self, project_id: str) -> None:
@@ -267,9 +266,13 @@ class FlowPage:
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             seen: list[object] = []
+            answered = False
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
-                if response is None or response.status >= 400:
+                if response is None:
+                    continue
+                answered = True
+                if response.status >= 400:
                     continue
                 body = response.request_body
                 quote = None
@@ -286,8 +289,10 @@ class FlowPage:
                                      tuple(sent_characters(body)), tuple(sent_media(body)),
                                      tuple(generated))
                 deadline = min(deadline, self._now() + REPLY_GRACE_S)
+        # A reply is captured only when its stream ends (live: ~47 s for free images): an open
+        # stream at the deadline may still be generating, so it is never "nothing was spent"
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
-                         generating=agent_pending(seen))
+                         generating=agent_pending(seen) or not answered, answered=answered)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
@@ -498,13 +503,17 @@ class FlowPage:
         deadline, failures = self._now() + timeout_s, 0
         while self._now() < deadline:
             await self._ui.pause(STITCH_POLL_MS)
-            status, text = await self._ui.batch_rpc("IxdSwd", json.dumps([[[job]]]))
+            try:
+                status, text = await self._ui.batch_rpc("IxdSwd", json.dumps([[[job]]]))
+            except BrowserError:  # one failed poll counts like an unreadable reply
+                status, text = 0, ""
             state, data = (stitch_state(decode_batch(text).get("IxdSwd")) if status < 400
                            else (None, None))
             if state is None:
                 failures += 1
                 if failures >= STITCH_FAILURES:
-                    last = f"HTTP {status}" if status >= 400 else f"HTTP {status}, unreadable"
+                    last = (f"HTTP {status}" if status >= 400 else "no reply" if not status
+                            else f"HTTP {status}, unreadable")
                     raise BrowserError(f"Flow stopped answering about the stitch (last reply "
                                        f"{last})",
                                        hint="re-run; if it persists, sign in again with "
@@ -643,10 +652,6 @@ class FlowPage:
             self.started = True
             await self._ui.click("button", START, exact=True, nth=-1)
             started = await log.next("fZytfe", timeout_s=60.0)
-            scene = await log.next("rqZuUc", timeout_s=2.0)  # sent first; usually queued already
-            if scene is not None:
-                scene_id = opt_index(decode_batch(scene.text).get("rqZuUc"), 0, 0)
-                self.last_scene_id = scene_id if isinstance(scene_id, str) else None
             credits, media = (extend_started(decode_batch(started.text).get("fZytfe"))
                               if started is not None and started.status < 400 else (None, []))
             if not media:

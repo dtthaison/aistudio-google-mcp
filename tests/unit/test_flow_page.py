@@ -385,3 +385,11 @@ async def test_a_quote_turn_also_reports_what_flow_made(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert turn.quote is not None and [g.media_id for g in turn.generated] == ["g1"]
+
+
+async def test_an_unfinished_reply_is_a_timeout(fake_ui):
+    # Deferred minor #78: a StreamChat reply is captured only when its stream ends, so a free
+    # run streaming past the limit looked like "no quote; nothing was spent".
+    ui = fake_ui({}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["Generating your images…"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60)
+    assert turn.quote is None and turn.generating and not turn.answered

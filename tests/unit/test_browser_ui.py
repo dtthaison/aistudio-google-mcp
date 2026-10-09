@@ -355,10 +355,9 @@ async def test_set_files_labels_given_types(tmp_path):
     assert given[-1] == [{"name": "talk.mp4", "mimeType": "audio/mp4", "buffer": b"mp4 bytes"}]
     await ui.set_files("input[type=file]", [str(other)], {".mp4": "audio/mp4"})
     assert given[-1] == [str(other)]  # nothing to relabel: Playwright's own type
-    await ui.set_files("input[type=file]", [str(clip), str(other)], {".mp4": "audio/mp4"})
-    first, second = given[-1]
-    assert first["mimeType"] == "audio/mp4" and second["name"] == "talk.wav"
-    assert second["mimeType"].startswith("audio/")  # the platform's guess for .wav
+    # Deferred minor #89: other files would get a guessed type; only one file is relabelled
+    with pytest.raises(ValueError):
+        await ui.set_files("input[type=file]", [str(clip), str(other)], {".mp4": "audio/mp4"})
 
 
 async def test_labels_are_read_in_one_step():

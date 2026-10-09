@@ -22,7 +22,7 @@ from aistudio.exceptions import (
     PlanMismatchError,
     ValidationError,
 )
-from tests.unit.test_app_flow_b import CONTENTS, IMG, VID, listed, media, store
+from tests.unit.test_app_flow_b import CONTENTS, IMG, NOW, VID, listed, media, store
 from tests.unit.test_app_flow_b import PID as PROJECT
 from tests.unit.test_app_flow_b import FakePage as PlanBPage
 from tests.unit.test_app_flow_b import harness as plan_b_harness
@@ -308,10 +308,12 @@ async def test_extend_reports_the_scene_holding_the_new_clip(logged_in_profile, 
     result = await flow_extend(profile, VID, "rolls off", max_credits=10,
                                out=tmp_path / "e.mp4", **kw)
     assert result["scene_id"] == "s9"
+    # Deferred minor #51: Flow's own scene reply was never seen live, so it is not trusted
     kw, _, _ = harness(after=BrowserError("gone"))
     result = await flow_extend(profile, VID, "rolls off", max_credits=10,
                                out=tmp_path / "e2.mp4", **kw)
-    assert result["status"] == "done" and result["scene_id"] == "s1"
+    assert result["status"] == "done" and result["scene_id"] is None
+    assert any("flow scene list" in w for w in result["warnings"])
 
 
 async def test_a_photo_must_be_a_finished_image(logged_in_profile, tmp_path):
@@ -655,3 +657,41 @@ async def test_rename_hint_is_shell_safe(logged_in_profile, tmp_path):
     kw, _, _ = harness(credits=(1010, 1010), rename_error=BrowserError("no"))
     result = await flow_character(profile, name, "a robot", out=tmp_path / "r.png", **kw)
     assert any(f"rename c1 {shlex.quote(name)}" in w for w in result["warnings"])
+
+
+def test_video_bytes_are_checked(tmp_path, monkeypatch):
+    # Deferred minor #40: any bytes that were not an image were saved as .mp4.
+    from aistudio._app.flow import _stitched, _type_of
+
+    assert _type_of("video", b"\x00\x00\x00\x18ftypisom...") == ("video/mp4", ".mp4")
+    assert _type_of("video", b"\x1a\x45\xdf\xa3webm...") == ("video/webm", ".webm")
+    assert _type_of("video", b"<!doctype html><p>sign in") == ("application/octet-stream", ".bin")
+    monkeypatch.chdir(tmp_path)
+    result = _stitched(b"<!doctype html>", [["m1", None, [], [8]]], out=None, overwrite=False,
+                       stamp=NOW, project_id=PROJECT)
+    assert result["files"][0]["path"].endswith(".bin")
+    assert any("not a video" in w for w in result["warnings"])
+
+
+async def test_an_unreported_id_drops_the_personality_with_a_note(logged_in_profile, tmp_path):
+    # Audit: without an id the personality was skipped, yet the result still showed it.
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness(credits=(1010, 1010), outcome_id=None)
+    result = await flow_character(profile, "Robot", "a robot", personality="cheerful",
+                                  out=tmp_path / "r.png", **kw)
+    assert "personality" not in result
+    assert any("personality" in w and "character personality" in w for w in result["warnings"])
+
+
+async def test_a_failed_credit_read_does_not_block_direct_spend(logged_in_profile, tmp_path):
+    # Audit (next to #80): only reporting uses this read; a changed account menu must not stop
+    # an extend or a character before anything is sent.
+    profile = profile_with_project(logged_in_profile)
+    kw, _, _ = harness(credits=(BrowserError("no account menu"), 1000))
+    result = await flow_extend(profile, VID, "rolls off", max_credits=10,
+                               out=tmp_path / "e.mp4", **kw)
+    assert result["status"] == "done"
+    assert any("not verified" in w for w in result["warnings"])
+    kw, _, _ = harness(credits=(BrowserError("no account menu"), 1010))
+    result = await flow_character(profile, "Robot", "a robot", out=tmp_path / "r.png", **kw)
+    assert result["status"] == "done"

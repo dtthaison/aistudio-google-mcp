@@ -105,10 +105,7 @@ async def flow_generate(
     free: tuple[list[Any], list[str]] | None = None
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        try:  # free models generate without asking (plan F); a quote does not need this read
-            before = await page.credits()
-        except Exception:  # noqa: BLE001 - only used to report a charge
-            before = None
+        before = await _credits_before(page)  # free models generate without asking (plan F)
         if before is None:
             warnings.append("could not read Flow credits before the run")
         project_id = await _open(page, profile, project_id)
@@ -179,8 +176,10 @@ async def flow_generate(
                 aspect=aspect))
             if turn.quote is None and not turn.generated and turn.generating:
                 waiting = await _reject_noting(page, expect=False)
-                raise WaitTimeoutError(f"Flow was still generating without asking when aistudio "
-                                       f"stopped waiting: {turn.text[-300:]}",
+                still = ("Flow's agent had not finished replying" if not turn.answered
+                         else "Flow was still generating without asking")
+                raise WaitTimeoutError(f"{still} when aistudio stopped waiting: "
+                                       f"{turn.text[-300:]}",
                                        hint=_with_note("Flow may still finish it; check the "
                                                        "project in Flow before re-running",
                                                        waiting))
@@ -622,6 +621,14 @@ def _cost_warning(before: int | None, after: int | None, price: int) -> tuple[in
     return spent, note
 
 
+async def _credits_before(page: Any) -> int | None:
+    """Credits before a run, or None: only used to report a charge, so it never fails a run."""
+    try:
+        return await page.credits()
+    except Exception:  # noqa: BLE001 - e.g. a changed account menu
+        return None
+
+
 async def _credits_after(page: Any, fallback: int | None) -> tuple[int | None, list[str]]:
     """Credits after a spend; never raises, so a paid result is never turned into "re-run"."""
     try:
@@ -647,7 +654,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await page.credits()
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
@@ -667,9 +674,12 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
             raise _spent(exc, page.paid_media, project_id) from exc  # Start may have spent
         after, read_notes = await _credits_after(page, outcome.credits_left)
         new_ids = page.paid_media or [m.media_id for m in outcome.media]
-        scene_id = await _scene_holding(page, project_id, new_ids) or page.last_scene_id
+        scene_id = await _scene_holding(page, project_id, new_ids)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
+    if scene_id is None:
+        warnings.append('Flow had not listed the extension\'s scene yet; find it with '
+                        '"aistudio flow scene list"')
     project_url = PROJECT_URL.format(id=project_id)
     if outcome.timed_out:
         return {"status": "timeout",
@@ -701,7 +711,7 @@ async def flow_edit(profile: Profile, media_id: str, text: str, *,
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await page.credits()
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         source = next((m for m in contents.media if m.media_id == media_id), None)
@@ -779,7 +789,7 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await page.credits()
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         _free_name(contents, name)
@@ -831,6 +841,10 @@ async def flow_character(profile: Profile, name: str, description: str | None = 
                                  f"aistudio flow character rename {cid} {shlex.quote(name)}")
                     name = UNTITLED
         personality = personality.strip() if personality is not None else None
+        if personality and cid is None:  # nothing to attach it to: say so, never claim it
+            notes.append("the personality was not saved (no character id); set it with: "
+                         "aistudio flow character personality <id> -- TEXT")
+            personality = None
         if personality and cid is not None:
             try:
                 await page.set_personality(project_id, cid, personality)
@@ -940,7 +954,7 @@ async def flow_character_body(profile: Profile, character_id: str, prompt: str, 
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await page.credits()
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
         project_id = await _open(page, profile, project_id)
         contents = await page.contents(project_id)
         if not any(c.id == character_id for c in contents.characters):
@@ -1081,6 +1095,8 @@ def _stitched(data: bytes, args: list[list[Any]], *, out: Path | None, overwrite
     path = out if out is not None else free_name(Path(f"flow-scene-{stamp:%Y%m%d-%H%M%S}{ext}"))
     warnings = ([f"{out} holds {mime} data; its extension says otherwise"]
                 if out is not None and _normal_suffix(out.suffix) != ext else [])
+    if ext == ".bin":
+        warnings.append("Flow's reply was not a video; check the scene in Flow")
     saved = write_file(path, data, overwrite=overwrite and path == out)
     return {"status": "done",
             "files": [{"path": str(saved), "mime_type": mime, "bytes": len(data)}],
@@ -1202,9 +1218,11 @@ def _type_of(kind: str, data: bytes) -> tuple[str, str]:
             return "image/avif", ".avif"
         if any(b in (b"heic", b"heix", b"mif1") for b in brands):
             return "image/heic", ".heic"
-    if kind == "video":
+    if kind == "video" and data[4:8] == b"ftyp":
         return "video/mp4", ".mp4"
-    return "application/octet-stream", ".bin"  # unknown image bytes: never call them JPEG
+    if kind == "video" and data.startswith(b"\x1a\x45\xdf\xa3"):  # EBML: WebM
+        return "video/webm", ".webm"
+    return "application/octet-stream", ".bin"  # unknown bytes: never call them JPEG or MP4
 
 
 def _normal_suffix(suffix: str) -> str:

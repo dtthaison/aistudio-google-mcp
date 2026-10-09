@@ -163,3 +163,11 @@ def test_a_failed_result_without_media_is_not_pending():
     assert agent_pending([generated_call()]) and not agent_pending([generated_call(), failed])
     odd = [["generate_image", "generate_image", [[["prompt", [None, None, "x"]]]], ["not", "str"]]]
     assert agent_pending([odd]) in (True, False)  # never an unhashable-key crash
+
+
+def test_flow_payloads_reject_nan():
+    # Audit (next to #9): NaN would make --json output invalid JSON.
+    bad_inner = json.dumps([["wrb.fr", "x", "[NaN, 1]"]])
+    bad_outer = '[["wrb.fr", "y", "[2]", Infinity]]'
+    good = json.dumps([["wrb.fr", "z", "[3]"]])
+    assert payloads(")]}'\n\n" + "\n".join([bad_inner, bad_outer, good])) == [("z", [3])]

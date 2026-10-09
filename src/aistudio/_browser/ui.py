@@ -404,6 +404,8 @@ class PlaywrightUi:
         reach the page as video/*, which AI Studio's audio input refuses."""
         files: Any = paths
         if types and any(Path(p).suffix.lower() in types for p in paths):
+            if len(paths) > 1:  # the others would only get a guessed type
+                raise ValueError("relabelling file types supports one file at a time")
             files = []
             for p in paths:
                 try:

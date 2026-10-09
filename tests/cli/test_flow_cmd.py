@@ -315,3 +315,15 @@ def test_edit_and_extend_wait_longer_by_default(logged_in_profile, monkeypatch):
     CliRunner().invoke(cli, ["flow", "edit", "m1", "x", "--max-credits", "20", "--json"])
     CliRunner().invoke(cli, ["flow", "extend", "m1", "x", "--max-credits", "10", "--json"])
     assert [c[1]["timeout_s"] for c in calls] == [1200.0, 1200.0]
+
+
+def test_character_output_without_an_id(logged_in_profile, monkeypatch):
+    # Audit: "Created character None (Untitled character)".
+    logged_in_profile()
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character",
+                        fake({"status": "done", "character_id": None,
+                              "name": "Untitled character", "files": [], "credits_spent": 0,
+                              "credits_left": 1020, "project": "p"}, []))
+    res = CliRunner().invoke(cli, ["flow", "character", "create", "Robot", "a robot"])
+    assert res.exit_code == 0, res.output
+    assert "None" not in res.stdout and "id not reported" in res.stdout

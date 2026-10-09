@@ -254,7 +254,8 @@ def character_create(state: CliState, name: str, description: str | None, photo:
         overwrite=force, visible=visible))
 
     def render(data: dict[str, Any]) -> None:
-        stdout.print(f"Created character {data['character_id']} ({data['name']})", markup=False)
+        cid = data["character_id"] or "(id not reported)"
+        stdout.print(f"Created character {cid} ({data['name']})", markup=False)
         _render_files(data)
 
     emit(result, json_output=json_output, render=render)
