@@ -256,11 +256,8 @@ async def flow_generate(
             raise
         finally:
             if wanted != previous:
-                try:
-                    await page.apply_defaults(kind, previous)
-                except Exception:  # noqa: BLE001 - restoring must never hide the run's outcome
-                    note = (f"could not restore Flow's {kind} defaults ({previous.model}, "
-                            f"{previous.aspect}, x{previous.count}); set them in Flow's settings")
+                note = await _restore_defaults(page, project_id, kind, previous)
+                if note:
                     warnings.append(note)
                     if failure is not None:
                         failure.hint = _with_note(failure.hint, note)
@@ -436,6 +433,22 @@ def _attachment_titles(contents: ProjectContents | None,
                                        "nothing was sent")
         titles.append(title)
     return titles, set(contents.titles) | {m.media_id for m in contents.media}
+
+
+async def _restore_defaults(page: Any, project_id: str, kind: str, previous: Defaults) -> str:
+    """Put the person's Flow settings back; a note when that fails. After a long wait the page
+    can refuse to save (live), so a freshly loaded project is tried once more."""
+    reason = ""
+    for attempt in range(2):
+        try:
+            if attempt:
+                await page.open_project(project_id)
+            await page.apply_defaults(kind, previous)
+            return ""
+        except Exception as exc:  # noqa: BLE001 - restoring must never hide the run's outcome
+            reason = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+    return (f"could not restore Flow's {kind} defaults ({previous.model}, {previous.aspect}, "
+            f"x{previous.count}): {reason}; set them in Flow's settings")
 
 
 _STILL_WAITING = "Flow's request may still be waiting: press Reject on it in Flow, never Approve"

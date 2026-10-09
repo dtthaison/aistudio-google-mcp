@@ -291,3 +291,14 @@ def test_edit_command(logged_in_profile, monkeypatch):
                                    "--max-credits", "20", "--timeout", "300", "--json"])
     assert res.exit_code == 0 and calls[-1][0] == ("m1", "make it black and white")
     assert calls[-1][1]["max_credits"] == 20 and calls[-1][1]["timeout_s"] == 300.0
+
+
+
+def test_video_waits_longer_by_default(logged_in_profile, monkeypatch):
+    # Live: a queued Veo 3.1 Fast clip took more than 10 minutes.
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", fake(QUOTED, calls))
+    CliRunner().invoke(cli, ["flow", "video", "x", "--json"])
+    CliRunner().invoke(cli, ["flow", "image", "x", "--json"])
+    assert [c[1]["timeout_s"] for c in calls] == [1200.0, 600.0]

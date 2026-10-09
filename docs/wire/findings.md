@@ -603,3 +603,15 @@ blocked; the RPCs that went through are free.
   it, so its tile caption never appeared and the attach timed out (nothing was sent). aistudio
   now reloads until every uploaded file's tile is shown. Re-run: both uploaded, attached in
   order, 10-credit quote, declined.
+
+### Flow settings restore after a timeout (2026-10-09, free probes)
+
+- A paid Veo 3.1 Fast run queued for more than 10 minutes. aistudio's 600 s wait ran out, and
+  restoring the video settings (Fast 9:16 back to Omni 16:9) then failed. The clip finished later.
+- These did **not** reproduce the failure:
+  - saving settings while a free image generated;
+  - the Fast 9:16 → Omni 16:9 round trip on its own;
+  - saving after the project page sat open for 11 minutes.
+- The remaining difference is a paid video still queued, which was not re-run, to avoid spending.
+- **Change:** a failed restore is retried once on a freshly loaded project, and the warning now
+  carries the reason. `flow video` also waits 1,200 s by default (images still 600 s).

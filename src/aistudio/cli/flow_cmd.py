@@ -96,7 +96,8 @@ def _command(kind: str) -> click.Command:
     @click.option("-o", "--out", type=click.Path(path_type=Path),
                   help="Output file, or a folder for several outputs.")
     @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
-    @click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
+    @click.option("--timeout", type=click.IntRange(30), show_default=True,
+                  default=1200 if kind == "video" else 600,  # queued Fast videos took > 10 min
                   help="Seconds to wait for Flow to finish after approving.")
     @click.option("--ingredient", multiple=True,
                   help="Reference image: a file or a Flow media id (repeatable).")

@@ -38,9 +38,10 @@ class FakePage:
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
                  restore_error=None, follow_error=None, reject_error=None, approve_error=None,
-                 credit_values=(1050, 1040), rejected=1):
+                 credit_values=(1050, 1040), rejected=1, restore_fails=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
         self.credit_values, self.rejected = list(credit_values), rejected
+        self.restore_fails = restore_fails  # None: always fail when restore_error is set
         self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
         self.follow_error, self.paid_media = follow_error, []
         self.outcome = outcome or FlowOutcome([DONE], 1040, False)
@@ -62,7 +63,10 @@ class FakePage:
 
     async def apply_defaults(self, kind, wanted):
         if wanted == self.defaults and self.restore_error:
-            raise self.restore_error
+            if self.restore_fails is None or self.restore_fails > 0:
+                if self.restore_fails is not None:
+                    self.restore_fails -= 1
+                raise self.restore_error
         self.calls.append(("apply", wanted))
 
     async def new_session(self):
@@ -615,9 +619,20 @@ async def test_a_failed_restore_is_reported_on_a_quote_and_on_errors(logged_in_p
     kw, _, _ = harness(restore_error=BrowserError("tune panel"))
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, out=tmp_path / "a.mp4", **kw)
-    assert any("could not restore" in w for w in result["warnings"])
+    assert any("could not restore" in w and "tune panel" in w for w in result["warnings"])
     kw, _, _ = harness(restore_error=BrowserError("tune panel"))
     with pytest.raises(OverBudgetError) as info:
         await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                             duration=8, max_credits=5, out=tmp_path / "b.mp4", **kw)
     assert "could not restore" in info.value.hint
+
+
+
+async def test_a_failed_restore_is_retried_after_a_reload(logged_in_profile, tmp_path):
+    # Live: after a 10-minute wait the restore failed once; a fresh page is tried before warning.
+    kw, pages, _ = harness(restore_error=BrowserError("did not save"), restore_fails=1)
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    assert "warnings" not in result
+    calls = pages[0].calls
+    assert calls[-1] == ("apply", OMNI) and ("open", calls[-2][1]) == calls[-2]
