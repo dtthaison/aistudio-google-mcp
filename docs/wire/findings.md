@@ -615,3 +615,24 @@ blocked; the RPCs that went through are free.
 - The remaining difference is a paid video still queued, which was not re-run, to avoid spending.
 - **Change:** a failed restore is retried once on a freshly loaded project, and the warning now
   carries the reason. `flow video` also waits 1,200 s by default (images still 600 s).
+
+## AI Studio transcription and image editing (2026-10-09, free: GenerateContent blocked)
+
+- **Transcribe page.** `/prompts/new_chat?model=gemini-3.5-transcribe` stays a chat URL showing
+  "Turn speech to transcriptions".
+  - Controls: Drive, Upload, Record Audio, an `input[type=file]` that accepts `audio/*` (.aac, .aif,
+    .flac, .m4a, .mp3, .ogg, .opus, .wav and more), and run settings switches "Word timestamps",
+    "Speaker labels" and "Smart transcription", plus a "Custom vocabulary" input.
+  - After a file is set, a "Remove media" chip and a **"Transcribe"** button appear.
+  - "Transcribe" sent `GenerateContent ["models/gemini-3.5-transcribe", [[[[null, null, null, null,
+    null, [<drive file id>]]], "user"]], null, [null, null, null, 32768, 1, 0.95, 64, …], <token>, …]`.
+    There was **no API-key gate**, although the page shows "No API key selected".
+  - Price (catalog): $2 per million audio tokens in, $12 per million text tokens out.
+- **Image editing.** On an image model's chat page, "Insert images or files" offers Drive, Upload
+  files, Camera and Sample Media. The page's `input[type=file]` accepts images, several at once;
+  each attached file shows a "Remove media" chip.
+  - Run sent `GenerateContent` with `[[[null ×5, [<drive file id>]], [null, "<prompt>"]], "user"]`.
+    There was no gate.
+- **Uploads go to Google Drive.** Setting a file calls `GetAppFolder` and Drive's `files` upload
+  (and `CheckImage` for images), so the request names a Drive file id. AI Studio keeps the
+  uploads in the user's Drive.
