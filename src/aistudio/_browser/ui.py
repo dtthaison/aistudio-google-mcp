@@ -54,7 +54,7 @@ class Ui(Protocol):
 
     async def press_first(self, selector: str, key: str) -> None: ...
 
-    async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None: ...
+    async def wait_enabled(self, role: str, name: Name, *, timeout_s: float = 30.0) -> None: ...
 
     async def click(self, role: str, name: Name, *, exact: bool = False, nth: int = 0) -> None: ...
 
@@ -232,7 +232,7 @@ class PlaywrightUi:
         except Exception as exc:
             raise BrowserError(f"could not press {key} in {selector!r}: {exc}") from exc
 
-    async def wait_enabled(self, role: str, name: str, *, timeout_s: float = 30.0) -> None:
+    async def wait_enabled(self, role: str, name: Name, *, timeout_s: float = 30.0) -> None:
         """Wait until a visible control is enabled (AI Studio disables Send while loading)."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_s

@@ -10,9 +10,11 @@ and it runs from "Generate" (⌘↵ does nothing there). Both send ``GenerateCon
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, ResponseLog, Ui
@@ -31,6 +33,8 @@ VOCABULARY = "Custom vocabulary"
 SWITCHES = {"timestamps": "Word timestamps", "speakers": "Speaker labels",
             "smart": "Smart transcription"}
 ATTACH_TIMEOUT_S = 60.0
+RUN = re.compile(r"^Run\b")  # the image page's Run ("Run keyboard_command_key …")
+UPLOAD_S_PER_MB = 5.0  # the action button stays disabled until the Drive upload ends (live)
 
 
 def _url(model_id: str) -> str:
@@ -46,17 +50,21 @@ async def _await_generation(log: ResponseLog, kind: str, timeout_s: float) -> Ca
     return response
 
 
-async def _attach(ui: Ui, paths: list[str], now: Callable[[], float]) -> None:
-    """Give the page's file input these files and wait until each shows its chip, so Run never
-    goes out without them (they upload to the user's Drive first)."""
+async def _attach(ui: Ui, paths: list[str], now: Callable[[], float],
+                  ready: tuple[str, Any]) -> None:
+    """Give the page's file input these files, wait for each chip, then for the page's action
+    button: the chip shows at once, but the button stays disabled until the Drive upload ends
+    (live), and pressing earlier would send the request without the files."""
     await ui.set_files(FILE_INPUT, paths)
     deadline = now() + ATTACH_TIMEOUT_S
-    while now() < deadline:
-        if len(await ui.labels("button", REMOVE_MEDIA)) >= len(paths):
-            return
+    while len(await ui.labels("button", REMOVE_MEDIA)) < len(paths):
+        if now() >= deadline:
+            raise BrowserError(f"AI Studio did not take {len(paths)} file(s); nothing was "
+                               "generated",
+                               hint="check the files open on this computer; re-run with --visible")
         await ui.pause(1000)
-    raise BrowserError(f"AI Studio did not take {len(paths)} file(s); nothing was generated",
-                       hint="check the files open on this computer; re-run with --visible")
+    megabytes = sum(os.path.getsize(p) for p in paths if os.path.exists(p)) / 1e6
+    await ui.wait_enabled(*ready, timeout_s=min(900.0, 60.0 + UPLOAD_S_PER_MB * megabytes))
 
 
 class ImagePage:
@@ -68,7 +76,7 @@ class ImagePage:
         await self._ui.goto(_url(model_id))
 
     async def attach(self, paths: list[str]) -> None:
-        await _attach(self._ui, paths, self._now)
+        await _attach(self._ui, paths, self._now, ("button", RUN))
 
     async def set_prompt(self, text: str) -> None:
         await self._ui.fill("textbox", IMAGE_PROMPT, text)
@@ -107,7 +115,7 @@ class TranscribePage:
         await self._ui.goto(_url(model_id))
 
     async def attach(self, paths: list[str]) -> None:
-        await _attach(self._ui, paths, self._now)
+        await _attach(self._ui, paths, self._now, ("button", TRANSCRIBE))
 
     async def options(self, **wanted: bool | None) -> None:
         """Set each run-settings switch that was asked for; press it only when it differs."""

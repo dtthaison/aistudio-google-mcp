@@ -1,6 +1,6 @@
 ---
 name: aistudio
-description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, or video/images with Google Flow — or mentions the aistudio CLI.
+description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, editing an image, transcribing audio to text, or video/images with Google Flow — or mentions the aistudio CLI.
 ---
 
 # aistudio CLI
@@ -81,7 +81,9 @@ quotes and write each `'` as `'\''`.
 - Speech: expression tags such as `<laugh>` go inside the text.
 - `--image` and `transcribe` upload the file to the user's Google Drive (AI Studio's folder):
   say so when the file is private. `--vocabulary` turns timestamps and speaker labels off
-  (AI Studio cannot combine them).
+  (AI Studio cannot combine them); pass brand or person names there, or they may be dropped.
+  Without it, AI Studio's defaults return `segments` with speakers and word times. A long
+  recording may need `--timeout`; a transcript cut off at the output limit comes with a warning.
 - Generation spends the user's quota or money: run one request per user ask and never retry in a
   loop. An existing output file is never overwritten without `--force`, which needs the user's OK.
 - **Free Flow models generate at once.** With the default image model (Nano Banana 2.1) Flow
@@ -128,7 +130,7 @@ quotes and write each `'` as `'\''`.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
-- Browser commands (`app create/prompt`, `generate …`, `voices list`, every `flow …`) share one
+- Browser commands (`app create/prompt`, `generate …`, `transcribe`, `voices list`, every `flow …`) share one
   Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;
   wait for it rather than retrying in a loop.

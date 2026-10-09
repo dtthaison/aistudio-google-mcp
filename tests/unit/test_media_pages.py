@@ -100,3 +100,16 @@ async def test_transcribe_page_sets_options_then_runs(fake_ui):
                        ("activate", "switch", "Smart transcription", 0)]
     assert ("fill", "textbox", "Custom vocabulary", "Yuri Handmade, amigurumi") in ui.ops
     assert ("click", "button", TRANSCRIBE, 0) in ui.ops
+
+
+
+async def test_attach_waits_until_the_upload_lets_the_page_run(fake_ui):
+    # Live: the chip shows at once, but Run stays disabled until the Drive upload finishes.
+    ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
+    await ImagePage(ui, now=Clock()).attach(["/a.png"])
+    waits = [op for op in ui.ops if op[0] == "wait_enabled"]
+    assert waits and waits[0][1] == "button"
+    assert getattr(waits[0][2], "pattern", "").startswith("^Run")
+    ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
+    await TranscribePage(ui, now=Clock()).attach(["/a.wav"])
+    assert ("wait_enabled", "button", TRANSCRIBE) in ui.ops

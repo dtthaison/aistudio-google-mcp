@@ -302,3 +302,16 @@ def test_video_waits_longer_by_default(logged_in_profile, monkeypatch):
     CliRunner().invoke(cli, ["flow", "video", "x", "--json"])
     CliRunner().invoke(cli, ["flow", "image", "x", "--json"])
     assert [c[1]["timeout_s"] for c in calls] == [1200.0, 600.0]
+
+
+
+def test_edit_and_extend_wait_longer_by_default(logged_in_profile, monkeypatch):
+    # Plan I review M7: they are paid video too, and Flow can queue them.
+    logged_in_profile()
+    calls = []
+    done = {"status": "done", "files": [], "credits_spent": 10, "credits_left": 1, "project": "p"}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_edit", fake(done, calls))
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_extend", fake(done, calls))
+    CliRunner().invoke(cli, ["flow", "edit", "m1", "x", "--max-credits", "20", "--json"])
+    CliRunner().invoke(cli, ["flow", "extend", "m1", "x", "--max-credits", "10", "--json"])
+    assert [c[1]["timeout_s"] for c in calls] == [1200.0, 1200.0]

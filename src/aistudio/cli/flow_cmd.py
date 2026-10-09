@@ -407,7 +407,7 @@ def scene_download(state: CliState, scene_id: str, project: str | None, out: Pat
               help="Spend at most this many credits (an Omni edit of an 8-second clip costs 20).")
 @click.option("-o", "--out", type=click.Path(path_type=Path), help="Output file for the new clip.")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
-@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True)
+@click.option("--timeout", type=click.IntRange(30), default=1200, show_default=True)
 @click.option("--visible", is_flag=True, help="Show the browser window.")
 @json_option
 @click.pass_obj
@@ -431,7 +431,7 @@ def edit_cmd(state: CliState, media_id: str, instruction: str, project: str | No
               help="Spend at most this many credits (extend with Veo 3.1 Lite costs 10).")
 @click.option("-o", "--out", type=click.Path(path_type=Path), help="Output file for the new clip.")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
-@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True)
+@click.option("--timeout", type=click.IntRange(30), default=1200, show_default=True)
 @click.option("--visible", is_flag=True, help="Show the browser window.")
 @json_option
 @click.pass_obj

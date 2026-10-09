@@ -413,8 +413,15 @@ Conversation state: in AI Studio, a chat *is* a saved prompt.
 > - Both return `{files: [{path, mime_type, bytes}], model, text?, warnings?}`.
 > - Video comes from Google Flow (`aistudio flow video`, see `2026-10-07-flow-generation-design.md`),
 >   because AI Studio's Veo page asks for a paid upgrade.
-> - The table below is the original plan. `--count`, `--aspect`, `--image`, `--lyrics`,
->   `--duration` and job commands were not built.
+> - **2026-10-09:** `generate image --image IN` (repeatable) edits or combines images, and
+>   `transcribe AUDIO [-m] [--timestamps|--no-timestamps] [--diarize|--no-diarize]
+>   [--smart|--no-smart] [--vocabulary TEXT] [--timeout S] [-o FILE]` returns
+>   `{text, model, audio, segments?: [{speaker, start, end, text, words?}], file?, warnings?}`.
+>   Both upload the input to the user's Google Drive (AI Studio's folder). `--vocabulary` turns
+>   timestamps and speaker labels off, because AI Studio refuses those combinations. A transcript
+>   cut off at the model's output limit is kept, with a warning.
+> - The table below is the original plan. `--count`, `--aspect`, `--lyrics`, `--duration` and
+>   job commands were not built.
 
 | Command | Behaviour | JSON |
 |---|---|---|

@@ -9,6 +9,7 @@ the finish reason. Image parts may also hold a large opaque signature, which is 
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 from typing import Any
 
 from aistudio._rpc.rows import as_int
@@ -89,25 +90,69 @@ def _collect(node: Any, prefix: str, out: list[tuple[str, str]]) -> None:
         _collect(child, prefix, out)
 
 
-def decode_text(response: Any) -> str:
-    """A text reply (a transcription): every text part, joined, after a normal finish."""
-    finish = finish_reason(response)
-    if finish is not None and finish != _FINISHED:
-        raise _stopped(finish)
-    text = "".join(_texts(response)) or "".join(_texts(response, slot=_TRANSCRIPT_SLOT))
-    if not text.strip():
-        raise SchemaDriftError(METHOD, (), "text parts")
-    if finish is None:
-        raise SchemaDriftError(METHOD, (0, -1, 0, 0, 1), "a finish reason")
-    return text
+_TRANSCRIPT_SLOT = 22  # the transcribe model's part: ``[None × 22, [text, speaker?, words?]]``
 
 
-_TRANSCRIPT_SLOT = 22  # the transcribe model's part: ``[None × 22, [text]]`` (live)
+@dataclass(frozen=True)
+class Segment:
+    text: str
+    speaker: str | None  # "spk:0" when speaker labels are on
+    start: float | None  # seconds, when word timestamps are on
+    end: float | None
+    words: tuple[tuple[str, float | None, float | None], ...] = ()
 
 
-def _texts(response: Any, *, slot: int = 1) -> list[str]:
-    """Text parts: ``chunk[0][c][0][0][p][1]`` for every candidate c and part p (a transcript
-    part keeps its text in ``[22][0]``)."""
+@dataclass(frozen=True)
+class Transcript:
+    text: str
+    segments: tuple[Segment, ...]
+    finish: int | None
+
+
+def decode_transcript(response: Any) -> Transcript:
+    """A transcription reply (live): each part's slot 22 holds ``[text, "spk:N"?, [[word,
+    start, end], …]?]`` with times as ``[seconds?, nanos?]``. Never raises: the caller words the
+    errors (empty, cut off, stopped)."""
+    segments: list[Segment] = []
+    for part in _parts(response):
+        slot = opt_index(part, _TRANSCRIPT_SLOT)
+        text = opt_index(slot, 0) if isinstance(slot, list) else opt_index(part, 1)
+        if not isinstance(text, str) or not text.strip():
+            continue
+        speaker = opt_index(slot, 1)
+        words = tuple((w[0], _seconds(opt_index(w, 1)), _seconds(opt_index(w, 2)))
+                      for w in (opt_index(slot, 2) or []) if isinstance(opt_index(w, 0), str))
+        segments.append(Segment(text.strip(), speaker if isinstance(speaker, str) else None,
+                                words[0][1] if words else None, words[-1][2] if words else None,
+                                words))
+    return Transcript(" ".join(s.text for s in segments), tuple(segments),
+                      finish_reason(response))
+
+
+def _seconds(value: Any) -> float | None:
+    """A ``[seconds, nanos]`` duration; either may be missing, seconds may be a string."""
+    if not isinstance(value, list):
+        return None
+    seconds, nanos = opt_index(value, 0), opt_index(value, 1)
+    try:
+        return round(float(seconds or 0) + float(nanos or 0) / 1e9, 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parts(response: Any) -> list[Any]:
+    out: list[Any] = []
+    chunks = opt_index(response, 0)
+    for chunk in chunks if isinstance(chunks, list) else []:
+        candidates = opt_index(chunk, 0)
+        for candidate in candidates if isinstance(candidates, list) else []:
+            parts = opt_index(candidate, 0, 0)
+            out.extend(parts if isinstance(parts, list) else [])
+    return out
+
+
+def _texts(response: Any) -> list[str]:
+    """Text parts: ``chunk[0][c][0][0][p][1]`` for every candidate c and part p."""
     out: list[str] = []
     chunks = opt_index(response, 0)
     for chunk in chunks if isinstance(chunks, list) else []:
@@ -115,7 +160,7 @@ def _texts(response: Any, *, slot: int = 1) -> list[str]:
         for candidate in candidates if isinstance(candidates, list) else []:
             parts = opt_index(candidate, 0, 0)
             for part in parts if isinstance(parts, list) else []:
-                text = opt_index(part, 1) if slot == 1 else opt_index(part, slot, 0)
+                text = opt_index(part, 1)
                 if isinstance(text, str) and text:
                     out.append(text)
     return out

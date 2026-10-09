@@ -382,10 +382,14 @@ def transcript_body(*texts, finish=1):
     return json.dumps([[chunk([[None, t]]) for t in texts] + [chunk([[None, ""]], finish)]])
 
 
-def transcribe_ui(fake_ui, body):
+SENT_AUDIO = json.dumps(["models/gemini-3.5-transcribe",
+                         [[[[None, None, None, None, None, ["drive1"]]], "user"]]])
+
+
+def transcribe_ui(fake_ui, body, sent=SENT_AUDIO):
     from aistudio._browser.media_pages import REMOVE_MEDIA
 
-    return fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200, body, "[]")]},
+    return fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200, body, sent)]},
                    labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]},
                    checks={("switch", "Word timestamps", 0): [False]})
 
@@ -484,3 +488,93 @@ def test_a_request_with_images_is_checked_by_its_text_part_and_file_count():
     assert _mismatches(sent, model_id="m", text="make it blue", voice=None, files=2) == []
     assert _mismatches(sent, model_id="m", text="make it blue", voice=None, files=3) == [
         "files: expected 3, sent 2"]
+
+
+
+def live_body(*segments, finish=1):
+    def chunk(parts, done=None):
+        candidate = [[parts, "model"]] + ([done] if done is not None else [])
+        return [[candidate], None, [9, 1, 10], None, None, None, None, "v1_id"]
+    parts = [[None, text] + [None] * 20 + [[text, speaker, words]]
+             for text, speaker, words in segments]
+    return json.dumps([[chunk(parts), chunk([[None, ""]], finish)]])
+
+
+WORDS = [["Xin", [None, 100000000], [None, 400000000]], ["chào.", [None, 400000000], ["2"]]]
+
+
+async def run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path, body, sent=SENT_AUDIO,
+                         **kw):
+    audio = tmp_path / "talk.wav"
+    audio.write_bytes(b"RIFF")
+    ui = transcribe_ui(fake_ui, body, sent)
+    return await transcribe(logged_in_profile(), audio, client_factory=lambda p: make_client(),
+                            browser=browser_with(ui, []), **kw)
+
+
+@respx.mock
+async def test_transcribe_returns_segments_and_a_timed_file(logged_in_profile, make_client,
+                                                            fake_ui, captured, tmp_path):
+    # Plan I review I1: with AI Studio's defaults the reply carries speakers and word times.
+    serve_catalog(captured)
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  live_body(("Xin chào.", "spk:0", WORDS)),
+                                  out=tmp_path / "t.txt")
+    assert result["segments"] == [{"speaker": "spk:0", "start": 0.1, "end": 2.0,
+                                   "text": "Xin chào.",
+                                   "words": [["Xin", 0.1, 0.4], ["chào.", 0.4, 2.0]]}]
+    written = (tmp_path / "t.txt").read_text(encoding="utf-8")
+    assert written == "[0:00.1 - 0:02.0] spk:0: Xin chào.\n"
+    assert "warnings" not in result
+
+
+@respx.mock
+async def test_a_cut_off_transcript_is_kept_with_a_warning(logged_in_profile, make_client, fake_ui,
+                                                           captured, tmp_path):
+    # Plan I review I2: a long recording that reaches the output limit is paid for: keep it.
+    serve_catalog(captured)
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  live_body(("Xin chào.", None, []), finish=2))
+    assert result["text"] == "Xin chào." and any("cut off" in w for w in result["warnings"])
+
+
+@respx.mock
+async def test_transcription_errors_say_what_happened(logged_in_profile, make_client, fake_ui,
+                                                      captured, tmp_path):
+    # Plan I review M3: not "the response shape changed" / "try a different prompt".
+    from aistudio.exceptions import AIStudioError
+
+    serve_catalog(captured)
+    for body, words in ((live_body(finish=1), "no speech"),
+                        (live_body(("x", None, []), finish=3), "stopped")):
+        with pytest.raises(AIStudioError) as info:
+            await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path, body)
+        assert words in info.value.message and "re-capture" not in (info.value.hint or "")
+
+
+@respx.mock
+async def test_a_request_without_the_audio_is_flagged(logged_in_profile, make_client, fake_ui,
+                                                      captured, tmp_path):
+    # Plan I review M5.
+    serve_catalog(captured)
+    no_file = json.dumps(["models/gemini-3.5-transcribe", [[[[None, "x"]], "user"]]])
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  live_body(("Xin chào.", None, [])), sent=no_file)
+    assert any("files" in w for w in result["warnings"])
+
+
+@respx.mock
+async def test_transcribe_without_out_needs_no_writable_folder(logged_in_profile, make_client,
+                                                               fake_ui, captured, tmp_path,
+                                                               monkeypatch):
+    # Plan I review M4.
+    import aistudio._app.media as media_module
+
+    def refuse(folder):
+        raise ValidationError(f"{folder} is not writable")
+
+    serve_catalog(captured)
+    monkeypatch.setattr(media_module, "_check_folder", refuse)
+    result = await run_transcribe(logged_in_profile, make_client, fake_ui, tmp_path,
+                                  live_body(("Xin chào.", None, [])))
+    assert result["text"] == "Xin chào."

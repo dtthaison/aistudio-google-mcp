@@ -147,14 +147,19 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
                                        markup=False))
 
 
+def _clock(seconds: float | None) -> str:
+    seconds = seconds or 0.0
+    return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
+
+
 @click.command("transcribe")
 @click.argument("audio", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-m", "--model", default=DEFAULT_TRANSCRIBE_MODEL, show_default=True,
               help='A transcription model (see "aistudio models list --category audio").')
 @click.option("--timestamps/--no-timestamps", default=None,
-              help="Word timestamps (default: AI Studio's own setting).")
+              help="Word timestamps (AI Studio turns them on by default).")
 @click.option("--diarize/--no-diarize", default=None,
-              help="Speaker labels (default: AI Studio's own setting).")
+              help="Speaker labels (AI Studio turns them on by default).")
 @click.option("--smart/--no-smart", default=None,
               help="Smart transcription (default: AI Studio's own setting).")
 @click.option("--vocabulary", default="",
@@ -163,25 +168,34 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
 @click.option("-o", "--out", type=click.Path(dir_okay=False, path_type=Path),
               help="Also write the text to this file.")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
+              help="Seconds to wait for the transcript (raise it for long recordings).")
 @click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
 @json_option
 @click.pass_obj
 @handle_errors
 def transcribe_cmd(state: CliState, audio: Path, model: str, timestamps: bool | None,
                    diarize: bool | None, smart: bool | None, vocabulary: str, out: Path | None,
-                   force: bool, visible: bool, json_output: bool) -> None:
+                   force: bool, timeout: int, visible: bool, json_output: bool) -> None:
     """Turn the speech in AUDIO into text (uses quota; AI Studio uploads the audio to your
     Google Drive)."""
     state.require_browser()
     result = asyncio.run(transcribe(state.profile(), audio, model=model, timestamps=timestamps,
                                     diarize=diarize, smart=smart, vocabulary=vocabulary, out=out,
-                                    overwrite=force, visible=visible,
+                                    overwrite=force, visible=visible, timeout_s=float(timeout),
                                     on_start=_notice_for("transcription", visible,
                                                          json_output)))
 
     def render(data: dict[str, Any]) -> None:
-        stdout.print(data["text"], markup=False)
+        for segment in data.get("segments") or [{"text": data["text"], "speaker": None,
+                                                 "start": None, "end": None}]:
+            when = (f"[{_clock(segment['start'])} - {_clock(segment['end'])}] "
+                    if segment.get("start") is not None else "")
+            who = f"{segment['speaker']}: " if segment.get("speaker") else ""
+            stdout.print(f"{when}{who}{segment['text']}", markup=False)
         if data.get("file"):
             stderr.print(f"Wrote {data['file']['path']}", markup=False)
+        for warning in data.get("warnings", []):
+            stderr.print(f"Warning: {warning}", markup=False)
 
     emit(result, json_output=json_output, render=render)

@@ -438,17 +438,21 @@ def _attachment_titles(contents: ProjectContents | None,
 async def _restore_defaults(page: Any, project_id: str, kind: str, previous: Defaults) -> str:
     """Put the person's Flow settings back; a note when that fails. After a long wait the page
     can refuse to save (live), so a freshly loaded project is tried once more."""
-    reason = ""
+    reasons: list[str] = []
     for attempt in range(2):
         try:
             if attempt:
                 await page.open_project(project_id)
             await page.apply_defaults(kind, previous)
-            return ""
+            # the first failure's cause is still unexplained (findings): keep it visible
+            return (f"Flow's {kind} settings were restored on a second try (first attempt: "
+                    f"{reasons[0]})") if reasons else ""
         except Exception as exc:  # noqa: BLE001 - restoring must never hide the run's outcome
             reason = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+            if reason not in reasons:
+                reasons.append(reason)
     return (f"could not restore Flow's {kind} defaults ({previous.model}, {previous.aspect}, "
-            f"x{previous.count}): {reason}; set them in Flow's settings")
+            f"x{previous.count}): {'; '.join(reasons)}; set them in Flow's settings")
 
 
 _STILL_WAITING = "Flow's request may still be waiting: press Reject on it in Flow, never Approve"

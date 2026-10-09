@@ -633,6 +633,41 @@ async def test_a_failed_restore_is_retried_after_a_reload(logged_in_profile, tmp
     kw, pages, _ = harness(restore_error=BrowserError("did not save"), restore_fails=1)
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, out=tmp_path / "a.mp4", **kw)
-    assert "warnings" not in result
+    assert not any("could not restore" in w for w in result.get("warnings", []))
     calls = pages[0].calls
     assert calls[-1] == ("apply", OMNI) and ("open", calls[-2][1]) == calls[-2]
+
+
+
+async def test_restore_reasons_are_both_kept(logged_in_profile, tmp_path):
+    # Plan I review M6: the first failure's reason is the unexplained one; keep it.
+    kw, pages, _ = harness(restore_error=BrowserError("did not save"))
+    original = kw["page_factory"]
+
+    def factory(ui):
+        page = original(ui)
+        opens = {"n": 0}
+        real_open = page.open_project
+
+        async def open_project(pid):
+            opens["n"] += 1
+            if opens["n"] > 1:  # the reload for the retry fails differently
+                raise BrowserError("project did not open")
+            await real_open(pid)
+
+        page.open_project = open_project
+        return page
+
+    kw["page_factory"] = factory
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    note = next(w for w in result["warnings"] if "could not restore" in w)
+    assert "did not save" in note and "project did not open" in note
+
+
+async def test_a_retried_restore_says_the_first_attempt_failed(logged_in_profile, tmp_path):
+    kw, _, _ = harness(restore_error=BrowserError("did not save"), restore_fails=1)
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, out=tmp_path / "a.mp4", **kw)
+    assert any("restored on a second try" in w and "did not save" in w
+               for w in result["warnings"])

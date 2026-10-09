@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from aistudio._rpc.rows.media import decode_media, decode_text, extension_for, finish_reason
+from aistudio._rpc.rows.media import decode_media, extension_for, finish_reason
 from aistudio.exceptions import SchemaDriftError, ServerError
 
 JPEG = b"\xff\xd8\xff\xe0fakejpeg\xff\xd9"
@@ -110,21 +110,39 @@ def test_neither_media_nor_text_is_schema_drift():
 
 
 
-def text_response(*texts, finish=1):
-    return [[chunk([[None, t]]) for t in texts] + [chunk([[None, ""]], finish)]]
 
 
-def test_decode_text_reads_the_reply():
-    # Plan I: a transcription reply is text parts, possibly over several chunks.
-    assert decode_text(text_response("Hello ", "world.")) == "Hello world."
-    with pytest.raises(SchemaDriftError):
-        decode_text(text_response())
-    with pytest.raises(ServerError):
-        decode_text(text_response("partial", finish=3))  # stopped early (e.g. safety)
+LIVE_PART = [None, "Xin chào, đây là cửa hàng"] + [None] * 20 + [[
+    "Xin chào, đây là cửa hàng", "spk:0",
+    [["Xin", [None, 100000000], [None, 400000000]], ["chào,", [None, 400000000], [None, 900000000]],
+     ["đây", ["1"], ["1", 200000000]], ["là", ["1", 200000000], ["1", 400000000]],
+     ["cửa", ["1", 400000000], ["1", 800000000]], ["hàng", ["1", 800000000], ["2"]]]]]
 
 
-def test_decode_text_reads_a_transcript_part():
-    # Live: the transcribe model puts its text in slot 22 of the part, not slot 1.
-    part = [None] * 22 + [["Xin chào, đây là cửa hàng Yuri Handmade."]]
-    response = [[chunk([part]), chunk([[None, ""]], 1)]]
-    assert decode_text(response) == "Xin chào, đây là cửa hàng Yuri Handmade."
+def test_decode_transcript_reads_speakers_and_word_times():
+    # Live (AI Studio defaults: word timestamps and speaker labels on).
+    from aistudio._rpc.rows.media import decode_transcript
+
+    words = [["Chúng", ["3"], ["3", 400000000]], ["len.", ["4"], ["4", 500000000]]]
+    second = [None] * 22 + [["Chúng tôi bán len.", "spk:1", words]]
+    transcript = decode_transcript([[chunk([LIVE_PART, second]), chunk([[None, ""]], 1)]])
+    assert transcript.finish == 1
+    assert transcript.text == "Xin chào, đây là cửa hàng Chúng tôi bán len."
+    first, other = transcript.segments
+    assert (first.speaker, first.start, first.end, first.text) == (
+        "spk:0", 0.1, 2.0, "Xin chào, đây là cửa hàng")
+    assert first.words[2] == ("đây", 1.0, 1.2)
+    assert (other.speaker, other.start, other.end) == ("spk:1", 3.0, 4.5)
+
+
+def test_decode_transcript_plain_and_cut_off():
+    from aistudio._rpc.rows.media import decode_transcript
+
+    plain = [None] * 22 + [["Just text."]]
+    t = decode_transcript([[chunk([plain]), chunk([[None, ""]], 1)]])
+    assert t.text == "Just text." and t.segments[0].speaker is None and t.segments[0].start is None
+    cut = decode_transcript([[chunk([[None, "\n"] + [None] * 20 + [["partial"]]]),
+                              chunk([[None, ""]], 2)]])
+    assert (cut.text, cut.finish) == ("partial", 2)  # slot 22 wins over blank slot-1 text
+    empty = decode_transcript([[chunk([[None, ""]], 1)]])
+    assert empty.text == "" and empty.segments == ()

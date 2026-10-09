@@ -16,7 +16,7 @@ from aistudio._media.save import free_name as _free_name
 from aistudio._media.save import write_file as _write
 from aistudio._media.wav import pcm_to_wav
 from aistudio._rpc import wire
-from aistudio._rpc.rows.media import decode_media, decode_text, extension_for
+from aistudio._rpc.rows.media import Transcript, decode_media, decode_transcript, extension_for
 from aistudio._rpc.rows.speech import decode_speech
 from aistudio._transport.http import error_for_response
 from aistudio.client import AIStudioClient
@@ -27,6 +27,7 @@ from aistudio.exceptions import (
     NotFoundError,
     QuotaExceededError,
     SchemaDriftError,
+    ServerError,
     ValidationError,
 )
 from aistudio.paths import Profile
@@ -182,6 +183,7 @@ async def transcribe(
     out: Path | None = None,
     overwrite: bool = False,
     visible: bool = False,
+    timeout_s: float = 600.0,
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     on_start: Callable[[], None] | None = None,
@@ -196,9 +198,10 @@ async def transcribe(
                               hint="drop one of them; nothing was sent")
     if vocabulary:
         timestamps = diarize = False
-    if out is not None and out.exists() and not overwrite:
-        raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
-    _check_folder(out.parent if out is not None and str(out.parent) else Path("."))
+    if out is not None:  # nothing is written without -o
+        if out.exists() and not overwrite:
+            raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
+        _check_folder(out.parent if str(out.parent) else Path("."))
     async with client_factory(profile) as client:
         model_id = await check_model(client, profile, model, command="transcribe",
                                      what="a transcription model", hint=_AUDIO_HINT)
@@ -210,21 +213,73 @@ async def transcribe(
         await page.attach([str(path)])
         await page.options(timestamps=timestamps, speakers=diarize, smart=smart)
         await page.vocabulary(vocabulary)
-        captured = await page.run()
+        captured = await page.run(timeout_s=timeout_s)
     if captured.status >= 400:
         error = _refused(captured.status, captured.text, "transcription")
         if isinstance(error, ValidationError):  # an option AI Studio refused, not a tier issue
             error.hint = "change the options; nothing was transcribed"
         raise error
     try:
-        text = decode_text(wire.decode(captured.text))
+        transcript = decode_transcript(wire.decode(captured.text))
     except ValueError as exc:  # truncated or non-JSON body
         raise SchemaDriftError("GenerateContent", (), "a JSON transcription") from exc
-    result: dict[str, Any] = {"text": text, "model": model_id, "audio": str(path)}
+    warnings = _transcript_problems(transcript)
+    wrong = _mismatches(_sent(captured.request_body), model_id=model_id, text=None, voice=None,
+                        files=1)
+    if wrong:  # the transcript is kept; the person should know the request looked different
+        warnings.append(f"the request AI Studio sent did not match ({'; '.join(wrong)}); check "
+                        "the transcript")
+    segments = [_segment(s) for s in transcript.segments]
+    result: dict[str, Any] = {
+        "text": transcript.text, "model": model_id, "audio": str(path),
+        **({"segments": segments} if any(s["speaker"] or s["start"] is not None
+                                         for s in segments) else {})}
     if out is not None:
-        saved = _write(out, text.encode("utf-8"), overwrite=overwrite)
+        saved = _write(out, _transcript_file(transcript).encode("utf-8"), overwrite=overwrite)
         result["file"] = {"path": str(saved), "bytes": saved.stat().st_size}
-    return result
+        if saved != out:
+            warnings.append(f"{out} appeared while transcribing; saved to {saved} instead")
+    return {**result, **({"warnings": warnings} if warnings else {})}
+
+
+_MAX_TOKENS = 2  # finish reason: the reply reached the model's output limit
+
+
+def _transcript_problems(transcript: Transcript) -> list[str]:
+    """Errors worded for transcription (no prompt to change); a cut-off reply is kept (paid)."""
+    if transcript.finish is not None and transcript.finish not in (1, _MAX_TOKENS):
+        raise ServerError(f"the transcription stopped (reason {transcript.finish})",
+                          hint="check the audio; nothing usable came back")
+    if not transcript.text:
+        raise ServerError("no speech was transcribed",
+                          hint="check that the audio has speech in it")
+    if transcript.finish == _MAX_TOKENS:
+        return ["the transcript was cut off at the model's output limit; split the audio into "
+                "shorter files"]
+    return []
+
+
+def _segment(segment: Any) -> dict[str, Any]:
+    return {"speaker": segment.speaker, "start": segment.start, "end": segment.end,
+            "text": segment.text, **({"words": [list(w) for w in segment.words]}
+                                     if segment.words else {})}
+
+
+def _transcript_file(transcript: Transcript) -> str:
+    """Plain text, or one line per segment with times and speaker when the reply has them."""
+    if not any(s.speaker or s.start is not None for s in transcript.segments):
+        return transcript.text
+    lines = []
+    for s in transcript.segments:
+        when = (f"[{_clock(s.start)} - {_clock(s.end)}] " if s.start is not None else "")
+        who = f"{s.speaker}: " if s.speaker else ""
+        lines.append(f"{when}{who}{s.text}")
+    return "\n".join(lines) + "\n"
+
+
+def _clock(seconds: float | None) -> str:
+    seconds = seconds or 0.0
+    return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
 
 
 async def _generate_media(

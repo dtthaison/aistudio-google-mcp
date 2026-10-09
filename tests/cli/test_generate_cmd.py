@@ -199,7 +199,24 @@ def test_transcribe_command(logged_in_profile, monkeypatch, tmp_path):
     assert calls[0][1] == (audio,)
     assert calls[0][2] == {"model": "gemini-3.5-transcribe", "timestamps": True, "diarize": True,
                            "smart": False, "vocabulary": "Yuri Handmade", "out": out,
-                           "overwrite": False, "visible": False}
+                           "overwrite": False, "visible": False, "timeout_s": 600.0}
     res = CliRunner().invoke(cli, ["transcribe", str(audio)])
     assert "Xin chào Yuri Handmade." in res.stdout
     assert calls[1][2]["timestamps"] is None  # the page's own setting stays when not asked
+
+
+
+def test_transcribe_prints_segments_and_takes_a_timeout(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    result = {"text": "Xin chào. Cảm ơn.", "model": "gemini-3.5-transcribe", "audio": "a.wav",
+              "segments": [{"speaker": "spk:0", "start": 0.1, "end": 2.0, "text": "Xin chào."},
+                           {"speaker": "spk:1", "start": 2.5, "end": 3.0, "text": "Cảm ơn."}]}
+    monkeypatch.setattr("aistudio.cli.generate_cmd.transcribe", fake(result, calls))
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    res = CliRunner().invoke(cli, ["transcribe", str(audio), "--timeout", "1800"])
+    assert res.exit_code == 0, res.output
+    assert calls[0][2]["timeout_s"] == 1800.0
+    assert "[0:00.1 - 0:02.0] spk:0: Xin chào." in res.stdout
+    assert "spk:1: Cảm ơn." in res.stdout
