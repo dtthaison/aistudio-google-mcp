@@ -426,3 +426,45 @@ async def test_transcribe_checks_before_the_browser(logged_in_profile, make_clie
                              client_factory=lambda p: make_client(),
                              browser=browser_with(fake_ui(), opened), **case)
         assert opened == []
+
+
+@respx.mock
+async def test_vocabulary_turns_timestamps_off(logged_in_profile, make_client, fake_ui, captured,
+                                               tmp_path):
+    # Live: "custom_vocabulary is incompatible with word timestamps" (timestamps are on by
+    # default on the page).
+    from aistudio._browser.media_pages import REMOVE_MEDIA
+
+    serve_catalog(captured)
+    audio = tmp_path / "talk.wav"
+    audio.write_bytes(b"RIFF")
+    ui = fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 200,
+                                                       transcript_body("ok"), "[]")]},
+                 labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]},
+                 checks={("switch", "Word timestamps", 0): [True]})
+    await transcribe(logged_in_profile(), audio, vocabulary="Yuri Handmade",
+                     client_factory=lambda p: make_client(), browser=browser_with(ui, []))
+    assert ("activate", "switch", "Word timestamps", 0) in ui.ops
+    opened = []
+    with pytest.raises(ValidationError):
+        await transcribe(logged_in_profile(), audio, vocabulary="Yuri", timestamps=True,
+                         client_factory=lambda p: make_client(),
+                         browser=browser_with(fake_ui(), opened))
+    assert opened == []
+
+
+@respx.mock
+async def test_a_refused_option_gets_an_accurate_hint(logged_in_profile, make_client, fake_ui,
+                                                      captured, tmp_path):
+    from aistudio._browser.media_pages import REMOVE_MEDIA
+
+    serve_catalog(captured)
+    audio = tmp_path / "talk.wav"
+    audio.write_bytes(b"RIFF")
+    refused = '[3,"custom_vocabulary is incompatible with word timestamps."]'
+    ui = fake_ui({"GenerateContent": [CapturedResponse("GenerateContent", 400, refused, "[]")]},
+                 labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
+    with pytest.raises(ValidationError) as info:
+        await transcribe(logged_in_profile(), audio, client_factory=lambda p: make_client(),
+                         browser=browser_with(ui, []))
+    assert "paid tier" not in (info.value.hint or "")

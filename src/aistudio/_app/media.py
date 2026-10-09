@@ -188,6 +188,13 @@ async def transcribe(
 ) -> dict[str, Any]:
     """Speech to text with AI Studio's transcribe model (page-driven; uses the user's quota)."""
     (path,) = _inputs([audio], AUDIO_INPUTS, "an audio file")
+    vocabulary = " ".join(vocabulary.split())
+    # AI Studio refuses both together: "custom_vocabulary is incompatible with word timestamps".
+    if vocabulary and timestamps:
+        raise ValidationError("--vocabulary cannot be combined with --timestamps",
+                              hint="drop one of them; nothing was sent")
+    if vocabulary:
+        timestamps = False  # the page turns timestamps on by default
     if out is not None and out.exists() and not overwrite:
         raise ValidationError(f"{out} already exists", hint="pass --force or choose another -o")
     _check_folder(out.parent if out is not None and str(out.parent) else Path("."))
@@ -201,10 +208,13 @@ async def transcribe(
         await page.open(model_id)
         await page.attach([str(path)])
         await page.options(timestamps=timestamps, speakers=diarize, smart=smart)
-        await page.vocabulary(" ".join(vocabulary.split()))
+        await page.vocabulary(vocabulary)
         captured = await page.run()
     if captured.status >= 400:
-        raise _refused(captured.status, captured.text, "transcription")
+        error = _refused(captured.status, captured.text, "transcription")
+        if isinstance(error, ValidationError):  # an option AI Studio refused, not a tier issue
+            error.hint = "change the options; nothing was transcribed"
+        raise error
     try:
         text = decode_text(wire.decode(captured.text))
     except ValueError as exc:  # truncated or non-JSON body
