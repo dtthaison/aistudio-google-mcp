@@ -747,3 +747,9 @@ blocked; the RPCs that went through are free.
   - Any other clip without an editor gets "extend the last clip of its scene instead".
   - Live (free, no `--max-credits`): the newest clip went through the scene path and stopped at
     OVER_BUDGET "costs 10 credits". The middle clip got the new message.
+  - Review hardening (2026-10-10, free).
+    - The scene page counts its clips (`.timeline-contents .clip`, visible); a 3-clip scene showed
+      3. aistudio requires the count to match the project read, so a clip shown but not yet
+      listed can never be the one extended.
+    - "What happens next?" is not on the scene page until Extend is chosen, so `extend()`'s panel
+      check still tells the Extend box apart there.

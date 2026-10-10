@@ -117,6 +117,8 @@ class Ui(Protocol):
 
     async def click_selector(self, selector: str) -> None: ...
 
+    async def count(self, selector: str) -> int: ...
+
     async def hover_text(self, text: str) -> None: ...
 
     async def click_text(self, text: str) -> None: ...
@@ -409,9 +411,15 @@ class PlaywrightUi:
         """Click the first element matching a CSS selector, for controls with no role or name
         (Flow's timeline clips); Playwright scrolls it into view first."""
         async def run() -> None:
-            await self._page.locator(selector).first.click(timeout=CONTROL_TIMEOUT_MS)
+            await self._page.locator(f"{selector} >> visible=true").first.click(
+                timeout=CONTROL_TIMEOUT_MS)
 
         await self._act("element", selector, run)
+
+    async def count(self, selector: str) -> int:
+        """How many visible elements match a CSS selector."""
+        return await self._read(
+            lambda: self._page.locator(f"{selector} >> visible=true").count())
 
     async def set_files(self, selector: str, paths: list[str],
                         types: Mapping[str, str] | None = None) -> None:

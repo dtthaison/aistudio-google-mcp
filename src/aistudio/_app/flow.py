@@ -669,7 +669,8 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         holder = _scene_ending_with(contents, media_id)
         if media_id not in contents.workflows and holder is not None:
             # an extension: it has no editor of its own, so extend its scene's last clip (live)
-            label = await page.extend_label_in_scene(project_id, holder.id, source.prompt)
+            label = await page.extend_label_in_scene(project_id, holder.id, source.prompt,
+                                                     clips=len(holder.clips))
         else:
             workflow_id = await _workflow_of(page, contents, media_id)
             label = await page.extend_label(project_id, workflow_id)  # opens that exact clip

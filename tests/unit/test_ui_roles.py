@@ -284,6 +284,28 @@ async def test_click_selector_clicks_the_first_match():
     # Plan L: Flow's timeline clips are plain elements (no role or name), found by class.
     clip, other = El(), El()
     page = Page({})
-    page.locator = lambda selector: Loc([clip, other] if selector == ".clip.is-last" else [])
+    page.locator = lambda selector: Loc([clip, other] if selector.startswith(".clip.is-last")
+                                        else [])
     await PlaywrightUi(page).click_selector(".clip.is-last")
     assert clip.actions == ["click"] and other.actions == []
+
+
+async def test_count_and_click_selector_use_visible_matches():
+    # Plan L review M6: a hidden copy of the timeline must not be the one clicked or counted.
+    asked = []
+
+    class Matches(Loc):
+        async def count(self):
+            return len(self._elements)
+
+    page = Page({})
+
+    def locator(selector):
+        asked.append(selector)
+        return Matches([El(), El()])
+
+    page.locator = locator
+    ui = PlaywrightUi(page)
+    assert await ui.count(".clip") == 2
+    await ui.click_selector(".clip.is-last")
+    assert asked == [".clip >> visible=true", ".clip.is-last >> visible=true"]

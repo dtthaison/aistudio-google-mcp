@@ -86,6 +86,7 @@ EDIT_MODEL_KEY = "abra_edit"  # the model key of a clip an Omni edit makes (live
 _EDIT_MODEL = re.compile(r"Describe how to edit this video…\s+(?:add\s+)?(?:pen_magic\s+)?"
                          r"(.+?)\s+arrow_forward")
 # A scene's timeline clips (live): plain elements marked is-first / is-last / selected
+CLIPS = ".timeline-contents .clip"
 LAST_CLIP = ".clip.is-last .clip-body"
 LAST_CLIP_SELECTED = ".clip.is-last.selected"
 PANEL_PROMPT_CHARS = 40  # the side panel shows the selected clip's prompt, cut short
@@ -647,22 +648,35 @@ class FlowPage:
         except BrowserError as exc:  # live: an extension's own editor page is empty
             raise BrowserError("Flow has no editor for this clip; if it is an extension, extend "
                                "the last clip of its scene instead; nothing was spent",
-                               hint='see "aistudio flow scene list"') from exc
+                               hint='see "aistudio flow scene list"; a clip extended moments ago '
+                                    "may not be listed yet: wait, then re-run") from exc
         if not self._ui.current_url().split("?", 1)[0].endswith(f"/edit/{workflow_id}"):
             raise BrowserError("Flow opened a different clip; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
         return await self._extend_menu_label()
 
     async def extend_label_in_scene(self, project_id: str, scene_id: str,
-                                    last_prompt: str | None) -> str:
+                                    last_prompt: str | None, *, clips: int) -> str:
         """Open a scene with its LAST clip selected, then read Extend's model (live: an extension
         has no editor of its own; its scene opens with the first clip selected, and Extend
         continues the selected clip). Every check runs before anything is sent."""
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/scene/{scene_id}")
-        await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        try:
+            await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
+        except WindowClosedError:
+            raise
+        except BrowserError as exc:
+            raise BrowserError("Flow did not open the scene; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed") from exc
         if not self._ui.current_url().split("?", 1)[0].endswith(f"/scene/{scene_id}"):
             raise BrowserError("Flow opened a different scene; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
+        shown = await self._ui.count(CLIPS)
+        if shown != clips:  # a clip not in the project read yet would be the "last" one here
+            raise BrowserError(f"Flow's scene shows {shown} clips, not the {clips} aistudio "
+                               "read; nothing was spent",
+                               hint='wait until "aistudio flow scene list" shows them all, then '
+                                    "re-run")
         await self._ui.click_selector(LAST_CLIP)
         await self._ui.pause(1200)
         try:
@@ -672,7 +686,7 @@ class FlowPage:
         except BrowserError as exc:
             raise BrowserError("Flow did not select the scene's last clip; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed") from exc
-        snippet = " ".join((last_prompt or "").split())[:PANEL_PROMPT_CHARS]
+        snippet = " ".join((last_prompt or "").split())[:PANEL_PROMPT_CHARS].rstrip()
         if snippet and snippet not in " ".join((await self._ui.text_of("body")).split()):
             raise BrowserError("Flow's panel does not show the last clip; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")

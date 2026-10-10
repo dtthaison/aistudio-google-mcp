@@ -3,6 +3,7 @@ import pytest
 
 from aistudio._browser.ui import CapturedResponse
 from aistudio._flow.page import (
+    CLIPS,
     EDITOR_ANY,
     EDITOR_LAST,
     LAST_CLIP,
@@ -339,20 +340,23 @@ async def test_media_details_returns_the_record_asked_for(fake_ui):
 LAST_PROMPT = "Satisfying fast time-lapse: the same hands crochet the same pastel pink yarn"
 
 
-def scene_ui(fake_ui, *, scene="s7", missing=(), shown=True):
-    return fake_ui(inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
+def scene_ui(fake_ui, *, scene="s7", missing=(), shown=True, clips=3):
+    ui = fake_ui(inner={("menuitem", "^Extend"): ["keyboard_double_arrow_right Extend (Veo 3.1 - "
                                                     "Lite)"]},
                    url=f"https://flow.google.com/project/{PID}/scene/{scene}", missing=missing,
                    # the side panel shows the selected clip's prompt, cut short (live)
                    texts={"body": ["Untitled Scene\n" + (LAST_PROMPT[:50] + "…" if shown
                                                            else "Vertical 9:16 first shot…")]})
+    ui.counts = {CLIPS: clips}
+    return ui
 
 
 async def test_a_scene_extension_selects_the_last_clip_first(fake_ui):
     # Live (findings, "Extending an extension"): an extension has no editor of its own; its scene
     # opens with the FIRST clip selected, and Extend continues the selected clip.
     ui = scene_ui(fake_ui)
-    assert await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT) == "Veo 3.1 - Lite"
+    assert await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT,
+                                                    clips=3) == "Veo 3.1 - Lite"
     steps = [op[:2] for op in ui.ops if op[0] in ("goto", "click_selector", "wait_for", "dispatch")]
     assert steps == [("goto", f"https://flow.google.com/project/{PID}/scene/s7"),
                      ("wait_for", EDITOR_ANY), ("click_selector", LAST_CLIP),
@@ -362,10 +366,14 @@ async def test_a_scene_extension_selects_the_last_clip_first(fake_ui):
 async def test_a_scene_extension_is_refused_unless_the_last_clip_is_selected(fake_ui):
     from aistudio.exceptions import BrowserError
 
+    # Plan L review M1 (re-graded): a clip Flow shows but the project read did not list yet
+    # would be the "last" one on the page; the clip count must match the scene that was read
+    # Review M4: a scene page that never loads says so, never the raw selector error
     for ui in (scene_ui(fake_ui, missing={LAST_CLIP_SELECTED}), scene_ui(fake_ui, shown=False),
-               scene_ui(fake_ui, scene="other")):
+               scene_ui(fake_ui, scene="other"), scene_ui(fake_ui, clips=4),
+               scene_ui(fake_ui, missing={EDITOR_ANY})):
         with pytest.raises(BrowserError) as info:
-            await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT)
+            await FlowPage(ui).extend_label_in_scene(PID, "s7", LAST_PROMPT, clips=3)
         assert "nothing was spent" in info.value.message
         assert not any(op[0] == "dispatch" for op in ui.ops)  # Add clip never pressed
 
@@ -378,3 +386,26 @@ async def test_a_clip_without_an_editor_says_what_to_do(fake_ui):
         await FlowPage(ui).extend_label(PID, "w9")
     assert "last clip of its scene" in info.value.message
     assert "nothing was spent" in info.value.message
+    assert "flow scene list" in info.value.hint and "re-run" in info.value.hint  # review M5
+
+
+async def test_a_prompt_cut_at_a_space_still_matches(fake_ui):
+    # Plan L review M3: character 40 is a space; the panel cuts at the word before it.
+    prompt = "The pink bunny waves hello at a camera, then hops away"  # [39] is a space
+    assert prompt[39] == " "
+    ui = scene_ui(fake_ui)
+    ui._texts["body"] = ["Untitled Scene " + prompt[:39] + "…"]
+    assert await FlowPage(ui).extend_label_in_scene(PID, "s7", prompt, clips=3)
+
+
+async def test_a_closed_window_passes_through_the_label_reads(fake_ui):
+    from aistudio.exceptions import WindowClosedError
+
+    class Closed(type(fake_ui())):
+        async def wait_for(self, selector, *, timeout_s=30.0):
+            raise WindowClosedError("the browser window was closed before aistudio finished")
+
+    for read in (lambda p: p.extend_label(PID, "w1"),
+                 lambda p: p.extend_label_in_scene(PID, "s7", LAST_PROMPT, clips=3)):
+        with pytest.raises(WindowClosedError):
+            await read(FlowPage(Closed()))

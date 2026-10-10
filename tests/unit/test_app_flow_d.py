@@ -736,9 +736,17 @@ async def test_an_extension_is_extended_through_its_scene(logged_in_profile, tmp
     kw, pages, _ = harness(contents=contents)
     result = await flow_extend(profile, EXT, "it waves", max_credits=10,
                                out=tmp_path / "e.mp4", **kw)
-    assert ("extend_label_in_scene", "s7", "the bunny is finished") in pages[0].calls
+    assert ("extend_label_in_scene", "s7", "the bunny is finished", 2) in pages[0].calls
     assert not any(c[0] == "extend_label" for c in pages[0].calls)
     assert result["status"] == "done"
+    # Review M7: an unlisted clip in the middle of a scene keeps the editor path (its record)
+    middle = FlowScene("s8", "Untitled Scene", 400,
+                       [SceneClip(EXT, "bunny", 0, 8), SceneClip(VID, "apple", 0, 8)])
+    kw, pages, _ = harness(contents=dataclasses.replace(contents, scenes=[middle]))
+    with pytest.raises(BrowserError) as info:  # its record names no editor here: nothing spent
+        await flow_extend(profile, EXT, "it waves", max_credits=10, out=tmp_path / "g.mp4", **kw)
+    assert "editor" in info.value.message and "nothing was spent" in info.value.message
+    assert not any(c[0] == "extend_label_in_scene" for c in pages[0].calls)
     # A listed clip keeps its own editor, even as the last clip of a scene (VID ends SCENE)
     kw, pages, _ = harness(contents=contents)
     await flow_extend(profile, VID, "it rolls", max_credits=10, out=tmp_path / "f.mp4", **kw)
