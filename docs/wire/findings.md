@@ -213,6 +213,11 @@ was made: one image ($0.034) and one clip ($0.04).
     450 KB), plus a large opaque signature at part `[14]`.
   - The finish reason (1) is in the last chunk. It took 15.3 s minimized.
   - No API-key prompt appeared.
+  - **The run shortcut is an account setting** (2026-10-29, free probes with the request blocked
+    in the page). One account's Run button reads "Run ⌘↵" (`Run keyboard_command_key
+    keyboard_return`), another's reads "Run ↵" (`Run keyboard_return`). On the second, ⌘↵ in
+    "Enter a prompt" sent nothing and `generate image` timed out after 180 s, while focusing Run
+    and pressing Enter sent `GenerateContent`. `ImagePage.run` therefore presses the Run button.
 - **Lyria**: the prompt sits behind a "Describe the music you want to generate…" button, which
   reveals the "Prompt input" box. "Generate" runs it (⌘↵ does nothing there).
   - The request is `["models/<id>", [[[[null, prompt]], "user"]], null, <config [14] = [3]>,
@@ -253,6 +258,30 @@ was made: one image ($0.034) and one clip ($0.04).
   - ⌘↵ pressed in that window is silently ignored; the text stays in the box and nothing is sent.
   - `app prompt` therefore waits for Send to be enabled before submitting.
   - The `/apps` create page has no Send button, and an immediate ⌘↵ works there.
+- **Changed 2026-10-29 (free probes, minimized, writes blocked in the page).**
+  - The `/apps` box is now `<div role="textbox" contenteditable="plaintext-only">` ("Describe
+    an app and let Gemini do the rest"), with no `<textarea>`. The editor still has a textarea.
+  - `/apps` now has a **Send** button. On an account set to run with Enter ("Run ↵"), ⌘↵ there
+    only sends `AutocompleteAppletPrompt`; Send sends `CreateApplet`. Both submit through Send.
+  - Before `CreateApplet` the page calls `ListImportedProjects`, `ListCloudProjects` and
+    `ListCloudApiKeys`, and on one account also `GenerateCloudApiKey` and `CreateCloudProject`
+    (blocked in the probe, so their effect is unknown).
+  - Headless, the page stops after `ListCloudApiKeys` (spinner; once "Failed to list API keys:
+    permission denied"). Minimized it goes on, so headless probes of create are misleading.
+  - `Waa/Create` (anti-abuse token, `waa-pa.clients6.google.com`) must not be blocked in a
+    probe: without it neither create nor speech sends anything.
+- **Create now builds two options (2026-10-29, one approved real `app create`).** After
+  `CreateApplet` (200, app `a6af8f55…` "Tap Counter") the page sent no `CodeAssistantOffline`
+  within 60 s, yet the app lists a run. Its editor shows "Option A" / "Option B" and "Waiting for
+  both options to finish…", and streams several `StreamCodeAssistantOfflineGeneration` at once;
+  `GetPendingArenaInteraction` and `ListCodeAssistantOfflineGenerations` load on open. The RPC
+  that starts the two runs, and how an option is chosen, are not mapped yet. The app had no
+  saved code when checked.
+- **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
+  Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
+  access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
+- **Speech is unchanged** (2026-10-29): after "Create new dialog", ⌘↵ in "Speech block text"
+  sends `GenerateContent` on both a "Run ⌘↵" and a "Run ↵" account.
 
 ## Export, chat gate, status, stars (`scripts/spikes/chat_export_discovery.py`)
 
