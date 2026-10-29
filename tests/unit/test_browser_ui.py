@@ -94,9 +94,17 @@ class Cdp:
         return {"windowId": 7}
 
 
+class WindowPage:
+    def __init__(self):
+        self.viewport = None
+
+    async def set_viewport_size(self, size):
+        self.viewport = size
+
+
 class Context:
     def __init__(self, jar=None, on_cookies=None):
-        self.pages = ["page"]
+        self.pages = [WindowPage()]
         self.closed = False
         self.cdp = Cdp()
         self.jar, self.on_cookies = jar, on_cookies
@@ -140,18 +148,38 @@ class Playwright:
         return False
 
 
-async def test_open_browser_minimizes_a_desktop_sized_window_and_closes(aistudio_home):
+async def test_open_browser_minimizes_a_small_window_with_a_desktop_page_and_closes(aistudio_home):
+    # User report: every generation flashed a full-size Chrome before it went to the Dock
+    # (macOS shows a new Chrome's window while it starts). It now starts at Chrome's smallest
+    # size in a screen corner; the page still gets the desktop viewport, after the minimize.
     profile = get_profile("default").ensure()
     profile.chrome_dir.mkdir()
     context = Context()
     chromium = Chromium(context)
     async with open_browser(profile, playwright_factory=lambda: Playwright(chromium)) as ui:
         assert isinstance(ui, PlaywrightUi)
-    assert chromium.kwargs["viewport"] == VIEWPORT
+        assert context.pages[0].viewport == VIEWPORT
     assert chromium.kwargs["headless"] is False
+    assert chromium.kwargs.get("no_viewport") is True and "viewport" not in chromium.kwargs
+    assert "--window-size=500,375" in chromium.kwargs["args"]
+    assert "--window-position=0,10000" in chromium.kwargs["args"]
+    assert "--disable-blink-features=AutomationControlled" in chromium.kwargs["args"]
     assert context.cdp.sent[-1] == (
         "Browser.setWindowBounds", {"windowId": 7, "bounds": {"windowState": "minimized"}})
     assert context.closed
+
+
+async def test_a_headless_run_keeps_the_desktop_viewport_and_the_default_window(aistudio_home):
+    profile = get_profile("default").ensure()
+    profile.chrome_dir.mkdir()
+    context = Context()
+    chromium = Chromium(context)
+    async with open_browser(profile, window="headless",
+                            playwright_factory=lambda: Playwright(chromium)):
+        pass
+    assert chromium.kwargs["viewport"] == VIEWPORT and chromium.kwargs["headless"] is True
+    assert not any(a.startswith("--window-") for a in chromium.kwargs["args"])
+    assert context.cdp.sent == [] and context.pages[0].viewport is None
 
 
 async def test_a_visible_window_follows_the_screen_like_normal_chrome(aistudio_home):

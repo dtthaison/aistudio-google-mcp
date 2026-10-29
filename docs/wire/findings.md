@@ -753,3 +753,18 @@ blocked; the RPCs that went through are free.
       listed can never be the one extended.
     - "What happens next?" is not on the scene page until Extend is chosen, so `extend()`'s panel
       check still tells the Extend box apart there.
+
+## The minimized window's startup flash (2026-10-29, throwaway profiles, macOS)
+
+- **A new Chrome shows its window while it starts.** It was about 1 s at full size before
+  `Browser.setWindowBounds` could minimize it, then the Dock animation, once per command.
+- **No launch hides it.** Off-screen `--window-position` is clamped onto a display (it landed on
+  the external monitor above). `open -g -j` still lets Chrome make itself the front app. Hiding
+  the app with `NSRunningApplication.hide` returned false.
+- **A small window works.** `--window-size=500,375 --window-position=0,10000` with no launch
+  viewport starts Chrome at its minimum size in the main screen's bottom-left corner, even when
+  the profile last closed maximized. `page.set_viewport_size(1600x1000)` after the minimize
+  keeps the window minimized and small, and the page lays out at 1600×1000.
+- **Focus is a race either way.** Chrome kept the front after the minimize in 1 of 5 runs with
+  the old launch and 2 of 5 with the small window.
+- muse-mcp avoids windows by running headless; AI Studio generation refuses headless (TTS above).

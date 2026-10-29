@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -58,12 +58,13 @@ _BROWSER_MISSING = re.compile(
 
 
 async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, headless: bool,
-                            viewport: dict[str, int] | None = None) -> Any:
+                            viewport: dict[str, int] | None = None,
+                            args: Sequence[str] = ()) -> Any:
     """Open the profile's persistent Chrome; translate launch failures into BrowserError."""
     options: dict[str, Any] = {
         "channel": None if browser == "chromium" else browser,
         "headless": headless,
-        "args": CHROME_ARGS,
+        "args": [*CHROME_ARGS, *args],
         "ignore_default_args": IGNORE_DEFAULT_ARGS,
     }
     if viewport:

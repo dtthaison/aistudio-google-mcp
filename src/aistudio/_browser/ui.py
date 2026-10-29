@@ -36,6 +36,10 @@ SESSION_SAVE_TIMEOUT_S = 10.0  # reading the cookies at close; never hang the ru
 
 TYPE_LIMIT = 200  # longer text is inserted at once (typing 2 KB at 10 ms/key is slow)
 VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio's UI
+# macOS shows a new Chrome's window while it starts, before it can be minimized: start it at
+# Chrome's smallest size in a bottom corner (Chrome keeps windows on a display, so off-screen
+# positions land on another monitor instead).
+SMALL_WINDOW_ARGS = ("--window-size=500,375", "--window-position=0,10000")
 RUN_SHORTCUT = "Meta+Enter" if sys.platform == "darwin" else "Control+Enter"
 RPC_MARKER = "MakerSuiteService/"
 CONTROL_TIMEOUT_MS = 30_000
@@ -582,14 +586,18 @@ async def open_browser(
     async with factory() as playwright:
         # A visible window is for watching: the page follows the real window like normal Chrome
         # (a fixed 1600x1000 page cut off pop-ups on smaller screens). Hidden runs keep the
-        # desktop viewport that page driving relies on.
+        # desktop viewport that page driving relies on; a minimized one sets it on the page,
+        # since a launch viewport would grow the window to fit it.
+        minimized = window == "minimized"
         context = await launch_persistent(playwright, profile, browser="chrome",
                                           headless=window == "headless",
-                                          viewport=None if window == "visible" else VIEWPORT)
+                                          viewport=VIEWPORT if window == "headless" else None,
+                                          args=SMALL_WINDOW_ARGS if minimized else ())
         try:
             page = context.pages[0] if context.pages else await context.new_page()
-            if window == "minimized":
+            if minimized:
                 await _minimize(context, page)
+                await page.set_viewport_size(VIEWPORT)
             elif window == "visible":
                 await _maximize(context, page)
             yield PlaywrightUi(page)
