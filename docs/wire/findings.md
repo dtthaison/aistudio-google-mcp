@@ -293,6 +293,15 @@ was made: one image ($0.034) and one clip ($0.04).
   - **The A/B letters are shuffled per page load**: the same app was "Option A" in one load and
     the first option of the other in the next. Choose by option app id, never by letter.
   - Unresolved, the parent app has no saved code, so `app export` fails.
+- **Create still sends `CodeAssistantOffline`** (probe with it blocked, app `91ad18c7…`): Send →
+  `ListCloudProjects`, `ListCloudApiKeys`, `GenerateCloudApiKey`, `CreateCloudProject`,
+  `CreateApplet`, then `CodeAssistantOffline` 0.2 s later and `GetPendingArenaInteraction([app])`.
+- **A second approved real create was refused** (app `2a184cb5…`, nothing blocked):
+  `CodeAssistantOffline` → 403 `[7,"The caller does not have permission"]` after 0.7 s, and
+  `GetPendingArenaInteraction` → `[]`. The page showed "Permission denied. Please check your
+  account permissions and project settings." with Retry, and the run "Canceled". The first real
+  create two hours earlier did start two options. Build now appears to depend on the account's
+  Cloud project and API key (the calls above); not confirmed.
 - **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
   Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
   access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
