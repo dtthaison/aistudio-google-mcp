@@ -293,6 +293,11 @@ was made: one image ($0.034) and one clip ($0.04).
   - **The A/B letters are shuffled per page load**: the same app was "Option A" in one load and
     the first option of the other in the next. Choose by option app id, never by letter.
   - Unresolved, the parent app has no saved code, so `app export` fails.
+  - **Keeping the first option works** (2026-10-29, approved live run of
+    `BuildPage.keep_first_option` on `a6af8f55…`): it kept `f3b70e01…` (26 steps, 10 files), and
+    the parent app then exported its 10 files. After the choice the parent has the code.
+  - An option's stream sends one snapshot whose `[2]` lists every step so far (0..26), with the
+    final `["model", …]` on the last; single builds sent one step per snapshot.
 - **Create still sends `CodeAssistantOffline`** (probe with it blocked, app `91ad18c7…`): Send →
   `ListCloudProjects`, `ListCloudApiKeys`, `GenerateCloudApiKey`, `CreateCloudProject`,
   `CreateApplet`, then `CodeAssistantOffline` 0.2 s later and `GetPendingArenaInteraction([app])`.
