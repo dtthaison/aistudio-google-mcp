@@ -302,6 +302,7 @@ was made: one image ($0.034) and one clip ($0.04).
   account permissions and project settings." with Retry, and the run "Canceled". The first real
   create two hours earlier did start two options. Build now appears to depend on the account's
   Cloud project and API key (the calls above); not confirmed.
+  The same refusal came on a second account the same day (app `5044c008…`, 403 after 1.1 s).
 - **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
   Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
   access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
