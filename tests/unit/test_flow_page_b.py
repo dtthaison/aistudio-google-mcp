@@ -1,3 +1,4 @@
+import json
 
 import pytest
 
@@ -29,6 +30,19 @@ async def test_contents_open_the_project(fake_ui):
                  url=f"https://flow.google.com/project/{PID}")
     contents = await FlowPage(ui, now=Clock()).contents(PID)
     assert contents.titles == {MEDIA: "Red apple"}
+
+
+async def test_contents_ask_again_when_chrome_dropped_the_reply_body(fake_ui):
+    # Live: Chrome sometimes cannot hand over the page's Zzl0ze body ("No data found for
+    # resource with given identifier"), which reads as an empty reply: 0 media.
+    workflow = ["w1", None, None, ["Red apple", [CREATED, 0], None, None, MEDIA], PID]
+    full = batch("Zzl0ze", [None, [workflow], [record()], []])
+    ui = fake_ui({"Zzl0ze": [CapturedResponse("Zzl0ze", 200, "", ""),
+                             CapturedResponse("Zzl0ze", 200, full, "")]},
+                 url=f"https://flow.google.com/project/{PID}")
+    contents = await FlowPage(ui, now=Clock()).contents(PID)
+    assert [m.media_id for m in contents.media] == [MEDIA]
+    assert ("batch_rpc", "Zzl0ze", json.dumps([f"projects/{PID}", None, None, None, [1]])) in ui.ops
 
 
 async def test_upload_accepts_the_rights_dialog_and_returns_the_new_media(fake_ui, tmp_path):

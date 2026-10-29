@@ -182,8 +182,6 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
   to finish, or use a different profile.
 - **"no … was generated within …s"**: AI Studio may still finish it. Check the page before
   running it again, so you aren't charged twice.
-- **"no media … in this Flow project" for a media id that `flow media` just listed**: the Flow
-  page sometimes loads slowly. Run the command again.
 - **Something else broke after it used to work**: Google probably changed a page. Run the
   command with `--visible` to watch it and `-vv` for details, then please open an issue.
 

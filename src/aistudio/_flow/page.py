@@ -402,7 +402,14 @@ class FlowPage:
         if response is None:
             raise BrowserError("Flow did not list the project's media",
                                hint="re-run; if it persists, the Flow UI changed")
-        return decode_contents(decode_batch(response.text).get("Zzl0ze"))
+        text = response.text
+        if not text:  # Chrome sometimes drops the page's reply body (live): ask Flow again
+            status, text = await self._ui.batch_rpc(
+                "Zzl0ze", json.dumps([f"projects/{project_id}", None, None, None, [1]]))
+            if status >= 400 or not text:
+                raise BrowserError(f"Flow did not list the project's media (HTTP {status})",
+                                   hint="re-run; if it persists, the Flow UI changed")
+        return decode_contents(decode_batch(text).get("Zzl0ze"))
 
     async def media_details(self, media_id: str) -> FlowMedia | None:
         """One media with its signed links (the project list leaves them out)."""

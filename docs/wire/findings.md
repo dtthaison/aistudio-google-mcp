@@ -867,3 +867,13 @@ blocked; the RPCs that went through are free.
   30 s) and `scene list` once returned no scenes, while plain HTTP to flow.google.com answered
   in 0.6 s. A re-run a few minutes later worked.
 - Done in the CLI: `aistudio flow frame save <media-id> [--at S] [-o file]`.
+
+### Flow project reads that came back empty (2026-10-29, free)
+
+- **Cause.** `flow media` and `flow download` sometimes saw 0 media in a full project. The
+  page's `Zzl0ze` reply was HTTP 200, but Chrome could not hand over its body: `response.text()`
+  raised "Protocol error (Network.getResponseBody): No data found for resource with given
+  identifier", and the capture stored an empty text. In one probe, 3 of 5 opens of the same
+  43-media project lost the body; the others read all of it (~91 KB).
+- **Fix.** When the captured body is empty, `FlowPage.contents` sends `Zzl0ze` itself with the
+  page's own request body, `["projects/<id>",null,null,null,[1]]`, through `batch_rpc`.
