@@ -303,6 +303,11 @@ was made: one image ($0.034) and one clip ($0.04).
   create two hours earlier did start two options. Build now appears to depend on the account's
   Cloud project and API key (the calls above); not confirmed.
   The same refusal came on a second account the same day (app `5044c008…`, 403 after 1.1 s).
+  **Not the account:** right after, the user's own Chrome on that second account built a new app
+  ("a page that says hello", one run "Gemini 3.8 Flash", no options). So the 403 is the
+  automated Chrome being refused (as BotGuard refusals look, after many probe launches that
+  aborted requests), not a Cloud project or API key the account lacks. Not every create builds
+  two options.
 - **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
   Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
   access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
