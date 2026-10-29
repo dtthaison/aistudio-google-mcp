@@ -275,8 +275,24 @@ was made: one image ($0.034) and one clip ($0.04).
   within 60 s, yet the app lists a run. Its editor shows "Option A" / "Option B" and "Waiting for
   both options to finish…", and streams several `StreamCodeAssistantOfflineGeneration` at once;
   `GetPendingArenaInteraction` and `ListCodeAssistantOfflineGenerations` load on open. The RPC
-  that starts the two runs, and how an option is chosen, are not mapped yet. The app had no
-  saved code when checked.
+  that starts the two runs is not mapped yet. The app had no saved code when checked.
+- **The two options ("arena"), mapped by free probes with every write blocked in the page.**
+  - `GetPendingArenaInteraction([app])` → `[1, [[option_app, run, x], [option_app, run, x]]]`.
+    Each option is its own hidden app (not in `ListApplets`; `app export` says "no app"), with
+    its own run. `GetApplet(option_app)` has a snapshot time at `[0][13]` once it is built.
+  - Each run streams as `StreamCodeAssistantOfflineGeneration([run, null, null, option_app, 1])`.
+    The page only notices a finished option through this stream; block it and it waits forever.
+  - When both are built the page shows "Pick an option to preview", "Preview Option A" and
+    "Skip comparison". Previewing shows "Select Option A" and "Exit variant preview". Select
+    opens "Why did you pick variant A?" (reasons: "Better instruction following", "Better design
+    & aesthetics", "Better functionality"; Cancel / Submit).
+  - Submit sends `ResolveArenaInteraction([app, 1, chosen_option_app, null, [s, ns] spent,
+    "React", <engagement JSON: schemaVersion "arena-engagement-v6", arenaInstanceId,
+    variantCount 2, outcome "PICK", …>])`. "Skip comparison" sends the same with `4` and the
+    option shown first.
+  - **The A/B letters are shuffled per page load**: the same app was "Option A" in one load and
+    the first option of the other in the next. Choose by option app id, never by letter.
+  - Unresolved, the parent app has no saved code, so `app export` fails.
 - **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
   Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
   access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
