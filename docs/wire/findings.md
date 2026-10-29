@@ -768,3 +768,34 @@ blocked; the RPCs that went through are free.
 - **Focus is a race either way.** Chrome kept the front after the minimize in 1 of 5 runs with
   the old launch and 2 of 5 with the small window.
 - muse-mcp avoids windows by running headless; AI Studio generation refuses headless (TTS above).
+
+## Saving a frame (2026-10-29; free probes, three saved frames)
+
+- **"Save frame" is a button on both players**: a clip's editor (`/edit/<workflow>`) and a scene
+  (`/scene/<id>`). An extension's own editor is empty, so its frames are saved from its scene.
+- **It captures in the page and uploads.** The player draws on `canvas.video-canvas` (no
+  `<video>` element). Save frame sends a reCAPTCHA reload, then **`maseQ`**, the upload call:
+  `[[null, 22, null, null, null, project_id, null, "", null, null, [<token>, 1]], <base64 PNG>,
+  "image/png", 1, null ×4, "Saved frame from <clip title>", null, <UUID>, <UUID>]`. There is no
+  rights dialog. A probe that blocked `maseQ` created nothing.
+- **Reply**: `[[media_id, project_id, workflow_id, …, [null, [… "image/jpeg"], [w, h]]],
+  [workflow_id, null, null, ["Saved frame from <clip title>", [created], null, null, media_id],
+  project_id]]`. Flow keeps it as a JPEG at the clip's full size: 1080×1920 for a 9:16 clip,
+  1920×1080 for 16:9. Credits stayed at 1,020 for all three saves.
+- **Frame-exact.** Each saved image matched exactly one frame of the downloaded MP4 (mean
+  difference about 0.35 of 255; the neighbouring frames 2.4–6): 3.000 s (frame 72), the last
+  frame (191 of 192), and an extension's 2.5 s (frame 60) saved through its scene.
+- **Seeking.** A click on the timeline's ruler row (`.time-unit`, 8 px below its top) moves the
+  playhead there. In a 1,600 px window the ruler shows 102 px per second and starts at x = 21,
+  so about 4.25 px per frame. Arrow keys and End do nothing. The player shows
+  `.timecode-value` and `.duration-timecode-value` as `MM:SS:FF` at 24 fps (3.5 s reads
+  `00:03:12`). A click can land one frame early (3.25 s read `00:03:05`), so aistudio aims at
+  the middle of the frame, reads the timecode, and corrects once.
+- **Long scenes.** The ruler shows about 15 s; a click past the timeline's right edge missed (the
+  timecode stayed). aistudio presses "Zoom out" until the frame is on screen.
+- **A clip's record can say 8 s for a 7 s clip.** An extension listed with 8 seconds had 168
+  frames. aistudio takes clip lengths from the timeline (clip boxes and the total timecode).
+- **Flaky loads.** During the live check, Flow's pages twice timed out on load (`Page.goto`
+  30 s) and `scene list` once returned no scenes, while plain HTTP to flow.google.com answered
+  in 0.6 s. A re-run a few minutes later worked.
+- Done in the CLI: `aistudio flow frame save <media-id> [--at S] [-o file]`.

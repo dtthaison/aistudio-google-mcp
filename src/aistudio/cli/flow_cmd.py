@@ -16,6 +16,7 @@ from aistudio._app.flow import (
     flow_download,
     flow_edit,
     flow_extend,
+    flow_frame,
     flow_generate,
     flow_media,
     flow_projects,
@@ -446,3 +447,37 @@ def extend_cmd(state: CliState, media_id: str, prompt: str, project: str | None,
     _finish(asyncio.run(flow_extend(state.profile(), media_id, prompt, max_credits=max_credits,
                                     project=project, out=out, overwrite=force,
                                     timeout_s=float(timeout), visible=visible)), json_output)
+
+
+@flow.group("frame")
+def frame() -> None:
+    """Frames of Flow clips, saved as images for --start-frame, --end-frame or --ingredient."""
+
+
+@frame.command("save")
+@click.argument("media_id")
+@click.option("--at", type=click.FloatRange(0), help="Seconds into the clip (nearest frame, "
+              "1/24 s); default: the clip's last frame.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Also download the saved image to this file.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def frame_save(state: CliState, media_id: str, at: float | None, project: str | None,
+               out: Path | None, force: bool, visible: bool, json_output: bool) -> None:
+    """Save one frame of the clip MEDIA_ID as a new image in its Flow project (Flow's "Save
+    frame"; free). Its media id works as --start-frame, --end-frame or --ingredient."""
+    state.require_browser()
+    result = asyncio.run(flow_frame(state.profile(), media_id, at=at, project=project, out=out,
+                                    overwrite=force, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"Saved the frame at {data['timecode']} of {data['source']} as image "
+                     f"{data['media_id']} (use it with --start-frame {data['media_id']})",
+                     markup=False)
+        _render_files({k: v for k, v in data.items() if k != "credits_spent"})
+
+    emit(result, json_output=json_output, render=render)

@@ -164,6 +164,13 @@ class FakeUi:
     async def count(self, selector):
         return getattr(self, "counts", {}).get(selector, 0)
 
+    async def boxes(self, selector):
+        """Scripted per selector in ``box_table`` (a list of answers, like the other tables)."""
+        return self._answer(getattr(self, "box_table", {}), selector, [])
+
+    async def click_at(self, x, y):
+        self.ops.append(("click_at", x, y))
+
     async def set_files(self, selector, paths, types=None):
         self.ops.append(("set_files", selector, tuple(paths))
                         + ((tuple(sorted(types.items())),) if types else ()))

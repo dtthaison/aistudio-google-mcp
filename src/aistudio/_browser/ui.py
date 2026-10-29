@@ -129,6 +129,14 @@ class Ui(Protocol):
 
     async def dispatch_click_near(self, role: str, name: Name, text: str) -> None: ...
 
+    async def boxes(self, selector: str) -> list[tuple[float, float, float, float]]: ...
+
+    async def click_at(self, x: float, y: float) -> None: ...
+
+
+# Elements with a box (x, y, width, height), in page order
+_BOXES_JS = """els => els.map(e => e.getBoundingClientRect())
+  .filter(b => b.width > 0 && b.height > 0).map(b => [b.x, b.y, b.width, b.height])"""
 
 # Playwright's visibility rule: a non-empty box and no visibility:hidden
 _VISIBLE_LABELS_JS = """els => els.filter(e => {
@@ -424,6 +432,17 @@ class PlaywrightUi:
         """How many visible elements match a CSS selector."""
         return await self._read(
             lambda: self._page.locator(f"{selector} >> visible=true").count())
+
+    async def boxes(self, selector: str) -> list[tuple[float, float, float, float]]:
+        """Page boxes (x, y, width, height) of the elements matching a CSS selector, read in
+        one step; elements without a box are left out."""
+        found = await self._read(lambda: self._page.locator(selector).evaluate_all(_BOXES_JS))
+        return [(float(x), float(y), float(w), float(h)) for x, y, w, h in found]
+
+    async def click_at(self, x: float, y: float) -> None:
+        """A real mouse click at a page point (Flow's timeline ruler has no element per
+        moment)."""
+        await self._act("point", f"{x:.0f},{y:.0f}", lambda: self._page.mouse.click(x, y))
 
     async def set_files(self, selector: str, paths: list[str],
                         types: Mapping[str, str] | None = None) -> None:

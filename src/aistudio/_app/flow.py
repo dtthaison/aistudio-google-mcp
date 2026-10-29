@@ -770,6 +770,83 @@ async def flow_edit(profile: Profile, media_id: str, text: str, *,
             **({"warnings": warnings} if warnings else {})}
 
 
+async def flow_frame(profile: Profile, media_id: str, *, at: float | None = None,
+                     project: str | None = None, out: Path | None = None,
+                     overwrite: bool = False, visible: bool = False,
+                     browser: Callable[..., Any] = open_browser,
+                     downloader: Callable[[str], Any] = download_signed,
+                     now: Callable[[], datetime] = datetime.now,
+                     page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Save one frame of a clip as a new image in its project (Flow's Save frame; free): the
+    last frame, or the one nearest ``at`` seconds into the clip."""
+    if at is not None and at < 0:
+        raise ValidationError(f"--at {at:g} is before the clip's start; nothing was saved")
+    project_id = _project_id(project) if project else None
+    if out is not None:
+        _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        source = next((m for m in contents.media if m.media_id == media_id), None)
+        if source is None:
+            raise NotFoundError(f"no media {media_id} in this Flow project",
+                                hint='see "aistudio flow media"')
+        if _media_kind(source) != "video" or source.status != 3:
+            raise ValidationError(f"media {media_id} is not a finished video")
+        holder = next((s for s in contents.scenes
+                       if any(c.media_id == media_id for c in s.clips)), None)
+        if media_id not in contents.workflows and holder is not None:
+            # an extension: its own editor is empty (live), its scene has the player
+            index = next(i for i, c in enumerate(holder.clips) if c.media_id == media_id)
+            shown = holder.clips[index]
+            _check_at(at, shown.start, shown.end)
+            await page.open_frames(project_id, f"scene/{holder.id}", clips=len(holder.clips))
+            frame, timecode = await page.seek_frame(index, at, trim_start=shown.start)
+        else:
+            _check_at(at, 0, source.seconds)
+            workflow_id = await _workflow_of(page, contents, media_id)
+            await page.open_frames(project_id, f"edit/{workflow_id}", clips=1)
+            frame, timecode = await page.seek_frame(0, at)
+        frame_id = await page.save_frame()
+        after = await _credits_before(page)  # never raises: the frame is already saved
+        saved = await page.media_details(frame_id) if out is not None else None
+    warnings: list[str] = []
+    if before is None or after is None:
+        spent = None
+        warnings.append("could not read Flow credits around the save; Save frame was free when "
+                        "measured")
+    else:
+        spent = before - after
+        if spent:
+            warnings.append(f"credits fell by {spent} during this run; Save frame was free when "
+                            "measured")
+    project_url = PROJECT_URL.format(id=project_id)
+    files: list[dict[str, Any]] = []
+    if out is not None:
+        if saved is None:
+            raise BrowserError(f"Flow did not return the saved frame {frame_id}",
+                               hint=f"it is in {project_url}; download it with "
+                                    f'"aistudio flow download {frame_id}"')
+        files, saved_notes = await _save_all("image", [saved], out=out, overwrite=overwrite,
+                                             downloader=downloader, stamp=now(),
+                                             project_url=project_url)
+        warnings += saved_notes
+    return {"status": "done", "media_id": frame_id, "source": media_id,
+            "at": round(frame / 24, 3), "timecode": timecode, "project": project_id,
+            **({"files": files} if files else {}), "credits_spent": spent,
+            "credits_left": after, **({"warnings": warnings} if warnings else {})}
+
+
+def _check_at(at: float | None, start: int, end: int | None) -> None:
+    """A time the clip shows (a scene shows a clip from its trim start); the player checks the
+    exact frames again."""
+    if at is not None and end is not None and not start <= at < end:
+        raise ValidationError(f"--at {at:g} is outside the clip ({start}-{end} s); nothing was "
+                              "saved")
+
+
 async def flow_character(profile: Profile, name: str, description: str | None = None, *,
                          photo: str | None = None, i_have_rights: bool = False,
                          personality: str | None = None, model: str | None = None,

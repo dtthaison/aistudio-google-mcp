@@ -54,6 +54,8 @@ uv run aistudio flow edit <media-id> "make it black and white" --max-credits 20 
 uv run aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
 uv run aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 uv run aistudio flow scene download <scene-id> -o scene.mp4              # e.g. the scene "flow extend" reports
+uv run aistudio flow frame save <media-id> -o last.jpg                 # free: the last frame, as a new image
+uv run aistudio flow video "she turns around" --start-frame <frame-media-id>  # chain from that frame
 uv run aistudio dev capture                 # record AI Studio traffic into tests/fixtures
 ```
 

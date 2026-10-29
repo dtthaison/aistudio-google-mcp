@@ -38,6 +38,7 @@ from aistudio._flow.rows import (
     media_records,
     parse_permission,
     personality_notes,
+    saved_frame,
     sent_characters,
     sent_media,
     stitch_job,
@@ -91,6 +92,20 @@ LAST_CLIP = ".clip.is-last .clip-body"
 LAST_CLIP_SELECTED = ".clip.is-last.selected"
 PANEL_PROMPT_CHARS = 40  # the side panel shows the selected clip's prompt, cut short
 EXTEND_PANEL = "What happens next?"  # the Extend box's placeholder (the edit box differs)
+# The player of a clip's editor or a scene (live, findings "Saving a frame"): a canvas, a
+# timecode MM:SS:FF at 24 fps, and a ruler row on the timeline that seeks where it is clicked
+CANVAS = "canvas.video-canvas"
+TIMECODE = ".timecode-value"
+DURATION = ".duration-timecode-value"
+RULER = ".time-unit"
+TIMELINE = ".timeline-area"
+SAVE_FRAME = "Save frame"
+ZOOM_OUT = "Zoom out"
+FPS = 24
+_TIMECODE = re.compile(r"^(\d+):(\d\d):(\d\d)$")
+RULER_ROW_Y = 8  # px below the ruler's top: its labels row (a click there seeks)
+ZOOM_OUTS = 4  # the ruler shows about 15 s at first (live); each step shows more
+SEEK_PAUSE_MS = 700
 TUNE_ROLE = "radio"  # confirmed in Step 0
 MODEL_OPTION_ROLE = "menuitem"  # confirmed in Step 0
 MODEL_BUTTON = {"video": "Video generation default model",
@@ -169,6 +184,15 @@ def _group(kind: str, aspect: str | None = None) -> int:
     if aspect is not None and aspect not in ("16:9", "9:16"):
         return 0  # only images offer 4:3, 1:1 and 3:4
     return GROUP[kind]
+
+
+def timecode_frame(text: str) -> int | None:
+    """The player's timecode (live: "00:03:12" is 3.5 s) as a frame number at 24 fps."""
+    match = _TIMECODE.match(text.strip())
+    if match is None:
+        return None
+    minutes, seconds, frames = (int(g) for g in match.groups())
+    return (minutes * 60 + seconds) * FPS + frames
 
 
 def _label(text: str) -> str:
@@ -728,6 +752,92 @@ class FlowPage:
                                          only=set(self.paid_media))
         return FlowOutcome(outcome.media, credits if outcome.credits_left is None
                            else outcome.credits_left, outcome.timed_out)
+
+    async def open_frames(self, project_id: str, where: str, *, clips: int) -> None:
+        """Open a player with Save frame: ``edit/<workflow>`` (a clip's editor) or
+        ``scene/<scene>``. Its timeline must show the ``clips`` clips aistudio read."""
+        await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/{where}")
+        try:
+            await self._ui.wait_for(CANVAS, timeout_s=30.0)
+        except WindowClosedError:
+            raise
+        except BrowserError as exc:
+            raise BrowserError("Flow did not show the clip's player; nothing was saved",
+                               hint="re-run; if it persists, the Flow UI changed") from exc
+        if not self._ui.current_url().split("?", 1)[0].endswith(f"/{where}"):
+            raise BrowserError("Flow opened another page than the clip's; nothing was saved",
+                               hint="re-run; if it persists, the Flow UI changed")
+        await self._ui.pause(2000)  # the timeline lays out after the player
+        shown = await self._ui.count(CLIPS)
+        if shown != clips:  # a clip not in the project read yet would shift every position
+            raise BrowserError(f"Flow's timeline shows {shown} clips, not the {clips} aistudio "
+                               "read; nothing was saved",
+                               hint='wait until "aistudio flow scene list" shows them all, then '
+                                    "re-run")
+
+    async def seek_frame(self, clip: int, at: float | None, *,
+                         trim_start: int = 0) -> tuple[int, str]:
+        """Call after open_frames. Put the playhead on a frame of the timeline's ``clip``-th clip:
+        its last frame, or the one nearest ``at`` seconds into the clip (a scene shows a clip
+        from its trim start). Returns the clip's own frame number and the timecode shown, which
+        must read that frame."""
+        for _ in range(ZOOM_OUTS + 1):
+            ruler, area = await self._ui.boxes(RULER), await self._ui.boxes(TIMELINE)
+            boxes, total = await self._ui.boxes(CLIPS), timecode_frame(
+                await self._ui.text_of(DURATION))
+            if not ruler or not area or len(boxes) <= clip or not total:
+                raise BrowserError("Flow's player did not show its timeline; nothing was saved",
+                                   hint="re-run; if it persists, the Flow UI changed")
+            first = boxes[0][0]
+            per_frame = (boxes[-1][0] + boxes[-1][2] - first) / total
+            start = round((boxes[clip][0] - first) / per_frame)
+            end = round((boxes[clip][0] + boxes[clip][2] - first) / per_frame)
+            if end <= start:
+                raise BrowserError("Flow's timeline shows the clip without length; nothing was "
+                                   "saved", hint="re-run; if it persists, the Flow UI changed")
+            target = end - 1 if at is None else start + round((at - trim_start) * FPS)
+            if at is not None and not start <= target < end:
+                raise ValidationError(f"--at {at:g} is outside the clip ({trim_start}-"
+                                      f"{trim_start + (end - start) / FPS:.2f} s); nothing was "
+                                      "saved")
+            x = first + (target + 0.5) * per_frame  # the middle of the frame
+            if x <= area[0][0] + area[0][2]:
+                break
+            await self._ui.dispatch_click("button", ZOOM_OUT, exact=True)
+            await self._ui.pause(SEEK_PAUSE_MS)
+        else:
+            raise BrowserError("Flow's timeline does not show that frame, even zoomed out; "
+                               "nothing was saved",
+                               hint="re-run with --visible to watch; the Flow UI may have changed")
+        y = ruler[0][1] + RULER_ROW_Y
+        shown = ""
+        for _ in range(2):  # one correction: a click can land a frame off (live)
+            await self._ui.click_at(x, y)
+            await self._ui.pause(SEEK_PAUSE_MS)
+            shown = await self._ui.text_of(TIMECODE)
+            reached = timecode_frame(shown)
+            if reached == target:
+                return target - start + trim_start * FPS, shown
+            if reached is None:
+                break
+            x += (target - reached) * per_frame
+        raise BrowserError(f"Flow's player stopped at {shown or 'an unreadable time'}, not the "
+                           "frame asked for; nothing was saved",
+                           hint="re-run; if it persists, the Flow UI changed")
+
+    async def save_frame(self) -> str:
+        """Call after seek_frame. Flow captures the frame in the page and uploads it as a new
+        image (live: ``maseQ``, free); returns its media id."""
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            self.started = True
+            await self._ui.dispatch_click("button", SAVE_FRAME, exact=True)
+            reply = await log.next("maseQ", timeout_s=60.0)
+        media_id = (saved_frame(decode_batch(reply.text).get("maseQ"))
+                    if reply is not None and reply.status < 400 else None)
+        if media_id is None:
+            raise BrowserError("Flow did not report the saved frame",
+                               hint="check the project's images in Flow before re-running")
+        return media_id
 
     async def credits(self) -> int | None:
         await self._ui.goto(HOME_URL)

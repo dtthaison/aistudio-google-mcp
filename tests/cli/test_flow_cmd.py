@@ -327,3 +327,22 @@ def test_character_output_without_an_id(logged_in_profile, monkeypatch):
     res = CliRunner().invoke(cli, ["flow", "character", "create", "Robot", "a robot"])
     assert res.exit_code == 0, res.output
     assert "None" not in res.stdout and "id not reported" in res.stdout
+
+
+def test_flow_frame_save_passes_every_option(logged_in_profile, monkeypatch, tmp_path):
+    logged_in_profile()
+    calls = []
+    saved = {"status": "done", "media_id": "f1", "source": "m1", "at": 3.5,
+             "timecode": "00:03:12", "project": "p", "credits_spent": 0, "credits_left": 1020}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_frame", fake(saved, calls))
+    out = tmp_path / "f.png"
+    res = CliRunner().invoke(cli, ["flow", "frame", "save", "m1", "--at", "3.5", "-o", str(out),
+                                   "--project", "p1", "--force", "--visible", "--json"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == saved
+    assert calls[-1] == (("m1",), {"at": 3.5, "project": "p1", "out": out, "overwrite": True,
+                                   "visible": True})
+    res = CliRunner().invoke(cli, ["flow", "frame", "save", "m1"])  # the last frame by default
+    assert res.exit_code == 0, res.output
+    assert calls[-1][1]["at"] is None
+    assert "f1" in res.stdout and "00:03:12" in res.stdout and "--start-frame" in res.stdout

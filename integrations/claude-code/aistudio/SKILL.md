@@ -71,6 +71,7 @@ quotes and write each `'` as `'\''`.
 | Flow characters: list, rename, personality (free) | `aistudio flow character list --json`, `aistudio flow character rename <id> '<Name>' --json`, `aistudio flow character personality <id> '<notes>' --json` (or `--personality` on create) |
 | Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
+| Save a frame of a Flow clip as an image (free; for shot-to-shot chaining) | `aistudio flow frame save <clip media id> [--at SECONDS] [-o frame.jpg] --json`: the last frame by default, or the nearest frame to `--at`; pass the returned `media_id` to `--start-frame`, `--end-frame` or `--ingredient` (no upload, no `--i-have-rights`) |
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
 | Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |

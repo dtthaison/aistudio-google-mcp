@@ -196,6 +196,12 @@ def linked_image(payload: Any) -> str | None:
     return _str(opt_index(payload, 0, 0))
 
 
+def saved_frame(payload: Any) -> str | None:
+    """Save frame's ``maseQ`` reply (live): the new image record, then its workflow,
+    ``[[media_id, project_id, workflow_id, …], [workflow_id, …]]``."""
+    return _str(opt_index(payload, 0, 0))
+
+
 def character_name(payload: Any) -> str | None:
     """``C4BZMd``/``rzMKMb`` reply: ``[[project_id, id, None, [1, name, …], …]]``."""
     return _str(opt_index(payload, 0, 3, 1))
