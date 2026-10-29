@@ -8,6 +8,11 @@ errors), an optional ``hint`` telling the user what to do next, and a
 from __future__ import annotations
 
 _LOGIN_HINT = 'run "aistudio login"'
+# An account that never allowed AI Studio to use Google Drive, where prompts live (live:
+# ListPrompts; the page itself shows "Allow Drive access"). Signing in again cannot fix it.
+_DRIVE_DENIED = "unauthorized_client"
+_DRIVE_HINT = ('open https://aistudio.google.com/library in this account and press '
+               '"Allow access", then re-run')
 
 
 class AIStudioError(Exception):
@@ -116,6 +121,9 @@ def error_from_status(status: int, message: str) -> AIStudioError:
         return NotFoundError(message)
     if status == 8:
         return QuotaExceededError(message) if quota else RateLimitError(message)
+    if status == 16 and _DRIVE_DENIED in message:
+        return AuthError(f"this account has not allowed AI Studio to use Google Drive ({message})",
+                         hint=_DRIVE_HINT)
     if status in (7, 16):
         return QuotaExceededError(message) if quota else AuthError(message, hint=_LOGIN_HINT)
     if status in (13, 14):

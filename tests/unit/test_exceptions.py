@@ -40,6 +40,16 @@ def test_auth_errors_carry_login_hint():
     assert error_from_http(401, "").hint == 'run "aistudio login"'
 
 
+def test_drive_access_not_allowed_points_at_the_history_page():
+    # Live (ListPrompts, an account that never allowed Drive): signing in again cannot fix it;
+    # the page itself shows "Allow Drive access".
+    err = error_from_status(16, "OAuth error: unauthorized_client.")
+    assert type(err) is AuthError
+    assert "Drive" in err.message
+    assert "aistudio.google.com/library" in err.hint
+    assert "Allow access" in err.hint
+
+
 @pytest.mark.parametrize(
     "status,cls",
     [(401, AuthError), (403, AuthError), (404, NotFoundError), (429, RateLimitError),
