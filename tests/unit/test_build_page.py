@@ -1,7 +1,7 @@
 import pytest
 
 from aistudio._browser.build_page import APPS_URL, PROMPT_BOX, BuildPage, app_url
-from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse
+from aistudio._browser.ui import CapturedResponse
 from aistudio._rpc import wire
 from aistudio.exceptions import (
     AuthError,
@@ -42,8 +42,10 @@ async def test_create_follows_the_run_to_completion(fake_ui, captured):
     outcome = await BuildPage(ui).create("a counter", timeout_s=600)
     assert (outcome.app_id, outcome.run_id) == (APP, RUN)
     assert outcome.progress.done and outcome.progress.steps == 24
+    # Send, not ⌘↵: on an account set to run with Enter, ⌘↵ on /apps only asks for prompt
+    # suggestions (live, 2026-10-29).
     assert ui.ops == [("goto", APPS_URL), ("fill", PROMPT_BOX, "a counter"),
-                      ("press", PROMPT_BOX, RUN_SHORTCUT)]
+                      ("wait_enabled", "button", "Send"), ("activate", "button", "Send", 0)]
 
 
 async def test_prompt_ignores_streams_of_older_runs(fake_ui, captured):
@@ -98,7 +100,7 @@ async def test_prompt_waits_for_send_to_be_enabled_before_submitting(fake_ui, ca
                   "StreamCodeAssistantOfflineGeneration": [stream(captured, run_id=UPDATE_RUN)]})
     await BuildPage(ui).prompt(APP, "make it blue", timeout_s=60)
     assert ui.ops == [("goto", app_url(APP)), ("fill", PROMPT_BOX, "make it blue"),
-                      ("wait_enabled", "button", "Send"), ("press", PROMPT_BOX, RUN_SHORTCUT)]
+                      ("wait_enabled", "button", "Send"), ("activate", "button", "Send", 0)]
 
 
 async def test_a_failed_start_after_create_reports_the_empty_app(fake_ui, captured):
@@ -134,6 +136,12 @@ class Clock:
 
     def __call__(self):
         return self.t
+
+
+def test_the_prompt_box_is_the_old_textarea_or_the_new_text_field():
+    # Live 2026-10-29: /apps now has <div role="textbox" contenteditable>, the editor a textarea.
+    assert {part.strip() for part in PROMPT_BOX.split(",")} == {
+        "textarea", "[role=textbox][contenteditable]"}
 
 
 def recording_ui(fake_ui, clock, step):

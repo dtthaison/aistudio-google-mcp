@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, ResponseLog, Ui
+from aistudio._browser.ui import CapturedResponse, ResponseLog, Ui
 from aistudio._rpc import wire
 from aistudio._rpc.rows import as_str
 from aistudio._rpc.rows.build import decode_build_stream, decode_created_app, decode_started_run
@@ -20,8 +20,9 @@ from aistudio._types.apps import BuildProgress
 from aistudio.exceptions import AIStudioError, AuthError, BotGuardError, BrowserError
 
 APPS_URL = "https://aistudio.google.com/apps"
-PROMPT_BOX = "textarea"
-SEND_BUTTON = "Send"  # the app editor's submit control
+# /apps has a contenteditable text field (live 2026-10-29); the app editor keeps a textarea
+PROMPT_BOX = "[role=textbox][contenteditable], textarea"
+SEND_BUTTON = "Send"  # the submit control of /apps and of the app editor
 START_TIMEOUT_S = 60.0
 CONTROL_WAIT_S = 30.0
 CREATE = "CreateApplet"
@@ -72,9 +73,8 @@ class BuildPage:
         deadline = self._now() + timeout_s
         async with self._ui.responses() as log:
             await self._ui.goto(app_url(app_id))
-            # The editor disables Send for ~1s while it loads the app; ⌘↵ pressed earlier is
-            # silently ignored (docs/wire/findings.md). The /apps create page has no Send button.
-            await self._submit(text, deadline=deadline, wait_for=SEND_BUTTON)
+            # The editor disables Send for ~1s while it loads the app (docs/wire/findings.md).
+            await self._submit(text, deadline=deadline)
             return await self._follow(log, deadline)
 
     def _left(self, deadline: float, cap: float) -> float:
@@ -85,12 +85,13 @@ class BuildPage:
                                hint="re-run with a larger --timeout")
         return min(cap, remaining)
 
-    async def _submit(self, text: str, *, deadline: float, wait_for: str | None = None) -> None:
+    async def _submit(self, text: str, *, deadline: float) -> None:
+        """Fill the box and press Send. Not ⌘↵: the run shortcut is an account setting, and on
+        an Enter account ⌘↵ only asks for prompt suggestions (live)."""
         await self._ui.fill_first(PROMPT_BOX, text, timeout_s=self._left(deadline, CONTROL_WAIT_S))
-        if wait_for:
-            await self._ui.wait_enabled("button", wait_for,
-                                        timeout_s=self._left(deadline, CONTROL_WAIT_S))
-        await self._ui.press_first(PROMPT_BOX, RUN_SHORTCUT)
+        await self._ui.wait_enabled("button", SEND_BUTTON,
+                                    timeout_s=self._left(deadline, CONTROL_WAIT_S))
+        await self._ui.activate("button", SEND_BUTTON, exact=True)
 
     async def _expect(self, log: ResponseLog, method: str, deadline: float) -> CapturedResponse:
         wait = self._left(deadline, START_TIMEOUT_S)
