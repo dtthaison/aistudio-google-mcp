@@ -308,6 +308,9 @@ was made: one image ($0.034) and one clip ($0.04).
   automated Chrome being refused (as BotGuard refusals look, after many probe launches that
   aborted requests), not a Cloud project or API key the account lacks. Not every create builds
   two options.
+- **The fixed CLI create works** (2026-10-29, approved real run on the second account, minimized,
+  a few minutes after the refusals): `app create` → "Hello Big" `166dfe40…`, one run, status
+  done, 60 steps, 18 files, 331 s; `app export` downloaded and verified all 18 files.
 - **Drive access.** `ListPrompts` for an account that never allowed AI Studio to use Google
   Drive returns `[16, "OAuth error: unauthorized_client."]`. The History page shows "Allow Drive
   access" ("Allow access to Google Drive to load Prompts"); signing in again does not help.
