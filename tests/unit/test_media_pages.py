@@ -8,18 +8,21 @@ from aistudio._browser.media_pages import (
     MUSIC_EDITOR,
     MUSIC_PROMPT,
     REMOVE_MEDIA,
+    RUN,
     TRANSCRIBE,
     ImagePage,
     MusicPage,
     TranscribePage,
 )
-from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse
+from aistudio._browser.ui import CapturedResponse
 from aistudio.exceptions import BrowserError
 
 RESPONSE = CapturedResponse("GenerateContent", 200, "[1]", "[2]")
 
 
-async def test_image_page_opens_the_model_fills_and_runs(fake_ui):
+async def test_image_page_opens_the_model_fills_and_presses_run(fake_ui):
+    # Run's shortcut is an account setting (live: "Run ⌘↵" on one account, "Run ↵" on
+    # another, where ⌘↵ sent nothing), so the page presses the Run button itself.
     ui = fake_ui({"GenerateContent": [RESPONSE]})
     page = ImagePage(ui)
     await page.open("gemini-3.1-flash-lite-image")
@@ -28,7 +31,7 @@ async def test_image_page_opens_the_model_fills_and_runs(fake_ui):
     assert ui.ops == [
         ("goto", "https://aistudio.google.com/prompts/new_chat?model=gemini-3.1-flash-lite-image"),
         ("fill", "textbox", IMAGE_PROMPT, "an apple"),
-        ("press", "textbox", IMAGE_PROMPT, RUN_SHORTCUT),
+        ("activate", "button", RUN.pattern, 0),
     ]
 
 

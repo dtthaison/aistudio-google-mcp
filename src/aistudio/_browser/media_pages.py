@@ -1,9 +1,9 @@
 """Drive AI Studio's image and music pages (spec §5.4 page driving, §6.4 media).
 
 Mapped by the free probes in docs/wire/findings.md ("Image and music generation"). A Gemini
-image model opens the chat page with an image prompt box, and ⌘↵ runs it. Input images (edits)
-and audio (transcription) go through the page's file input; each shows a "Remove media" chip
-(findings, "AI Studio transcription and image editing"). A Lyria model's
+image model opens the chat page with an image prompt box, and its Run button runs it. Input
+images (edits) and audio (transcription) go through the page's file input; each shows a
+"Remove media" chip (findings, "AI Studio transcription and image editing"). A Lyria model's
 chat URL redirects to the music page. Its prompt sits behind a "Describe the music…" button,
 and it runs from "Generate" (⌘↵ does nothing there). Both send ``GenerateContent``.
 """
@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-from aistudio._browser.ui import RUN_SHORTCUT, CapturedResponse, ResponseLog, Ui
+from aistudio._browser.ui import CapturedResponse, ResponseLog, Ui
 from aistudio.exceptions import BrowserError
 
 CHAT_URL = "https://aistudio.google.com/prompts/new_chat?model={model}"
@@ -87,7 +87,9 @@ class ImagePage:
 
     async def run(self, *, timeout_s: float = 180.0) -> CapturedResponse:
         async with self._ui.responses() as log:
-            await self._ui.press("textbox", IMAGE_PROMPT, RUN_SHORTCUT)
+            # Not the shortcut: it is an account setting ("Run ⌘↵" or "Run ↵"), and on an
+            # Enter account ⌘↵ sends nothing (live). Keyboard activation also beats overlays.
+            await self._ui.activate("button", RUN)
             return await _await_generation(log, "image", timeout_s)
 
 
