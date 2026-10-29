@@ -2,9 +2,11 @@
 StreamCodeAssistantOfflineGeneration/1; docs/wire/findings.md "Build create/update discovery").
 
 CreateApplet -> ``[app_id, [...]]``. CodeAssistantOffline -> ``[run_id, app_id]``.
-StreamCodeAssistantOfflineGeneration -> ``[[snapshot, ...]]``; snapshot ``[_, _, [run], app_id]``
-where run ``[11]`` is the step counter, ``[16]`` the run id, and the final snapshot's ``[8]`` is
-``["model", summary, _, timestamp, [[path, sha256], ...]]``.
+StreamCodeAssistantOfflineGeneration -> ``[[snapshot, ...]]``; snapshot
+``[_, _, [run, ...], app_id]`` where run ``[11]`` is the step counter, ``[16]`` the run id, and
+the final run's ``[8]`` is ``["model", summary, _, timestamp, [[path, sha256], ...]]``.
+GetPendingArenaInteraction -> ``[1, [[option_app_id, run_id, _], ...]]`` while the app waits for
+a choice between options it built at once, ``[]`` otherwise (findings, "The two options").
 """
 
 from __future__ import annotations
@@ -37,15 +39,28 @@ def decode_build_stream(response: Any) -> BuildProgress:
     run_id = app_id = summary = None
     steps, done, files = 0, False, ()
     for item in items if isinstance(items, list) else []:
-        run = opt_index(item, 2, 0)
-        run_id = as_str(opt_index(run, 16)) or run_id
         app_id = as_str(opt_index(item, 3)) or app_id
-        steps = max(steps, as_int(opt_index(run, 11)) or 0)
-        final = opt_index(run, 8)
-        if as_str(opt_index(final, 0)) == "model":
-            done = True
-            summary = as_str(opt_index(final, 1))
-            entries = opt_index(final, 4)
-            entries = entries if isinstance(entries, list) else []
-            files = tuple(p for p in (as_str(opt_index(e, 0)) for e in entries) if p)
+        # One step per snapshot, or (an option's stream, live 2026-10-29) every step so far
+        runs = opt_index(item, 2)
+        for run in runs if isinstance(runs, list) else []:
+            run_id = as_str(opt_index(run, 16)) or run_id
+            steps = max(steps, as_int(opt_index(run, 11)) or 0)
+            final = opt_index(run, 8)
+            if as_str(opt_index(final, 0)) == "model":
+                done = True
+                summary = as_str(opt_index(final, 1))
+                entries = opt_index(final, 4)
+                entries = entries if isinstance(entries, list) else []
+                files = tuple(p for p in (as_str(opt_index(e, 0)) for e in entries) if p)
     return BuildProgress(run_id, app_id, steps, done, files, summary)
+
+
+def decode_arena_options(response: Any) -> tuple[tuple[str, str], ...]:
+    """The (option app id, run id) of each option awaiting a choice; () when none."""
+    options = []
+    rows = opt_index(response, 1)
+    for row in rows if isinstance(rows, list) else []:
+        app_id, run_id = as_str(opt_index(row, 0)), as_str(opt_index(row, 1))
+        if app_id and run_id:
+            options.append((app_id, run_id))
+    return tuple(options)
