@@ -162,6 +162,11 @@ def _render_build(d: dict[str, Any]) -> None:
     stdout.print(d["url"], markup=False)
     if d["files"]:
         stdout.print(f"Files: {', '.join(d['files'])}", markup=False)
+    if d.get("options"):
+        others = ", ".join(o for o in d["options"] if o != d["kept_option"])
+        kept = (f"kept the first shown ({d['kept_option']}); other: {others}" if d["kept_option"]
+                else "none kept yet; open the link to choose")
+        stdout.print(f"Built {len(d['options'])} options; {kept}", markup=False)
 
 
 def _build(state: CliState, run: Callable[..., Awaitable[dict[str, Any]]], *args: Any,

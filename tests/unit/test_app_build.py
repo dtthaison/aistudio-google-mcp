@@ -91,6 +91,27 @@ async def test_create_timeout_still_reports_the_app(logged_in_profile, make_clie
     assert result["url"].endswith(APP)
 
 
+@respx.mock
+async def test_create_reports_which_option_was_kept(logged_in_profile, make_client, build_page):
+    serve_apps()
+    build_page(BuildOutcome(APP, RUN, DONE, ("opt-a", "opt-b"), "opt-b"))
+    result = await create_app(logged_in_profile(), "a counter",
+                              client_factory=lambda p: make_client(),
+                              browser=browser_recording([]), now=clock())
+    assert result["status"] == "done"
+    assert (result["options"], result["kept_option"]) == (["opt-a", "opt-b"], "opt-b")
+
+
+@respx.mock
+async def test_a_single_build_reports_no_options(logged_in_profile, make_client, build_page):
+    serve_apps()
+    build_page(BuildOutcome(APP, RUN, DONE))
+    result = await create_app(logged_in_profile(), "a counter",
+                              client_factory=lambda p: make_client(),
+                              browser=browser_recording([]), now=clock())
+    assert "options" not in result and "kept_option" not in result
+
+
 @pytest.mark.parametrize("idea", ["", "   "])
 async def test_blank_idea_is_rejected_before_anything(logged_in_profile, idea):
     opened = []

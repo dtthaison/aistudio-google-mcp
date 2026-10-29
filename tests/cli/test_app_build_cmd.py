@@ -92,3 +92,12 @@ def test_build_notice_matches_the_window(logged_in_profile, monkeypatch):
     hidden = CliRunner().invoke(cli, ["app", "create", "an idea"])
     assert "visible Chrome window" in visible.stderr and "minimized" not in visible.stderr
     assert "minimized Chrome window" in hidden.stderr
+
+
+def test_a_kept_option_is_named_with_the_other(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    two = {**RESULT, "options": ["opt-a", "opt-b"], "kept_option": "opt-b"}
+    monkeypatch.setattr("aistudio.cli.app_cmd.create_app", fake(two, []))
+    res = CliRunner().invoke(cli, ["app", "create", "a pomodoro timer"])
+    assert res.exit_code == 0, res.output
+    assert "Built 2 options; kept the first shown (opt-b); other: opt-a" in res.stdout

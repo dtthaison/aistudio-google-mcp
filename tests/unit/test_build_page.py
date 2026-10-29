@@ -1,6 +1,12 @@
 import pytest
 
-from aistudio._browser.build_page import APPS_URL, PROMPT_BOX, BuildPage, app_url
+from aistudio._browser.build_page import (
+    APPS_URL,
+    PROMPT_BOX,
+    SKIP_COMPARISON,
+    BuildPage,
+    app_url,
+)
 from aistudio._browser.ui import CapturedResponse
 from aistudio._rpc import wire
 from aistudio.exceptions import (
@@ -128,6 +134,79 @@ async def test_a_failed_stream_for_this_run_fails_fast(fake_ui, captured):
                   "StreamCodeAssistantOfflineGeneration": [failed, stream(captured, UPDATE_RUN)]})
     with pytest.raises(ServerError):
         await BuildPage(ui).prompt(APP, "x", timeout_s=60)
+
+
+# Live 2026-10-29 (app a6af8f55…): the builder made two hidden option apps at once.
+OPT_A, RUN_A = "f3b70e01-1598-4d18-9a6e-72132dda3e72", "e96502c5-7226-4dcb-9cff-15d494e9ce7f"
+OPT_B, RUN_B = "79f6eed8-5ad7-43fe-9358-7a253c3d357a", "7dd040de-6ee2-43bb-b808-33b8cc24921a"
+SKIP_OPS = [("wait_enabled", "button", SKIP_COMPARISON), ("activate", "button", SKIP_COMPARISON, 0)]
+
+
+def arena(*options):
+    rows = [[app, run, "x"] for app, run in options]
+    return CapturedResponse("GetPendingArenaInteraction", 200,
+                            wire.encode([1, rows] if rows else []), "")
+
+
+def resolved(kept, status=200, text="[]"):
+    # "Skip comparison" sends [app, 4, <the option shown first>, null, [s, ns], "React", …]
+    return CapturedResponse("ResolveArenaInteraction", status, text,
+                            wire.encode([APP, 4, kept, None, [2, 0], "React"]))
+
+
+async def test_create_keeps_the_first_option_when_the_builder_makes_two(fake_ui, captured):
+    # No CodeAssistantOffline reply comes then (live); the editor lists the options on load.
+    ui = fake_ui({
+        "CreateApplet": [reply("CreateApplet", captured("CreateApplet", 2))],
+        "GetPendingArenaInteraction": [arena(), arena((OPT_A, RUN_A), (OPT_B, RUN_B))],
+        "StreamCodeAssistantOfflineGeneration": [stream(captured, RUN_A),
+                                                 stream(captured, RUN_B, finished=False),
+                                                 stream(captured, RUN_B)],
+        "ResolveArenaInteraction": [resolved(OPT_B)],
+    })
+    outcome = await BuildPage(ui).create("a counter", timeout_s=600)
+    assert (outcome.app_id, outcome.options, outcome.kept) == (APP, (OPT_A, OPT_B), OPT_B)
+    assert outcome.run_id == RUN_B and outcome.progress.done
+    assert ui.ops[4:] == [("goto", app_url(APP)), *SKIP_OPS]
+
+
+async def test_an_existing_app_waiting_for_a_choice_keeps_its_first_option(fake_ui, captured):
+    ui = fake_ui({
+        "GetPendingArenaInteraction": [arena((OPT_A, RUN_A), (OPT_B, RUN_B))],
+        "StreamCodeAssistantOfflineGeneration": [stream(captured, RUN_B), stream(captured, RUN_A)],
+        "ResolveArenaInteraction": [resolved(OPT_A)],
+    })
+    outcome = await BuildPage(ui).keep_first_option(APP, timeout_s=300)
+    assert (outcome.kept, outcome.run_id) == (OPT_A, RUN_A)
+    assert ui.ops == [("goto", app_url(APP)), *SKIP_OPS]
+
+
+async def test_options_still_building_at_the_timeout_are_left_unchosen(fake_ui, captured):
+    ui = fake_ui({
+        "GetPendingArenaInteraction": [arena((OPT_A, RUN_A), (OPT_B, RUN_B))],
+        "StreamCodeAssistantOfflineGeneration": [stream(captured, RUN_A)],
+    })
+    outcome = await BuildPage(ui).keep_first_option(APP, timeout_s=300)
+    assert (outcome.options, outcome.kept, outcome.progress) == ((OPT_A, OPT_B), None, None)
+    assert ui.ops == [("goto", app_url(APP))]  # never picks while an option is unfinished
+
+
+async def test_an_app_with_no_options_waiting_is_an_error(fake_ui):
+    with pytest.raises(BrowserError) as info:
+        await BuildPage(fake_ui({"GetPendingArenaInteraction": [arena()]})).keep_first_option(
+            APP, timeout_s=60)
+    assert "no options" in info.value.message
+
+
+async def test_a_refused_choice_is_an_error(fake_ui, captured):
+    ui = fake_ui({
+        "GetPendingArenaInteraction": [arena((OPT_A, RUN_A), (OPT_B, RUN_B))],
+        "StreamCodeAssistantOfflineGeneration": [stream(captured, RUN_A), stream(captured, RUN_B)],
+        "ResolveArenaInteraction": [resolved(OPT_A, 403,
+                                             '[,[7,"The caller does not have permission"]]')],
+    })
+    with pytest.raises(AuthError):
+        await BuildPage(ui).keep_first_option(APP, timeout_s=60)
 
 
 class Clock:

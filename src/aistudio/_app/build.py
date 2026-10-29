@@ -85,7 +85,7 @@ async def _result(
     except AIStudioError:
         pass
     progress = outcome.progress
-    return {
+    result: dict[str, Any] = {
         "app_id": outcome.app_id,
         "run_id": outcome.run_id,
         "url": app_url(outcome.app_id),
@@ -95,3 +95,7 @@ async def _result(
         "files": list(progress.files) if progress else [],
         "seconds": round(now() - started),
     }
+    if outcome.options:  # the builder made several at once; the first shown was kept
+        result["options"] = list(outcome.options)
+        result["kept_option"] = outcome.kept
+    return result
