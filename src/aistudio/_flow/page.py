@@ -23,9 +23,11 @@ from aistudio._flow.models import ASPECTS
 from aistudio._flow.rows import (
     FlowMedia,
     FlowProject,
+    FlowTool,
     Generated,
     ProjectContents,
     Quote,
+    ToolFile,
     agent_generated,
     agent_pending,
     character_id,
@@ -33,6 +35,8 @@ from aistudio._flow.rows import (
     credits_left,
     decode_contents,
     decode_projects,
+    decode_tool_files,
+    decode_tools,
     extend_started,
     linked_image,
     media_records,
@@ -58,6 +62,8 @@ from aistudio.exceptions import (
 
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
+CREATE_TOOL_URL = "https://flow.google.com/project/{id}/create-tool"
+TOOL_URL = "https://flow.google.com/project/{project}/tool/{tool}"
 PROJECT_ID = re.compile(r"/project/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 PROMPT_EDITOR = "flow-rich-text-editor.prompt-input .ProseMirror"
 AGENT_MESSAGE = ".agent-message-content"
@@ -133,6 +139,17 @@ TILE_POLLS = 8  # x 1 s per reload
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
+# Tool builds (live, findings "Flow Tools discovery"): one took 95 s with the page text unchanged
+# for 50 s, so Stop is the only sign of progress, and a reload at 50 s lost the build
+TOOL_EDITOR = "flow-rich-text-editor .ProseMirror"
+TOOL_ID = re.compile(r"/tool/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+AGENT_STOP = "Stop"  # shown while the agent works
+AGENT_FAILED = "Try again"  # shown with "Something went wrong. Please try again."
+TOOL_DONE = "Done"
+TOOL_START_S = 60.0  # the agent showed Stop within 10 s
+TOOL_POLL_MS = 2000
+TOOL_QUIET_POLLS = 3  # polls in a row without Stop before a build counts as ended
+TOOL_LIST_POLLS = 10  # x TOOL_POLL_MS for the list to show a finished build
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
 
@@ -162,6 +179,12 @@ class AgentTurn:
 class CharacterOutcome:
     character_id: str | None
     media: list[FlowMedia]
+
+
+@dataclass(frozen=True)
+class ToolBuild:
+    tool_id: str
+    timed_out: bool  # the agent was still working when aistudio stopped waiting
 
 
 @dataclass(frozen=True)
@@ -410,6 +433,72 @@ class FlowPage:
                 raise BrowserError(f"Flow did not list the project's media (HTTP {status})",
                                    hint="re-run; if it persists, the Flow UI changed")
         return decode_contents(decode_batch(text).get("Zzl0ze"))
+
+    async def tools(self) -> list[FlowTool]:
+        """Every Tool the account can see (free, and listing copies nothing)."""
+        status, text = await self._ui.batch_rpc("tRARke", "[]")
+        if status >= 400:
+            raise BrowserError(f"Flow did not list its tools (HTTP {status})",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return decode_tools(decode_batch(text).get("tRARke"))
+
+    async def tool_files(self, tool_id: str, version_id: str) -> list[ToolFile]:
+        """A Tool version's code. Reading a template makes Flow add a remix of it to the account
+        (live), whether this call or the Tool's page sends the read: callers must ask first."""
+        status, text = await self._ui.batch_rpc(
+            "ZLaYcd", json.dumps([f"applets/{tool_id}/versions/{version_id}"]))
+        if status >= 400:
+            raise BrowserError(f"Flow did not return tool {tool_id} (HTTP {status})",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return decode_tool_files(decode_batch(text).get("ZLaYcd"))
+
+    async def build_tool(self, url: str, text: str, *, timeout_s: float) -> ToolBuild:
+        """Send ``text`` to the Tool agent at ``url`` and wait until it has really finished."""
+        text = " ".join(text.split())  # Enter sends, so a line break would cut the description
+        await self._ui.goto(url)
+        await self._ui.wait_for(TOOL_EDITOR, timeout_s=30.0)
+        await self._ui.type_text(TOOL_EDITOR, text)
+        await self._wait_for_prompt(TOOL_EDITOR, text)
+        await self._ui.activate("button", START, exact=True)
+        start = self._now()
+        worked, quiet = False, 0
+        while self._now() < start + timeout_s:
+            if await self._ui.visible("button", AGENT_FAILED, exact=True):
+                raise ServerError("Flow's tool agent said: Something went wrong",
+                                  hint="wait a few minutes before re-running: each try counts "
+                                       "toward Flow's daily limit for tools")
+            busy = await self._ui.visible("button", AGENT_STOP, exact=True)
+            worked = worked or busy
+            quiet = 0 if busy else quiet + 1
+            if worked and quiet >= TOOL_QUIET_POLLS:
+                return ToolBuild(self._tool_id(), False)
+            if not worked and self._now() >= start + TOOL_START_S:
+                raise ServerError("Flow's tool agent did not start",
+                                  hint="wait a few minutes before re-running: each try counts "
+                                       "toward Flow's daily limit for tools")
+            await self._ui.pause(TOOL_POLL_MS)
+        return ToolBuild(self._tool_id(), True)
+
+    def _tool_id(self) -> str:
+        match = TOOL_ID.search(self._ui.current_url())
+        if match is None:
+            raise ServerError("Flow's tool agent opened no tool page",
+                              hint="check the Tools page in Flow before re-running")
+        return match.group(1)
+
+    async def finish_tool(self) -> None:
+        if await self._ui.visible("button", TOOL_DONE, exact=True):
+            await self._ui.activate("button", TOOL_DONE, exact=True)
+            await self._ui.pause(TOOL_POLL_MS)
+
+    async def saved_tool(self, tool_id: str, *, not_version: str | None = None) -> FlowTool | None:
+        """The Tool once the list shows a saved version (a different one, after an edit)."""
+        for _ in range(TOOL_LIST_POLLS):
+            found = next((t for t in await self.tools() if t.id == tool_id), None)
+            if found is not None and found.version_id and found.version_id != not_version:
+                return found
+            await self._ui.pause(TOOL_POLL_MS)
+        return None
 
     async def media_details(self, media_id: str) -> FlowMedia | None:
         """One media with its signed links (the project list leaves them out)."""

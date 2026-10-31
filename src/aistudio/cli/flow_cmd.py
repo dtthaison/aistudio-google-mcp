@@ -26,6 +26,14 @@ from aistudio._app.flow import (
     flow_set_personality,
     flow_stitch,
 )
+from aistudio._app.flow_tools import (
+    flow_tool_create,
+    flow_tool_edit,
+    flow_tool_export,
+    flow_tool_get,
+    flow_tool_use,
+    flow_tools,
+)
 from aistudio._flow.models import ASPECTS, MODELS
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.inputs import read_text
@@ -447,6 +455,272 @@ def extend_cmd(state: CliState, media_id: str, prompt: str, project: str | None,
     _finish(asyncio.run(flow_extend(state.profile(), media_id, prompt, max_credits=max_credits,
                                     project=project, out=out, overwrite=force,
                                     timeout_s=float(timeout), visible=visible)), json_output)
+
+
+def _warn(data: dict[str, Any]) -> None:
+    for warning in data.get("warnings", []):
+        stderr.print(f"Warning: {warning}", markup=False)
+
+
+@flow.group("tool")
+def tool() -> None:
+    """Flow Tools: small apps Flow's agent writes from a description.
+
+    \b
+    Build a tool when it needs Flow itself:
+      - Flow's AI (Flow.generate: images, video, text; spends credits)
+      - media in your Flow project (pick files, save results back)
+      - a page other people can use in Flow without installing anything
+    Keep exact logic, batch scripts, outside APIs and heavy compute in
+    normal code: the agent's code has no tests, every fix uses one of
+    the daily builds, and a tool cannot reach most outside servers.
+
+    \b
+    Steps:
+      1. aistudio flow tool list --kind template    (one may exist already)
+      2. aistudio flow tool create --prompt-file spec.txt
+      3. aistudio flow tool use ID                   (lists the controls)
+      4. aistudio flow tool use ID 1=value "Export" -o out
+      5. aistudio flow tool edit ID --prompt-file fix.txt
+    """
+
+
+@tool.command("list")
+@click.option("--kind", type=click.Choice(["mine", "template", "community"]),
+              help="Only your tools, Flow's templates, or community tools.")
+@click.option("--search", help="Only tools with this text in the name or description.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_list(state: CliState, kind: str | None, search: str | None, project: str | None,
+              visible: bool, json_output: bool) -> None:
+    """Tools this account can see, with ids (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_tools(state.profile(), kind=kind, search=search, project=project,
+                                    visible=visible))
+    emit(result, json_output=json_output, render=lambda d: [
+        stdout.print(f"{t['id']}  [{t['kind']}]  {t['name']}", markup=False)
+        for t in d["tools"]])
+
+
+@tool.command("get")
+@click.argument("tool_id")
+@click.option("--allow-remix", is_flag=True,
+              help="Accept that reading a template adds a remix of it to your tools.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_get(state: CliState, tool_id: str, allow_remix: bool, project: str | None,
+             visible: bool, json_output: bool) -> None:
+    """One tool's files and the Flow calls in its code (free). TOOL_ID may be a unique prefix."""
+    state.require_browser()
+    result = asyncio.run(flow_tool_get(state.profile(), tool_id, allow_remix=allow_remix,
+                                       project=project, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"{data['id']}  {data['name']}", markup=False)
+        for file in data["files"]:
+            stdout.print(f"  {file['path']} ({file['bytes']} bytes)", markup=False)
+        stdout.print(f"Flow calls: {', '.join(data['flow_calls']) or 'none'}", markup=False)
+        if data["may_spend_credits"]:
+            stderr.print("Warning: this tool may spend Flow credits when it runs, with no quote.",
+                         markup=False)
+        _warn(data)
+
+    emit(result, json_output=json_output, render=render)
+
+
+@tool.command("export")
+@click.argument("tool_id")
+@click.argument("dest", type=click.Path(path_type=Path))
+@click.option("--force", is_flag=True, help="Overwrite files already in the folder.")
+@click.option("--allow-remix", is_flag=True,
+              help="Accept that reading a template adds a remix of it to your tools.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_export(state: CliState, tool_id: str, dest: Path, force: bool, allow_remix: bool,
+                project: str | None, visible: bool, json_output: bool) -> None:
+    """Save a tool's code into the folder DEST (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_tool_export(state.profile(), tool_id, dest, force=force,
+                                          allow_remix=allow_remix, project=project,
+                                          visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"Wrote {data['written']} files of {data['name']} to {data['path']}",
+                     markup=False)
+        _warn(data)
+
+    emit(result, json_output=json_output, render=render)
+
+
+def _finish_build(result: dict[str, Any], json_output: bool) -> None:
+    def render(data: dict[str, Any]) -> None:
+        if data["status"] == "timeout":
+            stdout.print(f"Flow's agent is still working. Check it here before re-running: "
+                         f"{data['url']}", markup=False)
+            return
+        stdout.print(f"Built {data['name']} in {data['seconds']} s: {data['id']}", markup=False)
+        stdout.print(data["url"], markup=False)
+        if data["may_spend_credits"]:
+            stderr.print("Warning: this tool may spend Flow credits when it runs, with no quote.",
+                         markup=False)
+
+    emit(result, json_output=json_output, render=render)
+    if result["status"] == "timeout":
+        raise SystemExit(2)
+
+
+@tool.command("create")
+@click.argument("description", required=False)
+@click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Read the description from a file instead.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
+              help="Seconds to wait for Flow's agent.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_create(state: CliState, description: str | None, prompt_file: Path | None,
+                project: str | None, timeout: int, visible: bool, json_output: bool) -> None:
+    """Have Flow's agent build a tool from DESCRIPTION (no credits; counts toward Flow's daily
+    limit for tools).
+
+    So the tool can be driven with "flow tool use", ask in DESCRIPTION for real HTML
+    controls (input, select, checkbox, button) with visible text labels, and for every
+    export to go through Flow.download. Say "no Flow.generate" when it needs no AI, so
+    using it never spends credits. For slow AI steps, ask for a ready signal the CLI can wait
+    on with @LABEL or ?TEXT: a button that is disabled while a step runs, or a progress text
+    such as "4 / 4 ready".
+    """
+    state.require_browser()
+    text = read_text(description, prompt_file, arg="DESCRIPTION", option="--prompt-file")
+    _finish_build(asyncio.run(flow_tool_create(state.profile(), text, project=project,
+                                               timeout_s=float(timeout), visible=visible)),
+                  json_output)
+
+
+@tool.command("edit")
+@click.argument("tool_id")
+@click.argument("change", required=False)
+@click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Read the change from a file instead.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
+              help="Seconds to wait for Flow's agent.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_edit(state: CliState, tool_id: str, change: str | None, prompt_file: Path | None,
+              project: str | None, timeout: int, visible: bool, json_output: bool) -> None:
+    """Have Flow's agent make CHANGE to one of your own tools."""
+    state.require_browser()
+    text = read_text(change, prompt_file, arg="CHANGE", option="--prompt-file")
+    _finish_build(asyncio.run(flow_tool_edit(state.profile(), tool_id, text, project=project,
+                                             timeout_s=float(timeout), visible=visible)),
+                  json_output)
+
+
+
+def _control_line(first: dict[str, Any], last: dict[str, Any], repeats: int) -> str:
+    number = str(first["n"]) if repeats == 1 else f"{first['n']}-{last['n']}"
+    line = f"{number}  {first['kind']}  {first['label'] or '(no label)'}"
+    if first["value"] not in (None, ""):
+        line += f" = {first['value']}"
+    if first["min"] is not None and first["max"] is not None:
+        line += f"  [{first['min']}-{first['max']}]"
+    if first["options"]:
+        line += f"  ({' | '.join(first['options'])})"
+    if first["accept"]:
+        line += f"  ({first['accept']})"
+    if first["disabled"]:
+        line += "  (disabled)"
+    return line + (f"  (x{repeats})" if repeats > 1 else "")
+
+
+def _render_use(data: dict[str, Any]) -> None:
+    for step in data["steps"]:
+        if step.get("wait"):
+            stdout.print(f"{step['step']}: ready after {step['waited_s']:.0f} s", markup=False)
+            continue
+        done = f" = {step['value']}" if step["value"] is not None else ""
+        stdout.print(f"{step['step']}: {step['kind']} {step['control']} "
+                     f"({step['label']}){done}", markup=False)
+    for file in data["files"]:
+        stdout.print(f"Saved {file['path']} ({file['bytes']} bytes)", markup=False)
+    for item in data.get("saved_to_flow", []):
+        stdout.print(f"Saved {item['path']} ({item['bytes']} bytes; {item['kind']} "
+                     f"{item['media_id']} in the Flow project)", markup=False)
+    if data["steps"] and not data["files"] and not data.get("saved_to_flow"):
+        stdout.print("The tool saved no files.", markup=False)
+    stdout.print(f"\n{data['name']} controls:", markup=False)
+    controls = data["controls"]
+    i = 0
+    while i < len(controls):  # fold runs of the same control, e.g. one button per row
+        j = i
+        while (j + 1 < len(controls) and controls[j + 1]["kind"] == controls[i]["kind"]
+               and controls[j + 1]["label"] == controls[i]["label"]):
+            j += 1
+        stdout.print("  " + _control_line(controls[i], controls[j], j - i + 1), markup=False)
+        i = j + 1
+    if "credits_spent" in data:
+        stdout.print(f"Credits spent: {data['credits_spent']}", markup=False)
+    _warn(data)
+
+
+@tool.command("use")
+@click.argument("tool_id")
+@click.argument("steps", nargs=-1)
+@click.option("-o", "--out-dir", type=click.Path(file_okay=False, path_type=Path),
+              default=Path("."), show_default=True, help="Folder for the files the tool saves.")
+@click.option("--force", is_flag=True, help="Overwrite files with the same names.")
+@click.option("--allow-spend", is_flag=True,
+              help="Run a tool whose code calls Flow.generate (spends credits, with no quote).")
+@click.option("--allow-remix", is_flag=True,
+              help="Accept that opening a template adds a remix of it to your tools.")
+@click.option("--step-timeout", type=click.IntRange(5), default=60, show_default=True,
+              help="Most seconds to wait for the tool after each step, and for each @ or ? "
+                   "wait step.")
+@click.option("--drop", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Drop this file onto the tool first (for tools that take a file only by "
+                   "drag and drop).")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def tool_use(state: CliState, tool_id: str, steps: tuple[str, ...], out_dir: Path, force: bool,
+             allow_spend: bool, allow_remix: bool, step_timeout: int, drop: Path | None,
+             project: str | None, visible: bool, json_output: bool) -> None:
+    """Use a tool: run STEPS on its controls in order and save the files it downloads.
+
+    Without STEPS, list the tool's controls with their numbers. Each step is N or LABEL to
+    press a control, or N=VALUE or "LABEL=VALUE" to set one (a file path for an upload, a number
+    for a slider, true/false for a checkbox). A LABEL may be part of the label if only one
+    control has it. Numbers can change after a step adds controls (an upload often does): use
+    labels, or list them again if unsure.
+
+    A step returns once the tool's screen stops changing, which can be before slow AI work
+    ends. To wait for it, add @LABEL (wait until that control is there and enabled) or
+    "?TEXT" (wait until the tool's screen shows TEXT), each for up to --step-timeout seconds,
+    for example: 3=photo.png "Write the brief" "@Generate images" "Generate images" "?4 / 4".
+    Files the tool saves into the Flow project (Flow.save) are downloaded into --out-dir too.
+    """
+    state.require_browser()
+    result = asyncio.run(flow_tool_use(state.profile(), tool_id, list(steps), out_dir,
+                                       allow_remix=allow_remix, allow_spend=allow_spend,
+                                       force=force, project=project, visible=visible,
+                                       step_timeout_s=float(step_timeout), drop=drop))
+    emit(result, json_output=json_output, render=_render_use)
 
 
 @flow.group("frame")

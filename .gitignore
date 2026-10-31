@@ -6,3 +6,7 @@ __pycache__/
 dist/
 build/
 .superpowers/
+
+# local results and research notes (may hold Flow project links and account ids)
+reports/
+research_notes/

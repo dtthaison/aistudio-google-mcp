@@ -1,6 +1,6 @@
 ---
 name: aistudio
-description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, editing an image, transcribing audio to text, or video/images with Google Flow — or mentions the aistudio CLI.
+description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, editing an image, transcribing audio to text, or video/images with Google Flow, or Google Flow Tools (list, read, build, change or use one) — or mentions the aistudio CLI.
 ---
 
 # aistudio CLI
@@ -75,6 +75,9 @@ quotes and write each `'` as `'\''`.
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
 | Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
+| Flow Tools: list, read, save the code (free) | `aistudio flow tool list [--kind mine\|template\|community] [--search TEXT] --json`, `aistudio flow tool get <id> --json`, `aistudio flow tool export <id> <empty folder> --json` |
+| Build or change a Flow Tool (no credits; a daily limit on builds) | `aistudio flow tool create --prompt-file <file> --json`, `aistudio flow tool edit <id> --prompt-file <file> --json` |
+| Use a Flow Tool: list its controls, then run steps and save what it downloads (free unless its code calls `Flow.generate`) | `aistudio flow tool use <id> --json` lists `controls` (n, kind, label, value, min/max); `aistudio flow tool use <id> '<N or label>=<value>' '<N or label>' … -o <folder> --json` runs them in order: `=VALUE` sets a box, slider, checkbox or file upload (a local path), no value presses a button, `'@<label>'` waits until that control is there and enabled, `'?<text>'` waits until the tool's screen shows the text (each up to `--step-timeout` seconds). The result has `steps`, `files` (saved downloads) and `text` (the tool's screen) |
 
 - `models list --json` gives each model `starred`: `true`/`false`, or `null` when the stars could
   not be read. Say "unknown", not "not starred".
@@ -138,6 +141,51 @@ quotes and write each `'` as `'\''`.
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
+- **Flow Tools.** Flow copies a template when its code is read, so `flow tool get|export` refuses a
+  template unless `--allow-remix` is passed, which leaves "Remix of X" in the user's tools: ask first.
+  `flow tool create` and `flow tool edit` cost no credits, but each try counts toward a daily limit
+  and Flow does not say how many are left: run one per user ask, no loops. A `"status": "timeout"`
+  (exit 2) means the agent may still be working: give the user `url`, never re-run. `"may_spend_credits":
+  true` means the Tool's code calls `Flow.generate.*`, and Flow gives no quote when a Tool runs: tell
+  the user before they use it. Only the user's own Tools can be edited.
+- **When to build a Flow Tool.** Build one only when the job needs Flow itself: Flow's AI
+  (`Flow.generate` for images, video or text; spends credits), media in the user's Flow project, or
+  a page other people will use inside Flow. Keep exact logic, batch scripts, outside APIs and heavy
+  compute in normal code: the Tool's code is written by Flow's agent with no tests, every fix uses a
+  daily build, and its sandbox blocks most outside servers. Check `flow tool list --kind template`
+  first. In the `create` description ask for real HTML controls with visible text labels, every
+  export through `Flow.download`, and "no Flow.generate" when no AI is needed, so `flow tool use`
+  can drive it for free. For slow AI steps ask for a ready signal the CLI can wait on: a button
+  that is disabled while the step runs, or a progress text such as "4 / 4 ready". Spell out exact
+  rules and numbers rather than goals. After `create` or `edit`, run `flow tool use <id>` with no
+  steps: "the Tool did not start" means the new code crashes (tell the user; one `edit` that
+  names the error usually fixes it). For a Tool that calls `Flow.generate`, listing is refused
+  without `--allow-spend` too, because a Tool could generate as soon as it opens: check the code
+  (`flow tool export`) that `Flow.generate` runs only from a button, tell the user, then list with
+  `--allow-spend`; `credits_spent` should be 0. An edit can end with the agent saying it is done
+  but nothing saved (`SERVER_ERROR` "saved nothing"; `version_id` unchanged in `flow tool get`):
+  tell the user before trying again.
+- **Using a Flow Tool.** List the controls first and use the labels or numbers it prints. A label
+  that matches several controls is refused (use the number). Numbers can change after a step adds
+  controls (an upload often does), so prefer labels in a long step list.
+  - A step returns once the tool's screen stops changing, which can be long before slow AI work
+    ends (a screen can sit on "Rendering video..." for minutes). After each slow step add a wait
+    step: `'@<next button>'` or `'?<progress text>'`, with `--step-timeout 600` or more for images
+    and video. A wait that runs out fails with the end of the tool's screen in the hint; the
+    work may still finish in Flow, so check `flow media` before running the step again.
+  - For a tool with no upload box that takes a file by drag and drop, pass `--drop <file>`
+    (dropped before the steps). Uploads send the file to Flow's tool page: say so when the file is
+    private.
+  - What the tool saves into the Flow project (`Flow.save`) is downloaded into `-o` too and listed
+    in `saved_to_flow` (media id, path); it also stays in the project. Images and videos it
+    generates also appear in `flow media`, so `flow download` can fetch them later.
+  - A tool whose code calls `Flow.generate.*` is refused without `--allow-spend`: Flow gives no
+    quote for a Tool, so ask the user first; the result then has `credits_spent`. A template needs
+    `--allow-remix` (ask first: opening it adds a remix). Saved files never overwrite without
+    `--force`; a clash gets `-2` in its name.
+  - Video made inside a Tool: a last frame passed to `Flow.generate.video` may be ignored (the clip
+    is then made from the first frame only), and clips joined in the browser by recording playback
+    have no duration in the file. Join clips on the computer instead, and check the result.
 - Browser commands (`app create/prompt`, `generate …`, `transcribe`, `voices list`, every `flow …`) share one
   Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;

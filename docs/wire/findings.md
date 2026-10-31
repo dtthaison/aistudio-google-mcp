@@ -877,3 +877,122 @@ blocked; the RPCs that went through are free.
   43-media project lost the body; the others read all of it (~91 KB).
 - **Fix.** When the captured body is empty, `FlowPage.contents` sends `Zzl0ze` itself with the
   page's own request body, `["projects/<id>",null,null,null,[1]]`, through `batch_rpc`.
+
+### Flow Tools discovery (2026-10-31, free, read-only)
+
+Probes only opened pages. They created, saved and ran nothing, and no request matching
+`StreamChat|generate|batchAsync` was attempted while that guard ran. **Not measured:** creating or
+editing a Tool, and running one. Everything about those two below comes from reading Flow's code.
+
+- **What a Tool is.** Flow calls Tools "applets". A Tool is a small React/TypeScript project (7–12
+  files seen: `App.tsx`, components, `index.html`, CSS) that Flow's agent writes from a description.
+- **Plans and limits (Google's help page).** Building needs Google AI Plus, Pro or Ultra; anyone can
+  use existing Tools. Creating costs no credits but has a daily limit (no number given), and the
+  create page says "Creating tools does not currently cost credits." Media a Tool generates uses
+  credits and goes to the open project. Web and PC only.
+- **Routes.** `/project/<id>/tools`, `/project/<id>/create-tool`, `/project/<id>/tool/<applet id>`
+  (also opens `community-<uuid>` ids), and `/shared/tool/<share id>`.
+- **Listing: `tRARke`.** Loaded by every project page. Payload `[0]` holds your Tools, community
+  Tools and first-party Tools together (70 rows on this account). Each row:
+  `[0]` id, `[2]` name, `[3]` description, `[5]` version id, `[11]` `applets/<id>`, `[12]` kind
+  (1 yours, 2 first-party, 3 community), `[15]` icon, `[17]` author, `[20]` a count, likely uses,
+  `[22]` tags, `[25]`/`[26]` version strings.
+- **Source: `ZLaYcd`.** Request `["applets/<id>/versions/<version id>"]`. Reply: `[0]` applet and
+  version, `[1]` the agent's `<changes><change><file>…` XML, `[3]` files as `[path, mime, text]`,
+  `[4]` model notes (for example "Nano Banana 2" upgraded to 2.1). It worked for your own Tools and
+  for community Tools (a 97 KB reply, whose body Chrome can drop, as with `Zzl0ze`).
+- **Other calls, matched from the client code, not sent.** `J0KDW` reads
+  `sharedApplets/<id>`; `sd0GXe` updates a Tool with a field mask (`display_name`, `description`);
+  `VVrfbf` copies; `CSvxid` forks a shared Tool; `eDee9c` favorites; `TsaPHc` unfavorites;
+  `ipGN1` removes a saved shared Tool; `NpB2cd` submits for review. Mutation keys: `COPY_APPLET`,
+  `DELETE_APPLET`, `FORK_SHARED_APPLET`, `MUTATE_APPLET`, `SHARE_APPLET`, `SUBMIT_APPLET_REVIEW`.
+- **Building goes through a separate agent.** `AppletAgentBidiStreamClient` on
+  `/v1/flowAppletAgent/streamAppletAgentChat/channel`, not `StreamChat`. The Tool page's box reads
+  "Describe how you want to edit this tool". Its messages, and whether it needs reCAPTCHA, are
+  unknown. The scan found no call that saves file contents directly, so code appears to change only
+  through this agent; the scan was not exhaustive.
+- **Running.** `flow-applet-compiler/shim.html` and `flow-applet-runner/shim.html` load in iframes on
+  throwaway `*.scf.usercontent.goog` hosts. esbuild-wasm 0.27.3 compiles in the browser. npm
+  packages resolve through esm.sh, jsDelivr or unpkg, with Tailwind from jsDelivr.
+- **`flow-sdk`.** Its source sits in Flow's JavaScript as a string, ending
+  `export const Flow = FLOW;`, and reaches the iframe through an import map. The whole API:
+  - `Flow.generate`: `image`, `video`, `videoExperimental`, `text`
+  - `Flow.media`: `select`, `selectMultiple`, `onDrop`, `registerDropTarget`
+  - `Flow.save`, `Flow.upload`, `Flow.download`
+  - `Flow.camera`: `capture`, `stream`; `Flow.microphone`: `record`
+  - `Flow.storage`: `getItem`, `setItem`, `removeItem`, `clear`, `keys`
+  - Seen in use: `Flow.generate.image({prompt, modelDisplayName, referenceImageMediaIds,
+    aspectRatio})`, read as `{base64, mimeType}`, and `Flow.generate.video({prompt,
+    modelDisplayName, aspectRatio, durationSeconds})`, read as `{mediaId, base64, mimeType}`.
+    Video also takes `firstFrameImageMediaId`, `lastFrameImageMediaId`, `sourceVideoMediaId`.
+- **No quote in a Tool.** The code calls `Flow.generate.*` directly. The page only warns: "Running
+  this Tool could consume your AI credits." No per-run confirmation was found in the code, but this
+  was not tested, and the price of `Flow.generate.text` is unknown.
+- **Tools have no input schema.** A Tool's inputs are its own UI, so there is no general way to
+  call one with arguments.
+- **Sharing.** Anyone with the link can see the Tool's code. A link keeps the version it was made
+  from. Google's page gives deleting the Tool as the only way to stop sharing.
+- **Reading a template's code copies it.** Reading a kind-2 Tool with `ZLaYcd` adds "Remix of <name>"
+  to the account as a new kind-1 Tool. A direct `batch_rpc` read did it (Video Resizer, 12:34:06),
+  and so did opening the Tool's page (Character X-Ray, Style Writer), because the page sends the
+  same read. Reading community and your own Tools added nothing. `tRARke` copies nothing. So
+  `flow tool get` and `export` refuse templates without `--allow-remix`, and `edit` refuses them.
+- **Building (live, 2026-10-31).** `/create-tool` uses the same `flow-rich-text-editor .ProseMirror`
+  box and "Start generation" button as a project. Submitting moves the page to
+  `/tool/<id>?mode=EDIT` within seconds and sends `FlowAppletAgentService/RunAppletAgentSse`
+  (a `fetch`, reply `application/json`, HTTP 200, 108 KB).
+  - The reply is a batchexecute-style stream of `wrb.fr` entries with a null rpcid. Early entries
+    are `[tool_id, …, [name, null, null, description], …, session id]`; later ones carry the
+    agent's text; the last carries the files, the version id and the icon.
+  - A "Stop" button shows from about 10 s until the agent ends. A good build took 85 s of Stop. The
+    page text stayed unchanged for 50 s of that, so wait on the button, never on quiet text.
+  - The Tool has no row in `tRARke` and no saved version until the agent finishes. Pressing "Done"
+    returns to the project, and the Tool is then listed. A Tool with no finished build ends up as
+    "App not found".
+  - Three runs from a minimized automated Chrome: one was reloaded at 50 s and saved nothing, one
+    showed "Something went wrong. Please try again." after about 30 s with no Stop seen and saved
+    nothing (cause unknown, its reply was not captured), and one built and saved. So automated
+    Chrome is not refused outright.
+
+Live CLI check (2026-10-31, default profile): `flow tool get|export` on the template Grid Architect
+was refused and the own-tool count stayed at 6. `flow tool edit` on one of the user's Tools changed
+its SVG export name in 134 s (a new version, only App.tsx changed). `flow tool create` built a
+small calculator Tool in 88 s. Two earlier `create` runs failed while the project page was
+loading (Playwright's 30 s `load` timeout) and never reached the agent. A free `flow tool list`
+opened the same page right after.
+
+Using a Tool (live, 2026-10-31, default profile). The Tool page never fires `load` (the Tool's
+frame keeps loading), so it is opened with `wait_until="commit"`. The Tool runs in a
+`blob:` frame on `*.scf.usercontent.goog`, compiled in the browser by esbuild from a shim frame
+(`flow-applet-compiler/shim.html`); its controls are ordinary DOM inputs and buttons reachable
+from Playwright. Headless Chrome renders it in under 10 s; a minimized window still showed a blank
+area after 25 s. `Flow.download` reaches Chrome as an ordinary download event with the Tool's
+file name. React inputs take a value through the native value setter plus `input`/`change`
+events; `set_input_files` works on the Tool's file input. Runs: an image-to-chart Tool (upload,
+3 settings, language, PNG/SVG/Markdown) saved 3 files in 61 s; a calculator Tool (4 numbers,
+Export) saved its result. The chart Tool draws a transparent background as black (#010101).
+
+Long AI steps in a Tool (live, 2026-10-31, an ad-campaign Tool built with `flow tool create`):
+- A step's settle (screen text unchanged for 1.2 s) returns while the Tool still works: the
+  screen sat on "Rendering video..." for about 3 minutes. Hence wait steps: `@LABEL` polls until
+  that control is there and enabled, `?TEXT` until the screen shows the text, every 2 s up to
+  `--step-timeout`. Tools that disable their button while a step runs, or show a count such as
+  "4 / 4", are easy to wait on.
+- Control numbers shift after an upload (an "Upload photo" button became "Change photo" and a
+  file input moved): labels are safer than numbers in a step list.
+- `Flow.generate.image` inside a Tool cost 0 credits (8 images, balance unchanged). Three
+  `Flow.generate.video` calls with "Veo 3.1 - Lite", 8 s, 9:16 cost 30 (1,038 → 1,008). Two calls
+  with first and last frames ran as `veo_3_1_interpolation_lite`. The third, whose last frame was
+  an image the Tool had drawn and sent with `Flow.upload`, ran as `veo_3_1_i2v_lite` (first frame
+  only), so a last frame is not guaranteed.
+- A Tool that joins clips by recording playback (canvas `captureStream` plus `MediaRecorder`)
+  produced an MP4 with Opus audio and no duration in its header (players read 820,948 s), and
+  missed the 2 s still at the end. Joining the clips outside the Tool (ffmpeg concat) is reliable.
+
+Remix of Video Resizer (live, 2026-10-31): no file input; it takes a video from `Flow.media.select`
+or a drop (`dataTransfer.files`). A synthetic dragenter/dragover/drop with a `DataTransfer` holding a
+`File`, dispatched in the Tool's frame, loads it. Export re-encodes in the browser and calls
+`Flow.save`, which adds the video to the project (no browser download); the new media id appears in
+the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8 s sample came back
+1280×2274 (9:16), 8 s, H.264 with audio, in 48 s total in headless Chrome.
+
