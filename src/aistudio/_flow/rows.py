@@ -87,6 +87,25 @@ class FlowScene:
 
 
 @dataclass(frozen=True)
+class FlowTool:
+    id: str
+    name: str
+    description: str | None
+    version_id: str | None  # with the id, names the code: applets/<id>/versions/<version id>
+    kind: str  # "mine" | "template" | "community", or "kind:<n>" for one not seen yet
+    author: str | None
+    uses: int | None
+    tags: list[str]
+
+
+@dataclass(frozen=True)
+class ToolFile:
+    path: str
+    mime_type: str | None
+    text: str
+
+
+@dataclass(frozen=True)
 class ProjectContents:
     titles: dict[str, str]  # media_id -> its workflow title (what the grid shows)
     media: list[FlowMedia]
@@ -118,6 +137,34 @@ def decode_contents(payload: Any) -> ProjectContents:
     media = [m for m in (_record(r) for r in opt_index(payload, 2) or []) if m is not None]
     return ProjectContents(titles, media, workflows, _characters(opt_index(payload, 5)),
                            _scenes(opt_index(payload, 4), opt_index(payload, 6)))
+
+
+_TOOL_KINDS = {1: "mine", 2: "template", 3: "community"}
+
+
+def decode_tools(payload: Any) -> list[FlowTool]:
+    """``tRARke`` ``[0]``: every Tool the account can see (findings "Flow Tools discovery")."""
+    out = []
+    for row in opt_index(payload, 0) or []:
+        tool_id, name = _str(opt_index(row, 0)), _str(opt_index(row, 2))
+        if tool_id and name:
+            kind, tags = opt_index(row, 12), opt_index(row, 22)
+            out.append(FlowTool(tool_id, name, _str(opt_index(row, 3)), _str(opt_index(row, 5)),
+                                _TOOL_KINDS.get(kind, f"kind:{kind}"), _str(opt_index(row, 17)),
+                                _int(opt_index(row, 20)),
+                                [t for t in tags if isinstance(t, str)]
+                                if isinstance(tags, list) else []))
+    return out
+
+
+def decode_tool_files(payload: Any) -> list[ToolFile]:
+    """``ZLaYcd`` ``[3]``: a Tool version's files as ``[path, mime type, text]``."""
+    out = []
+    for row in opt_index(payload, 3) or []:
+        path, text = _str(opt_index(row, 0)), opt_index(row, 2)
+        if path and isinstance(text, str):
+            out.append(ToolFile(path, _str(opt_index(row, 1)), text))
+    return out
 
 
 def _characters(rows: Any) -> list[FlowCharacter]:

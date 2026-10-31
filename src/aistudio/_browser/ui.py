@@ -224,6 +224,10 @@ class PlaywrightUi:
     def __init__(self, page: Any) -> None:
         self._page = page
 
+    def raw_page(self) -> Any:
+        """The Playwright page, for work on frames and downloads (Flow Tools)."""
+        return self._page
+
     def _check_signed_in(self) -> None:
         host = urlparse(getattr(self._page, "url", "") or "").hostname or ""
         if host.startswith("accounts."):

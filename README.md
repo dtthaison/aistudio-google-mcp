@@ -81,6 +81,8 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
 | Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
 | Google Flow | `flow video/image/extend/edit`, `flow character ...` | Flow credits, only with `--max-credits` |
+| Google Flow | `flow tool list/get/export`, `flow tool use` | free (a tool that calls `Flow.generate` needs `--allow-spend`) |
+| Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
 
 ```sh
@@ -117,6 +119,15 @@ aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --
 aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 aistudio flow scene download <scene-id> -o scene.mp4
 aistudio flow frame save <media-id> -o last.jpg                 # free: the last frame, as a new image
+aistudio flow tool list --kind mine            # your Tools; also template, community
+aistudio flow tool get <id-prefix>             # its files, and whether its code can spend credits
+aistudio flow tool export <id-prefix> ./my-tool
+aistudio flow tool create --prompt-file spec.txt   # Flow's agent builds it, about 2 min
+aistudio flow tool edit <id-prefix> "add a dark theme"
+aistudio flow tool use <id-prefix>              # the tool's controls, numbered
+aistudio flow tool use <id-prefix> "Upload File=bear.png" "Chart Width=40" PNG Markdown -o out   # run it, save its files
+aistudio flow tool use <id-prefix> "Export Video" --drop clip.mp4 --step-timeout 300 -o out   # drag-and-drop tools; Flow.save results are downloaded too
+aistudio flow tool use <id-prefix> "Upload photo=shoe.png" "Write the brief" "@Generate images" "Generate images" "?4 / 4" --allow-spend --step-timeout 900 -o out   # @LABEL / ?TEXT wait for slow AI steps
 ```
 
 `aistudio <command> --help` lists every option; `--json` prints machine-readable output.
