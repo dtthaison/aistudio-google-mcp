@@ -110,6 +110,12 @@ class AgentReplyError(AIStudioError):
     code = "AGENT_REPLY"
 
 
+class GenerationFailedError(AIStudioError):
+    """Flow accepted and started a job, then failed it (e.g. a safety filter)."""
+
+    code = "GENERATION_FAILED"
+
+
 def error_from_status(status: int, message: str) -> AIStudioError:
     """Map a gRPC status from an error envelope to an exception (spec §9)."""
     quota = "quota" in message.lower()

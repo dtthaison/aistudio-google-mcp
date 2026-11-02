@@ -472,3 +472,18 @@ async def test_a_read_reply_is_not_lost(fake_ui):
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
     assert turn.quote is not None and not turn.lost
     assert ui.fetch_bodies  # Chrome can hand a StreamChat body over empty: fetch it ourselves
+
+
+async def test_a_job_flow_failed_ends_the_follow_with_its_reason(fake_ui):
+    # Live (2026-11-02): Flow showed "Failed" and the poll said status 4,
+    # PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED; aistudio waited out the 25-minute timeout
+    from tests.unit.test_flow_rows import FILTERED, failed_poll
+
+    ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1030, [record(status=2, with_links=False)]]),
+                             poll("jwpduf", [None, 1040, [failed_poll()]])]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
+        count=1, credits=10, timeout_s=600, kind="video")
+    assert not outcome.timed_out and outcome.media == []
+    assert [(m.media_id, m.error) for m in outcome.failed] == [(MEDIA, FILTERED)]
+    assert outcome.credits_left == 1040

@@ -172,6 +172,7 @@ TOOL_QUIET_POLLS = 3  # polls in a row without Stop before a build counts as end
 TOOL_LIST_POLLS = 10  # x TOOL_POLL_MS for the list to show a finished build
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
+_FAILED = 4  # live (2026-11-02): with Flow's reason, e.g. a filter; the credits came back
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ class FlowOutcome:
     media: list[FlowMedia]
     credits_left: int | None
     timed_out: bool
+    failed: list[FlowMedia] = field(default_factory=list)  # Flow failed them (status 4)
 
 
 def _aspect_name(aspect: str) -> re.Pattern[str]:
@@ -1080,8 +1082,10 @@ class FlowPage:
                     # queued (6) before running (2), so only the deadline ends the wait.
             ready = [m for m in seen.values()
                      if m.status == _DONE and (m.video_url if kind == "video" else m.image_url)]
-            if len(ready) >= count:
-                return FlowOutcome(ready, credits, False)
+            failed = [m for m in seen.values() if m.status == _FAILED]
+            if len(ready) >= count or (failed and len(ready) + len(failed) >= len(seen)
+                                       and len(ready) + len(failed) >= count):
+                return FlowOutcome(ready, credits, False, failed)
         return FlowOutcome(list(seen.values()), credits, True)
 
     async def _checked_one(self, kind, values, name, *, aspect: bool):
@@ -1103,4 +1107,6 @@ def _merge(old: FlowMedia, new: FlowMedia) -> FlowMedia:
               else getattr(old, field) for field in old.__dataclass_fields__}
     if _DONE in (old.status, new.status):  # done is final; codes are not ordered (6 = queued)
         merged["status"] = _DONE
+    elif _FAILED in (old.status, new.status):  # so is failed
+        merged["status"] = _FAILED
     return FlowMedia(**merged)

@@ -32,6 +32,7 @@ class FlowMedia:
     image_url: str | None
     workflow_id: str | None = None  # the clip's editor id ([2] of its record)
     audio: bool = False  # a voice sample ("Save new voice"), not an image (live)
+    error: str | None = None  # Flow's reason when the job failed (status 4)
 
 
 @dataclass(frozen=True)
@@ -458,6 +459,8 @@ def _record(row: Any) -> FlowMedia | None:
         image_url=next((s for s in links if s.startswith(_IMAGE)), None),
         workflow_id=_str(opt_index(row, 2)),
         audio=_is_audio(row, links),
+        # Live (jwpduf): [4, [3, "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"], [reason]]
+        error=_str(opt_index(details, 8, 1, 1)),
     )
 
 

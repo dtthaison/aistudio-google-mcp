@@ -123,6 +123,10 @@ quotes and write each `'` as `'\''`.
   the job failed (Flow shows "Failed" when busy) or is still queued, so check Flow before a
   re-run. An `AGENT_REPLY` saying Flow's reply "never reached aistudio" spent nothing (the
   request was rejected): re-running is safe.
+  `GENERATION_FAILED` means Flow started the job and then failed it, for example its filter for
+  real or famous people; the hint says what was charged (failed jobs were refunded). Re-running
+  the same prompt and images usually fails again: change the shot (wider, another keyframe)
+  and ask the user before spending again.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before

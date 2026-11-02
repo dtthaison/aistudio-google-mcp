@@ -1105,3 +1105,11 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   browser right after pressing, and every run that came next got that reply instead of its
   quote ("I've cancelled the generation since permission was denied…"). `reject()` now waits up
   to 60 s for the reply to each Reject it pressed.
+- **What "Failed" was.** Traced on the retry of the phone clip (Mila Vance plus a keyframe of her
+  holding the AptusFit phone): the job's `jwpduf` poll went from status 2 to
+  `[4, [3, "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"], [reason]]` about a minute in, and the
+  credits went 1040 → 1030 (reserved at Approve) → 1040 (returned). The agent's chat text still
+  said "waiting in the queue due to high demand", which is not the reason. Status 4 now ends the
+  follow at once: `flow video|extend|edit` fail with `GENERATION_FAILED`, Flow's reason in words,
+  and the measured charge. The same character's squat clip passed the filter; the face in a close,
+  front-facing keyframe seems to be what trips it.

@@ -44,6 +44,7 @@ from aistudio.exceptions import (
     AgentReplyError,
     AIStudioError,
     BrowserError,
+    GenerationFailedError,
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
@@ -305,7 +306,7 @@ async def flow_generate(
                         failure.hint = _with_note(failure.hint, note)
         if free is not None:  # after the restore: reading credits leaves the project page
             after, free_notes = await _credits_after(page, None)
-        elif outcome is not None and outcome.timed_out:  # what was charged, not the quote
+        elif outcome is not None and (outcome.timed_out or outcome.failed):  # measured
             after, free_notes = await _credits_after(page, outcome.credits_left)
     if quoted is not None:
         return {**quoted, **({"warnings": warnings} if warnings else {})}
@@ -332,6 +333,10 @@ async def flow_generate(
             and before - outcome.credits_left != turn.quote.credits):
         warnings.append(f"credits fell by {before - outcome.credits_left} during this run; the "
                         f"quote was {turn.quote.credits}")
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
+    if outcome.failed:
+        warnings.append(str(_failed(outcome.failed, before, after)))
     if outcome.timed_out:
         spent = turn.quote.credits  # unverified: assume the quote was charged
         warnings += free_notes
@@ -702,6 +707,29 @@ async def _credits_before(page: Any) -> int | None:
         return None
 
 
+_FLOW_REASONS = {  # Flow's failure codes, in words (live)
+    "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED":
+        "Flow's filter for real or famous people blocked it: a face looked like a real person's",
+}
+
+
+def _failed(failed: list[Any], before: int | None, after: int | None) -> GenerationFailedError:
+    """Flow failed the job it started (status 4): say why, and what was charged."""
+    codes = list(dict.fromkeys(m.error or "no reason given" for m in failed))
+    reasons = "; ".join(_FLOW_REASONS.get(c, c) for c in codes)
+    if before is not None and after is not None:
+        charged = ("nothing was charged" if before == after
+                   else f"credits went from {before} to {after}")
+    else:
+        charged = "credits were not verified: check them with aistudio flow credits"
+    hint = f"{charged}; change the prompt or the images before trying again"
+    if "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED" in codes:
+        hint += (" (a close, front-facing realistic face trips it more often: try a wider shot "
+                 "or another reference image)")
+    ids = ", ".join(m.media_id for m in failed)
+    return GenerationFailedError(f"Flow failed {ids}: {reasons}", hint=hint)
+
+
 async def _credits_after(page: Any, fallback: int | None) -> tuple[int | None, list[str]]:
     """Credits after a spend; never raises, so a paid result is never turned into "re-run"."""
     try:
@@ -754,6 +782,8 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         after, read_notes = await _credits_after(page, outcome.credits_left)
         new_ids = page.paid_media or [m.media_id for m in outcome.media]
         scene_id = await _scene_holding(page, project_id, new_ids)
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     if scene_id is None:
@@ -823,6 +853,8 @@ async def flow_edit(profile: Profile, media_id: str, text: str, *,
             raise _spent(exc, page.paid_media, project_id,  # Start may have spent
                          about=f"editing {media_id}") from exc
         after, read_notes = await _credits_after(page, outcome.credits_left)
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     project_url = PROJECT_URL.format(id=project_id)

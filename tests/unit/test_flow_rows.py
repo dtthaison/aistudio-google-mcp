@@ -186,3 +186,19 @@ def test_personality_notes_come_from_the_character_record():
     record = [["p", "c1", None, [1, "Paper boat", [[["r1"]], None, "Calm, curious"]]]]
     assert personality_notes(record) == "Calm, curious"
     assert personality_notes([["p", "c1", None, [1, "Boat", [[["r1"]]]]]]) is None
+
+
+FILTERED = "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"
+
+
+def failed_poll(media_id=MEDIA, reason=FILTERED):
+    # Live (2026-11-02, jwpduf): a failed job's record carries status 4 and Flow's reason
+    return [media_id, None, None, None, None,
+            [None, None, None, None, None, None, None, None, [4, [3, reason], [reason]]]]
+
+
+def test_a_failed_job_carries_flows_reason():
+    (failed,) = media_records("jwpduf", [None, 1040, [failed_poll()]])
+    assert (failed.status, failed.error) == (4, FILTERED)
+    (done,) = media_records("as29s", record())
+    assert done.error is None

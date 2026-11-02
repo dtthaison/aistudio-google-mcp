@@ -264,6 +264,21 @@ async def test_a_timeout_reports_the_media_and_spent_credits(logged_in_profile, 
                       "project_url": f"https://flow.google.com/project/{PID}"}
 
 
+async def test_a_job_flow_failed_is_an_error_with_its_reason(logged_in_profile, tmp_path):
+    # Live (2026-11-02): status 4, PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED; refunded
+    from aistudio.exceptions import GenerationFailedError
+
+    failed = FlowMedia(media_id="m1", project_id=PID, prompt=None, model_key=None, status=4,
+                       created=None, seconds=None, size=None, video_url=None, image_url=None,
+                       error="PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED")
+    kw, _, _ = harness(outcome=FlowOutcome([], 1050, False, [failed]), credit_values=(1050, 1050))
+    with pytest.raises(GenerationFailedError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "real or famous people" in info.value.message and "m1" in info.value.message
+    assert info.value.hint.startswith("nothing was charged")
+
+
 async def test_a_timeout_with_no_charge_says_so(logged_in_profile, tmp_path):
     # Live (2026-11-02): Flow marked the approved clip "Failed" (high demand) and charged
     # nothing, but the timeout reported the quote as spent
