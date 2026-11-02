@@ -566,6 +566,8 @@ def _iso(epoch: int | None) -> str | None:
 
 def _media_kind(media: Any) -> str:
     """Flow's project list carries no links (live), so judge by length and model too."""
+    if getattr(media, "audio", False):  # a voice sample (live: it was listed as an image)
+        return "audio"
     veo = bool(media.model_key) and "veo" in media.model_key
     return "video" if media.video_url or media.seconds or veo else "image"
 
@@ -617,6 +619,9 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
                                 hint='see "aistudio flow media"')
         found = await page.media_details(media_id) or listed  # the list has no links
     kind = _media_kind(listed)
+    if kind == "audio":
+        raise ValidationError(f"media {media_id} is a voice sample (audio); aistudio downloads "
+                              "images and videos", hint="play it on a character's page in Flow")
     if not (found.video_url if kind == "video" else found.image_url):
         raise ValidationError(f"media {media_id} has no download yet (still running or failed)",
                               hint="check it in Flow, then retry")

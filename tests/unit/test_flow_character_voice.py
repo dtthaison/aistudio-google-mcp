@@ -74,6 +74,42 @@ def test_a_renamed_voice_shows_its_workflow_title():
     assert contents.voices[0].name == "Coach"
 
 
+def test_a_voice_sample_is_audio_media():
+    # Live: "flow media --type image" listed "Mila voice"; its record says audio/wav.
+    contents = decode_contents([None, [VOICE_WORKFLOW], [VOICE_ROW], [], [], []])
+    assert [m.audio for m in contents.media] == [True]
+
+
+async def test_voices_are_listed_as_audio_and_never_taken_for_images(logged_in_profile):
+    from aistudio._app.flow import flow_media
+
+    profile = profile_with_project(logged_in_profile)
+    sample = dataclasses.replace(FULL.media[0], media_id=VOICE_ID, audio=True, model_key=None,
+                                 seconds=None)
+    kw, _ = voice_harness(dataclasses.replace(WITH_VOICES, media=[*FULL.media, sample]))
+    images = await flow_media(profile, kind="image", **kw)
+    assert VOICE_ID not in [m["media_id"] for m in images["media"]]
+    audio = await flow_media(profile, kind="audio", **kw)
+    assert [m["media_id"] for m in audio["media"]] == [VOICE_ID]
+
+
+async def test_a_voice_is_no_photo_and_no_download(logged_in_profile, tmp_path):
+    from aistudio._app.flow import flow_character, flow_download
+
+    profile = profile_with_project(logged_in_profile)
+    sample = dataclasses.replace(FULL.media[0], media_id=VOICE_ID, audio=True, model_key=None,
+                                 seconds=None)
+    contents = dataclasses.replace(WITH_VOICES, media=[*FULL.media, sample])
+    kw, _ = voice_harness(contents)
+    with pytest.raises(ValidationError) as info:
+        await flow_download(profile, VOICE_ID, out=tmp_path / "v.wav", **kw)
+    assert "voice sample" in info.value.message
+    kw, pages = voice_harness(contents)
+    with pytest.raises(ValidationError) as info:
+        await flow_character(profile, "Voice face", photo=VOICE_ID, out=tmp_path / "f.png", **kw)
+    assert "not an image" in info.value.message
+
+
 def test_save_and_rpc_replies():
     assert saved_voice([[[VOICE_ID, PID, WORKFLOW, None]], [[WORKFLOW]]]) == VOICE_ID
     assert saved_voice([]) is None

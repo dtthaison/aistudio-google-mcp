@@ -192,7 +192,8 @@ def projects_cmd(state: CliState, visible: bool, json_output: bool) -> None:
 
 @flow.command("media")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
-@click.option("--type", "kind", type=click.Choice(["video", "image"]))
+@click.option("--type", "kind", type=click.Choice(["video", "image", "audio"]),
+              help="Only this kind; audio is character voice samples.")
 @click.option("--visible", is_flag=True, help="Show the browser window.")
 @json_option
 @click.pass_obj

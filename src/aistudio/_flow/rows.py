@@ -12,6 +12,7 @@ from aistudio._rpc.wire import opt_index
 
 _VIDEO = "https://flow-content.google/video/"
 _IMAGE = "https://flow-content.google/image/"
+_AUDIO = "https://flow-content.google/audio/"
 _SECONDS = re.compile(r"(\d+)-second", re.I)
 _MODEL = re.compile(r"\busing ((?:Veo|Omni|Nano Banana)[\w .\-]*?)"
                     r"(?=[.,;!?](?:\s|$)|\s+(?:with|in|at|and)\b|$)", re.I)
@@ -30,6 +31,7 @@ class FlowMedia:
     video_url: str | None
     image_url: str | None
     workflow_id: str | None = None  # the clip's editor id ([2] of its record)
+    audio: bool = False  # a voice sample ("Save new voice"), not an image (live)
 
 
 @dataclass(frozen=True)
@@ -455,7 +457,16 @@ def _record(row: Any) -> FlowMedia | None:
         video_url=next((s for s in links if s.startswith(_VIDEO)), None),
         image_url=next((s for s in links if s.startswith(_IMAGE)), None),
         workflow_id=_str(opt_index(row, 2)),
+        audio=_is_audio(row, links),
     )
+
+
+def _is_audio(row: Any, links: list[str]) -> bool:
+    """The listing gives an audio media's type at ``[10][0][10]`` ("audio/wav", live); its
+    details carry an ``/audio/`` link."""
+    mime = opt_index(row, 10, 0, 10)
+    return ((isinstance(mime, str) and mime.startswith("audio/"))
+            or any(link.startswith(_AUDIO) for link in links))
 
 
 def _str(value: Any) -> str | None:
