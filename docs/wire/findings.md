@@ -1065,3 +1065,10 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   aistudio reads the project again (up to 3 times) and takes the new, finished images created
   since the send, with a warning that the model, aspect and attachments were not checked. While
   any new image is still running, the run stays a TIMEOUT.
+- **A start frame and a character do not mix.** `flow video --start-frame <image> --character
+  <name>` got no quote: the agent said its first-frame tool (`generate_video_with_first_frame`)
+  takes one start image and no character, and asked whether to use reference-to-video instead.
+  `--start-frame` alone and `--ingredient <same image> --character <name>` were both quoted at
+  10 credits (Veo 3.1 Lite, 8 s, 9:16). The start-frame plan says "using Veo 3.1 - Lite from your
+  start frame image", which the plan parser read as the model name; it now stops at "from",
+  "for" and "to" as well.

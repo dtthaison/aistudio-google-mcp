@@ -67,6 +67,13 @@ def test_parse_plan_from_the_agent_text():
     assert parse_plan("Here you go.") == Plan(model=None, seconds=None)
 
 
+def test_parse_plan_stops_the_model_at_from():
+    # Live (2026-11-02), a start-frame run: the model name was read with the rest of the phrase
+    text = ("I'm going to generate an 8-second video in 9:16 using Veo 3.1 - Lite from your start "
+            "frame image. Would you like me to kick off this 1 video generation?")
+    assert parse_plan(text) == Plan(model="Veo 3.1 - Lite", seconds=8)
+
+
 def permission(videos=1, images=0, cost=10):
     return [[None, [["c", None, None, ["open_chat_panel", "open_chat_panel", [[["_synthetic",
              [None, None, None, True]]]]]], ["c", None, None, ["ask_for_permission",

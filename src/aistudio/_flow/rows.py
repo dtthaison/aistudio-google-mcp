@@ -15,7 +15,7 @@ _IMAGE = "https://flow-content.google/image/"
 _AUDIO = "https://flow-content.google/audio/"
 _SECONDS = re.compile(r"(\d+)-second", re.I)
 _MODEL = re.compile(r"\busing ((?:Veo|Omni|Nano Banana)[\w .\-]*?)"
-                    r"(?=[.,;!?](?:\s|$)|\s+(?:with|in|at|and)\b|$)", re.I)
+                    r"(?=[.,;!?](?:\s|$)|\s+(?:with|in|at|and|from|for|to)\b|$)", re.I)
 
 
 @dataclass(frozen=True)

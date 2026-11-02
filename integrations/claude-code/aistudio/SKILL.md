@@ -222,9 +222,15 @@ fixed inputs, not from Flow remembering.
 3. **Keyframes (free).** Make each shot's first frame with `flow image --character …
    --ingredient <plate> [--ingredient <product>]`, review them together, and redo only the weak
    ones. Check face, outfit, setting and props against the bible before any credits are spent.
-4. **Clips (credits).** `flow video --start-frame <keyframe id> --character '<Name>'` with the
-   shot's prompt. Quote first and ask (the rules above). Draft on Veo 3.1 Lite (about 10 credits a
-   clip); Fast is about 20 and Quality about 100, so upgrade only approved shots.
+4. **Clips (credits).** Flow cannot combine a start frame with a character (its agent replies
+   with a question, `AGENT_REPLY`, nothing spent). Pick one per clip:
+   - `flow video --start-frame <keyframe id>`: the clip opens on the exact keyframe, but the
+     character (and its saved voice) is not attached;
+   - `flow video --ingredient <keyframe id> --character '<Name>'`: the character's look and
+     voice, with the keyframe only as a guide.
+
+   Quote first and ask (the rules above). Draft on Veo 3.1 Lite (10 credits a clip, measured for
+   both); Fast is about 20 and Quality about 100, so upgrade only approved shots.
    - Same shot continuing: `flow extend <last clip>` (10 credits, no quote: ask first).
    - New angle in the same moment: `flow frame save <clip>` and pass the frame as
      `--start-frame` or `--ingredient` of the next clip.
