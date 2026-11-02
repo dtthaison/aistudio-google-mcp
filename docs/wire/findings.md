@@ -1031,3 +1031,19 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
 - **Test leftovers in the "aistudio" project:** custom voices "Mila voice" (`d14e0551`, given to
   Mila Vance) and "Paper boat voice" (`c876bc12`, made by the CLI's first `--style` run; Paper
   boat's voice was then removed again).
+
+### Flow image runs: a second "Settings" button and late replies (2026-11-02, free, live)
+
+- **Two "Settings" buttons.** The project page's top bar gained an icon button named "Settings"
+  (tooltip "View settings": view mode, grid size, sound on hover, tile details). It comes before
+  the prompt box's "Settings" (class `agent-action-button`), which still opens "Agent settings"
+  (Confirm before generating, image and video defaults, Save). Pressing the first one made every
+  `flow image`/`flow video` run wait 30 s for "Image generation default model" and fail with
+  "the page did not show what aistudio expected in time". aistudio now presses the last one.
+- **A free image's result can come after the agent's first reply.** One run's agent ended a
+  StreamChat reply with "I will generate 1 image…" and sent the generation later; the 10 s
+  grace after a reply without a quote ran out, and the run said "replied without a quote …
+  nothing was spent" while Flow made the image. In other runs one reply held everything. With a
+  character attached, a reply ended after the 90 s limit (the image existed about 75 s in), and
+  the run timed out. Image runs (free models only) now wait up to 240 s for the generation, and
+  a reply without one is reported as "may still be generating", never as nothing made.

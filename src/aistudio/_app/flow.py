@@ -56,6 +56,10 @@ STATE_FILE = "flow.json"
 DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
+QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
+# A free image run: the reply carrying the generation ends only once the image is made; with a
+# character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
+FREE_REPLY_TIMEOUT_S = 240.0
 
 
 async def flow_credits(profile: Profile, *, visible: bool = False,
@@ -180,7 +184,8 @@ async def flow_generate(
             turn = await page.submit_for_quote(instruction(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
-                aspect=aspect))
+                aspect=aspect), expect_generation=kind == "image",  # images: free models only
+                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S)
             if turn.quote is None and not turn.generated and turn.generating:
                 waiting = await _reject_noting(page, expect=False)
                 still = ("Flow's agent had not finished replying" if not turn.answered

@@ -74,6 +74,9 @@ PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission r
 _SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
 TITLE = "Editable text"
 TUNE = "Settings"
+# Live 2026-11-02: the top bar gained its own "Settings" (tooltip "View settings": grid size,
+# sound on hover), which comes first; the agent's settings are the prompt box's button, the last.
+TUNE_NTH = -1
 NEW_PROJECT = re.compile(r"New project")
 NEW_SESSION = "Start new session"
 EXPAND = "Expand"  # a collapsed prompt box hides "Start new session" (live)
@@ -290,7 +293,7 @@ class FlowPage:
         await self._ui.pause(1000)
 
     async def read_defaults(self, kind: str) -> Defaults:
-        await self._ui.activate("button", TUNE, exact=True)
+        await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
         await self._ui.pause(1200)
         model = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
         aspect = await self._checked_one(kind, ASPECTS[kind], _aspect_name, aspect=True)
@@ -303,7 +306,7 @@ class FlowPage:
         return Defaults(model, str(aspect), int(count), asks=asks)
 
     async def apply_defaults(self, kind: str, wanted: Defaults) -> None:
-        await self._ui.activate("button", TUNE, exact=True)
+        await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
         await self._ui.pause(1200)
         current = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
         if current != wanted.model:
@@ -325,11 +328,17 @@ class FlowPage:
             raise BrowserError(f"Flow's {kind} settings did not take effect",
                                hint="re-run; if it persists, the Flow UI changed")
 
-    async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0) -> AgentTurn:
+    async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0,
+                               expect_generation: bool = False) -> AgentTurn:
         """Send the instruction and read Flow's structured permission request for it.
 
         The quote comes from the StreamChat response to this message, never from page text, so
         an echoed prompt or an older message cannot fake a price.
+
+        ``expect_generation``: the model generates without asking (free images), so a reply
+        without a quote is no answer yet. The agent can end one reply with "I will generate…"
+        and send the generation in a later one, well after REPLY_GRACE_S (live, 2026-11-02):
+        wait for it, and never call such a reply "nothing was made".
         """
         async with self._ui.responses(marker=CHAT_RPC) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
@@ -359,11 +368,13 @@ class FlowPage:
                     return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                                      tuple(sent_characters(body)), tuple(sent_media(body)),
                                      tuple(generated))
-                deadline = min(deadline, self._now() + REPLY_GRACE_S)
+                if not expect_generation:
+                    deadline = min(deadline, self._now() + REPLY_GRACE_S)
         # A reply is captured only when its stream ends (live: ~47 s for free images): an open
         # stream at the deadline may still be generating, so it is never "nothing was spent"
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
-                         generating=agent_pending(seen) or not answered, answered=answered)
+                         generating=agent_pending(seen) or not answered or expect_generation,
+                         answered=answered)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an

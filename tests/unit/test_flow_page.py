@@ -67,7 +67,27 @@ async def test_read_defaults_for_video(fake_ui):
     defaults = await FlowPage(ui).read_defaults("video")
     assert defaults == Defaults("Omni 1.1 Flash", "9:16", 2)
     assert defaults.asks is False  # not scripted as "Always": treated as not asking
-    assert ui.ops[0] == ("activate", "button", TUNE, 0)
+    # Live 2026-11-02: the top bar's "Settings" (View settings) comes first; the agent's
+    # settings button is the prompt box's, the last one.
+    assert ui.ops[0] == ("activate", "button", TUNE, -1)
+
+
+async def test_apply_defaults_opens_the_agent_settings_too(fake_ui):
+    from aistudio._flow.page import Defaults as D
+
+    ui = fake_ui({"Kcr7Ub": [rpc_ok("Kcr7Ub")]},
+                 inner={("button", "Image generation default model"): ["Nano Banana 2.1"]},
+                 checks={("radio", r"(^|\s)9:16$", 0): [True], ("radio", r"^x1$", 0): [True]},
+                 url=f"https://flow.google.com/project/{PID}")
+    await FlowPage(ui).apply_defaults("image", D("Nano Banana 2.1", "9:16", 1))
+    tune = [op for op in ui.ops if op[:3] == ("activate", "button", TUNE)]
+    assert tune and all(op[3] == -1 for op in tune)
+
+
+def rpc_ok(method):
+    from aistudio._browser.ui import CapturedResponse
+
+    return CapturedResponse(method, 200, "", "")
 
 
 async def test_read_defaults_reports_whether_flow_asks_before_spending(fake_ui):
@@ -385,6 +405,37 @@ async def test_a_quote_turn_also_reports_what_flow_made(fake_ui):
                  texts={PROMPT_EDITOR: ["Generate exactly 1 video."], AGENT_MESSAGE: ["q"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("Generate exactly 1 video.")
     assert turn.quote is not None and [g.media_id for g in turn.generated] == ["g1"]
+
+
+ANNOUNCED = [[[[["text", [None, None, "I will generate 1 image of Mila."]]]], None, "e0"]]
+
+
+async def test_a_free_image_whose_result_comes_after_the_grace_is_still_followed(fake_ui):
+    # Live 2026-11-02: the agent's "I will generate 1 image…" ended one StreamChat reply and the
+    # generation came in a later one, after REPLY_GRACE_S: the run said "no quote; nothing was
+    # spent" while Flow made the image. A free image run always generates, so it waits.
+    from tests.unit.test_flow_rows import generated_call, generated_result
+
+    later = [chat(stream(ANNOUNCED)), *[None] * 30,
+             chat(stream(generated_call(), generated_result()))]
+    ui = fake_ui({"StreamChat": later}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["done"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", expect_generation=True)
+    assert turn.quote is None and [g.media_id for g in turn.generated] == ["g1"]
+
+
+async def test_a_free_image_reply_without_its_result_is_never_nothing_spent(fake_ui):
+    ui = fake_ui({"StreamChat": [chat(stream(ANNOUNCED))]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["I will generate 1 image"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60,
+                                                            expect_generation=True)
+    assert turn.quote is None and turn.generating and turn.answered
+
+
+async def test_a_paid_run_still_stops_soon_after_a_reply_without_a_quote(fake_ui):
+    later = [chat(stream(ANNOUNCED)), *[None] * 30, chat(stream(permission(cost=10)))]
+    ui = fake_ui({"StreamChat": later}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is None and not turn.generating and turn.answered
 
 
 async def test_an_unfinished_reply_is_a_timeout(fake_ui):

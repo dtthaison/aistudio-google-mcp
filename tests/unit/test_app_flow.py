@@ -72,7 +72,8 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
-    async def submit_for_quote(self, text, *, timeout_s=90.0):
+    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False):
+        self.expect_generation, self.reply_timeout_s = expect_generation, timeout_s
         self.calls.append(("submit", text))
         return self.turn
 
@@ -437,6 +438,17 @@ async def test_a_free_image_is_downloaded_without_approval(logged_in_profile, tm
     assert any("without asking" in w for w in result["warnings"])
     assert any("g2" in w for w in result["warnings"])
     assert not any(c[0] == "approve" for c in pages[0].calls)  # reject only clears leftovers
+    # Live 2026-11-02: the generation can come in a later reply, and with a character attached
+    # the reply ended past 90 s; an image run waits longer for it.
+    assert pages[0].expect_generation is True and pages[0].reply_timeout_s == 240.0
+
+
+async def test_a_video_run_does_not_wait_for_a_free_generation(logged_in_profile, tmp_path):
+    kw, pages, _ = harness(turn=AgentTurn("Which apple?", None))
+    with pytest.raises(AgentReplyError):
+        await flow_generate(logged_in_profile(), "video", "an apple", out=tmp_path / "x.mp4",
+                            **kw)
+    assert pages[0].expect_generation is False and pages[0].reply_timeout_s == 90.0
 
 
 async def test_a_reply_with_nothing_made_is_still_an_agent_reply(logged_in_profile, tmp_path):
