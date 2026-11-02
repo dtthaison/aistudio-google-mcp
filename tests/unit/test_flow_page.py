@@ -344,6 +344,17 @@ async def test_reject_waits_for_the_request_and_says_how_many(fake_ui):
     ui = fake_ui(enabled={("radio", "Reject"): [[]]}, record_pauses=True)
     assert await FlowPage(ui).reject(expect=False) == 0
     assert len([op for op in ui.ops if op[0] == "pause"]) == 0
+    assert ui.waits == []  # nothing pressed: no reply to wait for
+
+
+async def test_reject_waits_for_the_agents_reply_to_it(fake_ui):
+    # Live (2026-11-02): Reject starts an agent turn whose reply ("I've cancelled…") took ~24 s.
+    # Closing the browser first left it to answer the next run's prompt instead of a quote.
+    from aistudio._flow.page import REJECT_REPLY_TIMEOUT_S
+
+    ui = fake_ui(enabled={("radio", "Reject"): [[True], [True], [False]]})
+    assert await FlowPage(ui).reject() == 1
+    assert ui.waits == [("StreamChat", REJECT_REPLY_TIMEOUT_S)]
 
 
 async def test_approve_presses_only_the_newest_request(fake_ui):

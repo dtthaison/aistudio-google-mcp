@@ -157,6 +157,7 @@ TILE_RELOADS = 4  # reloads to wait for a new upload's tile (the list can lag th
 TILE_POLLS = 8  # x 1 s per reload
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
+REJECT_REPLY_TIMEOUT_S = 60.0  # the agent's reply to a Reject (~24 s live)
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
 # Tool builds (live, findings "Flow Tools discovery"): one took 95 s with the page text unchanged
 # for 50 s, so Stop is the only sign of progress, and a reload at 50 s lost the build
@@ -401,15 +402,23 @@ class FlowPage:
                 break
             await self._ui.pause(500)
         pressed = 0
-        for _ in range(REJECT_ROUNDS):
-            waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject")) if ok]
-            if not waiting:
-                return pressed
-            await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
-            await self._ui.pause(1000)
-            pressed += 1
-        raise BrowserError("Flow still shows a waiting request after Reject",
-                           hint="press Reject on it in Flow, never Approve")
+        # Each Reject starts an agent turn ("I've cancelled…", ~24 s live). Wait for its reply:
+        # left unfinished, Flow gave it as the answer to the next run's prompt (2026-11-02).
+        async with self._ui.responses(marker=CHAT_RPC) as log:
+            for _ in range(REJECT_ROUNDS):
+                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject"))
+                           if ok]
+                if not waiting:
+                    break
+                await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
+                await self._ui.pause(1000)
+                pressed += 1
+            else:
+                raise BrowserError("Flow still shows a waiting request after Reject",
+                                   hint="press Reject on it in Flow, never Approve")
+            for _ in range(pressed):
+                await log.next(CHAT_METHOD, timeout_s=REJECT_REPLY_TIMEOUT_S)
+        return pressed
 
     async def approve_and_follow(self, *, count: int, credits: int, timeout_s: float,
                                  kind: str, known: set[str] | frozenset[str] = frozenset()

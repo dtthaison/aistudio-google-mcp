@@ -1100,3 +1100,8 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   this video multiple times… I'm holding off". Every instruction now says "This is a new
   request: earlier cancelled requests do not apply, so ask for permission as usual."; the next
   run was quoted normally.
+- **The reply to a Reject.** Pressing Reject sends a StreamChat request; its reply ("I've
+  cancelled the video generation…") finished about 24 s later (traced). aistudio closed the
+  browser right after pressing, and every run that came next got that reply instead of its
+  quote ("I've cancelled the generation since permission was denied…"). `reject()` now waits up
+  to 60 s for the reply to each Reject it pressed.
