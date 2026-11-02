@@ -63,7 +63,7 @@ quotes and write each `'` as `'\''`.
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
-| Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
+| Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
 | Flow character from a description (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<Name>' '<description>' -o robot.png --json` |
@@ -198,6 +198,41 @@ quotes and write each `'` as `'\''`.
   wait for it rather than retrying in a loop.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
   without the user's OK.
+
+## Making a Flow scene (story, character and setting that stay the same)
+
+A **clip** is one generation (4–10 s, 8 s on Veo 3.1 Lite). A **scene** is Flow's timeline of
+clips: `flow extend` adds a clip to the same scene, and `flow scene stitch` joins clips into a new
+one. Flow keeps nothing between generations except what you attach, so consistency comes from
+fixed inputs, not from Flow remembering.
+
+1. **Story bible (free).** Before any video, write down and reuse word for word:
+   - the character: a Flow character (`flow character create`, then `body` and `voice`), attached
+     with `--character '<Name>'` on every image and clip;
+   - the setting: one or two free **location plates** (`flow image`, no people, same aspect as the
+     video), passed as `--ingredient <plate id>` on every shot in that place;
+   - fixed sentences for wardrobe, setting and style (light, lens, colour, aspect). Paste them
+     unchanged into every prompt; a changed adjective gives a different gym or outfit;
+   - product or brand images (app screens, logos) as `--ingredient` ids from `flow media`.
+2. **Storyboard.** One line per shot: framing, action, spoken line (under about 20 words for an
+   8-second clip), and how it joins the next shot (extend, cut, or a saved frame).
+3. **Keyframes (free).** Make each shot's first frame with `flow image --character …
+   --ingredient <plate> [--ingredient <product>]`, review them together, and redo only the weak
+   ones. Check face, outfit, setting and props against the bible before any credits are spent.
+4. **Clips (credits).** `flow video --start-frame <keyframe id> --character '<Name>'` with the
+   shot's prompt. Quote first and ask (the rules above). Draft on Veo 3.1 Lite (about 10 credits a
+   clip); Fast is about 20 and Quality about 100, so upgrade only approved shots.
+   - Same shot continuing: `flow extend <last clip>` (10 credits, no quote: ask first).
+   - New angle in the same moment: `flow frame save <clip>` and pass the frame as
+     `--start-frame` or `--ingredient` of the next clip.
+   - Hard cut: a new keyframe from step 3.
+5. **Assemble (free).** `flow scene stitch <id>@START-END …` (whole seconds) and
+   `flow scene download`.
+
+Prompt tips: say who speaks and put the line in quotes (`She says: "…"`); keep one action per
+clip; describe camera and light the same way every time; name the brand on screen only when a
+brand image is attached (models misspell text). Check each result for a changed face, outfit,
+setting or prop before the next step, and fix the keyframe rather than paying to re-roll a clip.
 
 ## Not available yet
 
