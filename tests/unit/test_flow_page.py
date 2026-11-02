@@ -444,3 +444,19 @@ async def test_an_unfinished_reply_is_a_timeout(fake_ui):
     ui = fake_ui({}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["Generating your images…"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60)
     assert turn.quote is None and turn.generating and not turn.answered
+
+
+async def test_a_reply_chrome_lost_is_flagged(fake_ui):
+    # Live (2026-11-02): the page showed "…costing 10 credits?" with Approve/Reject, but the
+    # StreamChat body reached aistudio empty (Chrome can drop a reply body)
+    ui = fake_ui({"StreamChat": [chat("")]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["costing 10 credits?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is None and turn.lost
+
+
+async def test_a_read_reply_is_not_lost(fake_ui):
+    ui = fake_ui({"StreamChat": [chat(stream(permission(cost=10)))]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is not None and not turn.lost

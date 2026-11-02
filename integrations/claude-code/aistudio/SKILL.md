@@ -118,7 +118,11 @@ quotes and write each `'` as `'\''`.
   `flow character body`, `OVER_BUDGET` is aistudio's own refusal before anything was sent.
   A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
   `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
-  `"status": "timeout"` means credits were spent: give the user `project_url`.
+  `"status": "timeout"` means the job was approved: give the user `project_url`. Its
+  `credits_spent` is measured (`credits_left` too); 0 with a warning means Flow has not charged:
+  the job failed (Flow shows "Failed" when busy) or is still queued, so check Flow before a
+  re-run. An `AGENT_REPLY` saying Flow's reply "never reached aistudio" spent nothing (the
+  request was rejected): re-running is safe.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before

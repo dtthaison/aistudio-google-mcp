@@ -260,7 +260,21 @@ async def test_a_timeout_reports_the_media_and_spent_credits(logged_in_profile, 
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert result == {"status": "timeout", "media_ids": ["m1"], "credits_spent": 10,
+                      "credits_left": 1040,
                       "project_url": f"https://flow.google.com/project/{PID}"}
+
+
+async def test_a_timeout_with_no_charge_says_so(logged_in_profile, tmp_path):
+    # Live (2026-11-02): Flow marked the approved clip "Failed" (high demand) and charged
+    # nothing, but the timeout reported the quote as spent
+    late = FlowMedia(media_id="m1", project_id=PID, prompt=None, model_key=None, status=6,
+                     created=None, seconds=None, size=None, video_url=None, image_url=None)
+    kw, _, _ = harness(outcome=FlowOutcome([late], None, True), credit_values=(1050, 1050))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "timeout"
+    assert result["credits_spent"] == 0 and result["credits_left"] == 1050
+    assert any("not charged" in w for w in result["warnings"])
 
 
 async def test_image_defaults_name_files_by_their_bytes(logged_in_profile, tmp_path, monkeypatch):
@@ -591,6 +605,25 @@ async def test_a_free_stream_still_running_is_a_timeout(logged_in_profile, tmp_p
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "still generating" in info.value.message and "re-running" in info.value.hint
     assert "charged" not in info.value.hint  # credits were not read (plan H review M3)
+
+
+async def test_a_reply_without_a_quote_rejects_what_waits(logged_in_profile, tmp_path):
+    # Live (2026-11-02): a request Flow showed but aistudio could not read stayed waiting
+    kw, pages, _ = harness(turn=AgentTurn("costing 10 credits?", None))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert ("reject",) in pages[0].calls and not pages[0].started
+    assert "nothing was spent" in info.value.hint
+
+
+async def test_a_lost_reply_says_so(logged_in_profile, tmp_path):
+    kw, pages, _ = harness(turn=AgentTurn("costing 10 credits?", None, lost=True))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "never reached aistudio" in info.value.message
+    assert ("reject",) in pages[0].calls and "re-run" in info.value.hint
 
 
 def image(media_id, *, created, status=3):

@@ -192,6 +192,7 @@ class AgentTurn:
     generated: tuple[Generated, ...] = ()  # made without asking (free models)
     generating: bool = False  # a free generation was still running when the wait ended
     answered: bool = True  # a StreamChat reply ended; False: the stream was still open
+    lost: bool = False  # a reply ended but its body never reached aistudio (Chrome dropped it)
 
 
 @dataclass(frozen=True)
@@ -346,7 +347,7 @@ class FlowPage:
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             seen: list[object] = []
-            answered = False
+            answered = lost = False
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
                 if response is None:
@@ -354,6 +355,7 @@ class FlowPage:
                 answered = True
                 if response.status >= 400:
                     continue
+                lost = lost or not response.text  # live: Chrome can drop a reply body
                 body = response.request_body
                 quote = None
                 for _, payload in payloads(response.text):
@@ -374,7 +376,7 @@ class FlowPage:
         # stream at the deadline may still be generating, so it is never "nothing was spent"
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                          generating=agent_pending(seen) or not answered or expect_generation,
-                         answered=answered)
+                         answered=answered, lost=lost)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an

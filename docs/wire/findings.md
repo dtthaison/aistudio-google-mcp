@@ -1072,3 +1072,22 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   10 credits (Veo 3.1 Lite, 8 s, 9:16). The start-frame plan says "using Veo 3.1 - Lite from your
   start frame image", which the plan parser read as the model name; it now stops at "from",
   "for" and "to" as well.
+
+### Paid Flow clips on a busy day (2026-11-02, Veo 3.1 Lite, 0 credits charged)
+
+- **An approved clip can fail with no charge.** One approved 10-credit clip (ingredient plus
+  character) showed "Failed – Something went wrong" in the chat, and the agent added that it was
+  "waiting in the queue due to high demand". The media never appeared in the project and credits
+  stayed at 1050. aistudio followed it until `--timeout` (20 minutes) and reported
+  `credits_spent: 10`, the quote. A timeout now reads the credits again and reports what was
+  charged (`credits_spent`, `credits_left`), with a warning when nothing was. The failed job's
+  status code is still unknown (its record was gone), so the follow still waits until the deadline.
+- **A lost quote.** On the retry, the page showed the agent's "…costing 10 credits?" with Approve
+  and Reject, but aistudio read no permission request (the reply body did not arrive) and said
+  "replied without a quote". It did not press Reject, so the request stayed waiting in Flow (it
+  was rejected by hand afterwards). Now any reply without a quote is followed by Reject, and an
+  empty reply body is reported as "Flow's reply never reached aistudio"; nothing is spent, and
+  re-running is safe.
+- **A reply to the last Reject.** One paid run read "I've cancelled that video generation. Are
+  there any changes…", the agent's answer to the previous run's Reject, instead of a quote.
+  Nothing was spent; the next run was quoted normally.

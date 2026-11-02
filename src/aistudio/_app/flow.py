@@ -120,6 +120,7 @@ async def flow_generate(
     if on_start:
         on_start()
     free: tuple[list[Any], list[str]] | None = None
+    outcome: Any = None  # a paid run's follow result
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         before = await _credits_before(page)  # free models generate without asking (plan F)
@@ -217,9 +218,17 @@ async def flow_generate(
                                                        "project in Flow before re-running",
                                                        waiting))
             if turn.quote is None and not turn.generated:
+                # A request the page shows but aistudio could not read must not stay waiting
+                waiting = await _reject_noting(page, expect=False)
+                if turn.lost:
+                    raise AgentReplyError(
+                        "Flow's reply never reached aistudio (the browser dropped it), so there "
+                        f"was no quote to check: {turn.text[-300:]}",
+                        hint=_with_note("nothing was spent and any request it showed was "
+                                        "rejected; re-run", waiting))
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
-                                      hint="rephrase the prompt or add options; nothing was "
-                                           "spent")
+                                      hint=_with_note("rephrase the prompt or add options; "
+                                                      "nothing was spent", waiting))
             if turn.quote is None:  # a free model: Flow generated without asking (live)
                 free = await _free_run(page, turn, kind, wanted.count, flow_model, aspect,
                                        attached_ids, [c.id for c in chosen])
@@ -296,6 +305,8 @@ async def flow_generate(
                         failure.hint = _with_note(failure.hint, note)
         if free is not None:  # after the restore: reading credits leaves the project page
             after, free_notes = await _credits_after(page, None)
+        elif outcome is not None and outcome.timed_out:  # what was charged, not the quote
+            after, free_notes = await _credits_after(page, outcome.credits_left)
     if quoted is not None:
         return {**quoted, **({"warnings": warnings} if warnings else {})}
     project_url = PROJECT_URL.format(id=project_id)
@@ -322,8 +333,17 @@ async def flow_generate(
         warnings.append(f"credits fell by {before - outcome.credits_left} during this run; the "
                         f"quote was {turn.quote.credits}")
     if outcome.timed_out:
+        spent = turn.quote.credits  # unverified: assume the quote was charged
+        warnings += free_notes
+        if before is not None and after is not None:
+            spent = before - after
+            if spent == 0:  # live (2026-11-02): a "Failed" job (high demand) charged nothing
+                warnings.append(f"Flow has not charged for it (credits unchanged at {after}): "
+                                f"the job failed or is still queued and may charge "
+                                f"{turn.quote.credits} when it finishes; check the project in "
+                                f"Flow before re-running")
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
-                "project_url": project_url, "credits_spent": turn.quote.credits,
+                "project_url": project_url, "credits_spent": spent, "credits_left": after,
                 **({"warnings": warnings} if warnings else {})}
     expected_id = flow_model.id if flow_model else label_to_id(wanted.model)
     made = {MODEL_KEYS[m.model_key] for m in outcome.media if m.model_key in MODEL_KEYS}
