@@ -32,6 +32,7 @@ from aistudio._flow.rows import (
     agent_pending,
     character_id,
     character_name,
+    character_voice,
     credits_left,
     decode_contents,
     decode_projects,
@@ -43,6 +44,7 @@ from aistudio._flow.rows import (
     parse_permission,
     personality_notes,
     saved_frame,
+    saved_voice,
     sent_characters,
     sent_media,
     stitch_job,
@@ -50,6 +52,7 @@ from aistudio._flow.rows import (
 )
 from aistudio._flow.rows import character_id as record_character_id
 from aistudio._flow.wire import decode_batch, payloads
+from aistudio._rpc.wire import opt_index
 from aistudio.exceptions import (
     BrowserError,
     NotFoundError,
@@ -88,6 +91,19 @@ EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
 CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
 BODY_MODE = "Ingredient"  # shown only in body mode, with or without an earlier body (live)
+# Flow ignores "Create body" until the character has loaded, and its editor shows before that
+# (live, 2026-11-02: a click at once did nothing, one 3 s later worked): click again until the
+# body mode shows. The click itself sends nothing.
+BODY_TRIES = 8
+BODY_PAUSE_MS = 1500
+# The character page's voice control (live, 2026-11-02): "Select a voice" without a voice, a
+# card with the voice's name once it has one; both open the "Select a voice" dialog.
+VOICE_BUTTON = ".voice-card-start-btn, .voice-selector-empty-btn"
+VOICE_STYLE = "Customize performance"  # the dialog's style box (a textbox)
+VOICE_NAME = 'input[placeholder="Enter voice name"]'  # shown once a style is typed
+SAVE_VOICE = "Save new voice"
+VOICE_FIELD = "entity_info.character_info.audio_references"
+VOICE_SAVE_TIMEOUT_S = 120.0  # live: the sample took about 30 s
 EDIT_MODEL_KEY = "abra_edit"  # the model key of a clip an Omni edit makes (live)
 # The clip editor's own box: "Describe how to edit this video… add pen_magic Omni 1.1 Flash →"
 _EDIT_MODEL = re.compile(r"Describe how to edit this video…\s+(?:add\s+)?(?:pen_magic\s+)?"
@@ -697,20 +713,80 @@ class FlowPage:
             return await self._follow(log, 1, timeout_s, "video", since, exclude=known,
                                       model_key=EDIT_MODEL_KEY)
 
-    async def open_body(self, project_id: str, character_id: str) -> str:
-        """Open the character's page in body mode; return the image model it will use."""
+    async def _open_character_page(self, project_id: str, character_id: str) -> None:
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character/{character_id}")
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
         if not self._ui.current_url().split("?", 1)[0].endswith(f"/character/{character_id}"):
             raise BrowserError("Flow opened another page than the character; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
-        await self._ui.dispatch_click("button", CREATE_BODY)
-        await self._ui.pause(2000)
-        # Without body mode, Start would run the page's other, unpriced action.
-        if not await self._ui.visible("button", BODY_MODE, exact=True):
+
+    async def open_body(self, project_id: str, character_id: str) -> str:
+        """Open the character's page in body mode; return the image model it will use."""
+        await self._open_character_page(project_id, character_id)
+        for _ in range(BODY_TRIES):
+            await self._ui.dispatch_click("button", CREATE_BODY)
+            await self._ui.pause(BODY_PAUSE_MS)
+            if await self._ui.visible("button", BODY_MODE, exact=True):
+                break
+        else:  # without body mode, Start would run the page's other, unpriced action
             raise BrowserError("Flow did not switch to body mode; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
         return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+
+    async def set_voice(self, project_id: str, character_id: str, ref: str | None) -> None:
+        """Give the character a voice: a preset's lower-case name or a custom voice's media id;
+        None removes it (free; what picking a voice or "Remove" sends, live)."""
+        info: list[Any] = [None, [[None, ref]]] if ref else []
+        args = [[project_id, character_id, None, [1, None, info]], [[VOICE_FIELD]]]
+        status, reply = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
+        record = decode_batch(reply).get("rzMKMb") if status < 400 else None
+        if record_character_id(record) != character_id or character_voice(record) != ref:
+            raise BrowserError(f"Flow did not save the voice of character {character_id}"
+                               + (f" (HTTP {status})" if status >= 400 else ""),
+                               hint="check it on the character's page in Flow; re-run to retry")
+
+    async def save_voice(self, project_id: str, character_id: str, base: str, style: str,
+                         name: str, *, description: str) -> tuple[str, str | None]:
+        """Save a custom voice (``base`` spoken in ``style``) from the character's "Select a
+        voice" dialog, as "Save new voice" does: Flow renders a sample (with a reCAPTCHA token
+        only the page can make) and keeps it as an audio media. Returns its media id and its
+        workflow id. ``description`` is the preset's dialog text, e.g. "Female, upbeat, …"."""
+        await self._open_character_page(project_id, character_id)
+        await self._ui.click_selector(VOICE_BUTTON)
+        await self._ui.pause(1500)
+        await self._ui.fill_first(SEARCH_ASSETS, base)
+        await self._ui.pause(1500)
+        shown = [" ".join(label.replace("voice_selection", " ").split())
+                 for label in await self._ui.labels("option", re.compile("."))]
+        if not shown or shown[0] != f"{base} {description}":  # the style applies to the first
+            raise ValidationError(f"Flow's voice search for {base!r} lists "
+                                  f"{shown[:3] or 'nothing'} first; nothing was saved",
+                                  hint="re-run; if it persists, the Flow UI changed")
+        await self._ui.fill("textbox", VOICE_STYLE, style)
+        await self._ui.pause(800)
+        await self._ui.fill_first(VOICE_NAME, name, timeout_s=10.0)
+        await self._ui.pause(500)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            self.started = True
+            await self._ui.dispatch_click("button", SAVE_VOICE, exact=True)
+            saved = await log.next("no0P6", timeout_s=VOICE_SAVE_TIMEOUT_S)
+            payload = decode_batch(saved.text).get("no0P6") if saved else None
+            media_id = saved_voice(payload)
+            if media_id is None:
+                raise BrowserError("Flow did not confirm the new voice",
+                                   hint='check "aistudio flow character voices" for it before '
+                                        "re-running")
+            self.paid_media = [media_id]
+            named = await log.next("mYWVGd", timeout_s=30.0)  # the page names it (live)
+        workflow = opt_index(payload, 0, 0, 2)
+        workflow_id = workflow if isinstance(workflow, str) and workflow else None
+        if named is None and workflow_id:  # finish it as the page does after a save (live)
+            await self._ui.batch_rpc("lt8g5", json.dumps(
+                [[media_id, None, None, None, None, [None] * 9 + [1]],
+                 [["media.media_metadata.visibility"]]]))
+            await self._ui.batch_rpc("mYWVGd", json.dumps(
+                [[workflow_id, None, None, [name], project_id], [["metadata.display_name"]]]))
+        return media_id, workflow_id
 
     async def start_body(self, prompt: str) -> list[FlowMedia]:
         """Call after open_body. Generates the body image (a direct spend: priced first)."""

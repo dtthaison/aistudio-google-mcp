@@ -68,6 +68,18 @@ class FlowCharacter:
     name: str
     media_id: str | None  # the character's image; None until it has one
     created: int | None
+    voice: str | None = None  # a preset's lower-case name or a custom voice's media id
+
+
+@dataclass(frozen=True)
+class FlowVoice:
+    """A custom voice saved in a project ("Save new voice"): a sample clip of a preset voice
+    spoken in a style, stored as an audio media (findings "Flow character voices")."""
+    media_id: str
+    name: str
+    base: str | None  # the preset it is based on, e.g. "Laomedeia"
+    style: str | None  # the performance style
+    created: int | None
 
 
 @dataclass(frozen=True)
@@ -112,6 +124,7 @@ class ProjectContents:
     workflows: dict[str, str] = field(default_factory=dict)  # media_id -> workflow id (editor)
     characters: list[FlowCharacter] = field(default_factory=list)
     scenes: list[FlowScene] = field(default_factory=list)
+    voices: list[FlowVoice] = field(default_factory=list)
 
 
 def decode_projects(payload: Any) -> list[FlowProject]:
@@ -136,7 +149,8 @@ def decode_contents(payload: Any) -> ProjectContents:
                 workflows[media_id] = workflow[0]
     media = [m for m in (_record(r) for r in opt_index(payload, 2) or []) if m is not None]
     return ProjectContents(titles, media, workflows, _characters(opt_index(payload, 5)),
-                           _scenes(opt_index(payload, 4), opt_index(payload, 6)))
+                           _scenes(opt_index(payload, 4), opt_index(payload, 6)),
+                           _voices(opt_index(payload, 2), titles))
 
 
 _TOOL_KINDS = {1: "mine", 2: "template", 3: "community"}
@@ -174,8 +188,37 @@ def _characters(rows: Any) -> list[FlowCharacter]:
         cid, name = _str(opt_index(row, 1)), opt_index(row, 3, 1)
         if cid and isinstance(name, str):  # "" stays: an unnamed character can be renamed
             out.append(FlowCharacter(cid, name, _str(opt_index(row, 4)),
-                                     _int(opt_index(row, 6, 0))))
+                                     _int(opt_index(row, 6, 0)), _voice_ref(row)))
     return out
+
+
+def _voice_ref(row: Any) -> str | None:
+    """A character record's voice (live): ``[3][2][1]`` is ``[[None, ref]]``, ``[]`` or absent."""
+    return _str(opt_index(row, 3, 2, 1, 0, 1))
+
+
+def character_voice(payload: Any) -> str | None:
+    """``rzMKMb`` reply: the character record's voice."""
+    return _voice_ref(opt_index(payload, 0))
+
+
+def _voices(rows: Any, titles: dict[str, str]) -> list[FlowVoice]:
+    """Audio media whose ``[10][0]`` is ``[None x6, sample, style, notes, model, mime,
+    [[base, name]]]`` (live); the name shown is the workflow title, which renames change."""
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        media_id, detail = _str(opt_index(row, 0)), opt_index(row, 10, 0)
+        base, name = _str(opt_index(detail, 11, 0, 0)), _str(opt_index(detail, 11, 0, 1))
+        if media_id and (base or name):
+            out.append(FlowVoice(media_id, titles.get(media_id) or name or media_id, base,
+                                 _str(opt_index(detail, 7)), _int(opt_index(row, 5, 0, 0))))
+    return out
+
+
+def saved_voice(payload: Any) -> str | None:
+    """``no0P6`` reply ("Save new voice", live):
+    ``[[[media_id, project_id, workflow_id, …]], …]``."""
+    return _str(opt_index(payload, 0, 0, 0))
 
 
 def _scenes(rows: Any, clip_rows: Any) -> list[FlowScene]:

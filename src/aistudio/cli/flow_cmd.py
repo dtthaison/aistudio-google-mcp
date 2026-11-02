@@ -11,6 +11,7 @@ import click
 from aistudio._app.flow import (
     flow_character,
     flow_character_body,
+    flow_character_voice,
     flow_characters,
     flow_credits,
     flow_download,
@@ -25,6 +26,7 @@ from aistudio._app.flow import (
     flow_scenes,
     flow_set_personality,
     flow_stitch,
+    flow_voices,
 )
 from aistudio._app.flow_tools import (
     flow_tool_create,
@@ -283,8 +285,73 @@ def character_list(state: CliState, project: str | None, visible: bool,
     result = asyncio.run(flow_characters(state.profile(), project=project, visible=visible))
     emit(result, json_output=json_output, render=lambda d: [
         stdout.print(f"{c['id']}  {c['name'] or '(unnamed)'}"
-                     f"{'' if c['media_id'] else '  (no image)'}",
+                     f"{'' if c['media_id'] else '  (no image)'}"
+                     f"{_voice_note(c.get('voice'))}",
                      markup=False) for c in d["characters"]])
+
+
+def _voice_note(voice: dict[str, Any] | None) -> str:
+    if not voice:
+        return ""
+    return f"  voice: {voice.get('name') or voice.get('ref')}"
+
+
+def _voice_line(v: dict[str, Any]) -> str:
+    if v["kind"] == "custom":
+        return f"{v['name']}  (custom, {v['media_id']}; {v['base']}: {v['style'] or ''})"
+    return f"{v['name']}  {v['gender']}, {v['style']}, {v['pitch']}"
+
+
+@character.command("voices")
+@click.option("--search", help="Only voices whose name or description contains TEXT.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_voices(state: CliState, search: str | None, project: str | None, visible: bool,
+                     json_output: bool) -> None:
+    """Voices for characters: Flow's presets and the project's custom voices (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_voices(state.profile(), search=search, project=project,
+                                     visible=visible))
+    emit(result, json_output=json_output, render=lambda d: [
+        stdout.print(_voice_line(v), markup=False) for v in d["voices"]])
+
+
+@character.command("voice")
+@click.argument("character_id")
+@click.argument("voice", required=False)
+@click.option("--style", help="Make a new custom voice: VOICE (a preset) spoken in this "
+                              "performance style, then give it to the character (free).")
+@click.option("--voice-name", help="Name of the new custom voice (default: the character's "
+                                   "name plus ' voice').")
+@click.option("--clear", is_flag=True, help="Remove the character's voice.")
+@click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def character_voice(state: CliState, character_id: str, voice: str | None, style: str | None,
+                    voice_name: str | None, clear: bool, project: str | None, visible: bool,
+                    json_output: bool) -> None:
+    """Give a character a VOICE: a preset (e.g. Laomedeia) or a custom voice of the project, by
+    name or media id (free). See "aistudio flow character voices"."""
+    state.require_browser()
+    result = asyncio.run(flow_character_voice(
+        state.profile(), character_id, voice, style=style, voice_name=voice_name, clear=clear,
+        project=project, visible=visible))
+
+    def render(d: dict[str, Any]) -> None:
+        made = d.get("created_voice")
+        if made:
+            stdout.print(f"Saved custom voice {made['name']} ({made['media_id']})", markup=False)
+        name = d["voice"]["name"] if d["voice"] else None
+        stdout.print(f"Voice of {d['character_id']}: {name or '(none)'}", markup=False)
+        for warning in d.get("warnings", []):
+            stderr.print(f"warning: {warning}", markup=False)
+
+    emit(result, json_output=json_output, render=render)
 
 
 @character.command("rename")

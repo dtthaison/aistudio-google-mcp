@@ -73,6 +73,8 @@ quotes and write each `'` as `'\''`.
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Save a frame of a Flow clip as an image (free; for shot-to-shot chaining) | `aistudio flow frame save <clip media id> [--at SECONDS] [-o frame.jpg] --json`: the last frame by default, or the nearest frame to `--at`; pass the returned `media_id` to `--start-frame`, `--end-frame` or `--ingredient` (no upload, no `--i-have-rights`) |
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
+| Character voices: list, set, remove (free) | `aistudio flow character voices [--search TEXT] --json` (Flow's 30 presets and the project's custom voices), `aistudio flow character voice <id> <preset or custom voice name or media id> --json`, `aistudio flow character voice <id> --clear --json`; `flow character list` shows each character's `voice` |
+| New custom voice for a character (0 credits measured) | `aistudio flow character voice <id> <preset> --style '<performance style>' [--voice-name '<Name>'] --json`: Flow saves a sample of the preset spoken in that style as a project voice, then gives it to the character |
 | Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 | Flow Tools: list, read, save the code (free) | `aistudio flow tool list [--kind mine\|template\|community] [--search TEXT] --json`, `aistudio flow tool get <id> --json`, `aistudio flow tool export <id> <empty folder> --json` |
@@ -126,6 +128,10 @@ quotes and write each `'` as `'\''`.
   Flow's request carried other attachments than asked (e.g. a leftover in Flow's prompt box): it
   was rejected and nothing was spent. Tell the user to check the prompt box in Flow before a
   re-run. A character's image id is not an ingredient: use `--character` instead.
+- Character voices: `--style` saves a new custom voice in the project each time it runs, so run
+  it once per user ask. After an error that mentions a saved voice, never re-run with `--style`:
+  give the character that voice by its media id (the hint names it). Custom voice names are
+  unique per project; a clash is refused before anything is saved.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   `scene_id` can be null when Flow had not listed the scene yet: find it with `flow scene list`.
   To make it longer, run `flow extend` again on the newest clip (the scene's last clip); each

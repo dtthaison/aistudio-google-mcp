@@ -28,7 +28,14 @@ from aistudio._flow.models import (
     model_by_label,
 )
 from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
-from aistudio._flow.rows import FlowCharacter, FlowScene, ProjectContents, parse_plan
+from aistudio._flow.rows import (
+    FlowCharacter,
+    FlowScene,
+    FlowVoice,
+    ProjectContents,
+    parse_plan,
+)
+from aistudio._flow.voices import PRESET_VOICES, PresetVoice, preset_voice
 from aistudio._fs import read_json, write_private_json
 from aistudio._media.save import check_folder, free_name, write_file
 from aistudio.exceptions import (
@@ -1001,7 +1008,8 @@ async def flow_characters(profile: Profile, *, project: str | None = None, visib
                           page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
     project_id, contents = await _project_contents(profile, project, visible, browser,
                                                    page_factory)
-    items = [{"id": c.id, "name": c.name, "media_id": c.media_id, "created": _iso(c.created)}
+    items = [{"id": c.id, "name": c.name, "media_id": c.media_id, "created": _iso(c.created),
+              "voice": _voice_item(contents, c.voice)}
              for c in contents.characters]
     return {"characters": items, "count": len(items), "project": project_id}
 
@@ -1083,6 +1091,156 @@ async def flow_set_personality(profile: Profile, character_id: str, text: str, *
                                 hint='see "aistudio flow character list"')
         await page.set_personality(project_id, character_id, text)
     return {"character_id": character_id, "personality": text, "project": project_id}
+
+
+def _preset_item(voice: PresetVoice) -> dict[str, Any]:
+    return {"name": voice.name, "kind": "preset", "gender": voice.gender, "style": voice.style,
+            "pitch": voice.pitch}
+
+
+def _custom_item(voice: FlowVoice) -> dict[str, Any]:
+    return {"name": voice.name, "kind": "custom", "media_id": voice.media_id,
+            "base": voice.base, "style": voice.style, "created": _iso(voice.created)}
+
+
+def _voice_item(contents: ProjectContents, ref: str | None) -> dict[str, Any] | None:
+    """A character's voice for output: a preset, a custom voice of the project, or unknown."""
+    if ref is None:
+        return None
+    preset = preset_voice(ref)
+    if preset is not None:
+        return _preset_item(preset)
+    custom = next((v for v in contents.voices if v.media_id == ref), None)
+    return _custom_item(custom) if custom else {"name": None, "kind": "unknown", "ref": ref}
+
+
+def _custom_voice(contents: ProjectContents, value: str) -> FlowVoice | None:
+    """A custom voice of the project by media id, or by a name no other custom voice has."""
+    by_id = [v for v in contents.voices if v.media_id == value]
+    found = by_id or [v for v in contents.voices if _key(v.name) == _key(value)]
+    if len(found) > 1:
+        raise ValidationError(f"{len(found)} custom voices are named {found[0].name!r}",
+                              hint="pass the media id of one instead (see "
+                                   '"aistudio flow character voices"); nothing was changed')
+    return found[0] if found else None
+
+
+def _character_of(contents: ProjectContents, character_id: str) -> FlowCharacter:
+    found = next((c for c in contents.characters if c.id == character_id), None)
+    if found is None:
+        raise NotFoundError(f"no character {character_id} in this Flow project",
+                            hint='see "aistudio flow character list"')
+    return found
+
+
+async def flow_voices(profile: Profile, *, search: str | None = None,
+                      project: str | None = None, visible: bool = False,
+                      browser: Callable[..., Any] = open_browser,
+                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Voices a character can have: Flow's presets and the project's custom voices (free)."""
+    project_id, contents = await _project_contents(profile, project, visible, browser,
+                                                   page_factory)
+    needle = _key(search) if search else ""
+    items = ([_custom_item(v) for v in contents.voices]
+             + [_preset_item(v) for v in PRESET_VOICES])
+    if needle:
+        items = [i for i in items if needle in _key(" ".join(
+            str(i.get(k) or "") for k in ("name", "gender", "style", "pitch", "base")))]
+    return {"voices": items, "count": len(items), "project": project_id}
+
+
+async def flow_character_voice(profile: Profile, character_id: str, voice: str | None, *,
+                               style: str | None = None, voice_name: str | None = None,
+                               clear: bool = False, project: str | None = None,
+                               visible: bool = False,
+                               browser: Callable[..., Any] = open_browser,
+                               page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Give a character a voice (free): a preset, a custom voice of the project, or, with
+    ``style``, a new custom voice made from a preset ("Save new voice"). ``clear`` removes it."""
+    if clear == bool(voice):
+        raise ValidationError("give a VOICE or --clear (exactly one)")
+    style = " ".join(style.split()) if style is not None else None
+    if style == "":
+        raise ValidationError("--style is empty")
+    if voice_name is not None and style is None:
+        raise ValidationError("--voice-name names a new custom voice: it needs --style")
+    preset = preset_voice(voice) if voice else None
+    if style is not None and preset is None:
+        raise ValidationError(f"{voice!r} is not one of Flow's preset voices; --style makes a "
+                              "new voice from a preset",
+                              hint='see "aistudio flow character voices"; nothing was changed')
+    project_id = _project_id(project) if project else None
+    created: dict[str, Any] | None = None
+    warnings: list[str] = []
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        character = _character_of(contents, character_id)
+        if clear:
+            ref, item = None, None
+        elif style is not None:
+            assert preset is not None
+            name = _name(voice_name or f"{character.name or 'Character'} voice")
+            taken = [v for v in contents.voices if _key(v.name) == _key(name)]
+            if taken:
+                raise ValidationError(f"custom voice {taken[0].media_id} is already named "
+                                      f"{name!r}",
+                                      hint="pass another --voice-name, or use that voice: "
+                                           f"aistudio flow character voice {character_id} "
+                                           f"{taken[0].media_id}")
+            before = await _credits_before(page)
+            try:
+                ref, _ = await page.save_voice(
+                    project_id, character_id, preset.name, style, name,
+                    description=f"{preset.gender}, {preset.style}, {preset.pitch}")
+            except Exception as exc:
+                if not page.started:
+                    raise
+                raise _voice_made(exc, page.paid_media, name) from exc
+            after, warnings = await _credits_after(page, None)
+            spent = before - after if before is not None and after is not None else None
+            if spent:  # measured free (2026-11-02); say so if Flow ever charges for it
+                warnings.append(f"credits fell by {spent} while the voice was saved")
+            created = {"media_id": ref, "name": name, "credits_spent": spent}
+            item = {"name": name, "kind": "custom", "media_id": ref, "base": preset.name,
+                    "style": style}
+        elif preset is not None:
+            ref, item = preset.ref, _preset_item(preset)
+        else:
+            assert voice is not None
+            custom = _custom_voice(contents, voice)
+            if custom is None:
+                raise NotFoundError(f"no voice {voice!r}: not a Flow preset or a custom voice "
+                                    "of this project",
+                                    hint='see "aistudio flow character voices"; nothing was '
+                                         "changed")
+            ref, item = custom.media_id, _custom_item(custom)
+        try:
+            await page.set_voice(project_id, character_id, ref)
+        except Exception as exc:
+            if created is None:
+                raise
+            raise _voice_made(exc, [ref] if ref else [], created["name"],
+                              set_on=character_id) from exc
+    return {"character_id": character_id, "voice": item, "project": project_id,
+            **({"created_voice": created} if created else {}),
+            **({"warnings": warnings} if warnings else {})}
+
+
+def _voice_made(exc: Exception, media: list[str], name: str, *,
+                set_on: str | None = None) -> AIStudioError:
+    """An error once Flow may hold the new custom voice: never invite a re-run with --style,
+    which would save a second one."""
+    where = f"saved as media {media[0]}" if media else "may have been saved"
+    note = (f"the custom voice {name!r} {where}; do not re-run with --style: see "
+            f'"aistudio flow character voices"')
+    if set_on and media:
+        note += f", then: aistudio flow character voice {set_on} {media[0]}"
+    if not isinstance(exc, AIStudioError):
+        return BrowserError(f"{type(exc).__name__}: {exc}", hint=note)
+    exc.hint = f"{note} ({exc.hint})" if exc.hint else note
+    return exc
 
 
 async def flow_scenes(profile: Profile, *, project: str | None = None, visible: bool = False,

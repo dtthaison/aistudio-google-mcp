@@ -280,6 +280,47 @@ def test_character_body_command(logged_in_profile, monkeypatch):
     assert res.exit_code == 0 and calls[-1][0] == ("c1", "full body")
 
 
+def test_character_voice_command(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    made = {"character_id": "c1", "project": "p",
+            "voice": {"name": "Coach", "kind": "custom", "media_id": "v9"},
+            "created_voice": {"media_id": "v9", "name": "Coach", "credits_spent": 0}}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character_voice", fake(made, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "voice", "c1", "Puck", "--style",
+                                   "calm", "--voice-name", "Coach", "--project", "p1"])
+    assert res.exit_code == 0, res.output
+    assert calls[-1] == (("c1", "Puck"), {"style": "calm", "voice_name": "Coach", "clear": False,
+                                          "project": "p1", "visible": False})
+    assert "Saved custom voice Coach (v9)" in res.stdout and "Voice of c1: Coach" in res.stdout
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_character_voice",
+                        fake({"character_id": "c1", "voice": None, "project": "p"}, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "voice", "c1", "--clear"])
+    assert res.exit_code == 0 and calls[-1][0] == ("c1", None) and calls[-1][1]["clear"]
+    assert "(none)" in res.stdout
+
+
+def test_character_voices_and_list_show_voices(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    voices = {"voices": [
+        {"name": "Coach", "kind": "custom", "media_id": "v9", "base": "Puck", "style": "calm"},
+        {"name": "Kore", "kind": "preset", "gender": "Female", "style": "firm",
+         "pitch": "mid pitch"}], "count": 2, "project": "p"}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_voices", fake(voices, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "voices", "--search", "o"])
+    assert res.exit_code == 0 and calls[-1][1]["search"] == "o"
+    assert "Coach  (custom, v9; Puck: calm)" in res.stdout
+    assert "Kore  Female, firm, mid pitch" in res.stdout
+    chars = {"characters": [{"id": "c1", "name": "Mila", "media_id": "i1", "created": None,
+                             "voice": {"name": "Coach", "kind": "custom"}},
+                            {"id": "c2", "name": "Boat", "media_id": "i2", "created": None,
+                             "voice": None}], "count": 2, "project": "p"}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_characters", fake(chars, calls))
+    res = CliRunner().invoke(cli, ["flow", "character", "list"])
+    assert "c1  Mila  voice: Coach" in res.stdout and "c2  Boat\n" in res.stdout
+
+
 
 def test_edit_command(logged_in_profile, monkeypatch):
     logged_in_profile()

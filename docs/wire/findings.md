@@ -996,3 +996,38 @@ or a drop (`dataTransfer.files`). A synthetic dragenter/dragover/drop with a `Da
 the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8 s sample came back
 1280×2274 (9:16), 8 s, H.264 with audio, in 48 s total in headless Chrome.
 
+
+### Flow character voices and body mode (2026-11-02, free, live)
+
+- **Body mode timing.** A character page shows its prompt editor before the character has loaded,
+  and Flow ignores a "Create body" click made then: three runs of the old `open_body` failed at
+  once, while a click 3 s or 6 s later switched to body mode within 250 ms. The click sends
+  nothing, so `open_body` now clicks again (up to 8 times, 1.5 s apart) until the "Ingredient"
+  button shows. A body made this way on Nano Banana 2.1 cost 0 credits (1,050 → 1,050).
+- **The voice control.** The character page has `.voice-selector-empty-btn` ("Select a voice")
+  without a voice and `.voice-card-start-btn` (the voice's name and style) with one, plus "Play
+  preview" and "Remove". Either button opens the "Select a voice" dialog: a project picker, a
+  "Search assets" box, a listbox "Asset list" (the project's custom voices first, then 30 presets,
+  each "Name Gender, style, pitch"), a "Sample dialogue" box, a "Customize performance" box and
+  "Add to character". The earlier note that choosing a voice sent nothing no longer holds.
+- **Picking a voice** (clicking an option) closes the dialog and sends `rzMKMb`
+  `[[project_id, character_id, None, [1, None, [None, [[None, ref]]]]],
+  [["entity_info.character_info.audio_references"]]]`. `ref` is the preset's lower-case name
+  (`"laomedeia"`) or a custom voice's audio media id. The reply is the character record, with the
+  voice at `[0][3][2][1][0][1]`. "Remove" sends the same mask with `[1, None, []]`. The call works
+  from `batch_rpc` without the dialog, and the project list (`Zzl0ze[5]`) holds the same field.
+- **Custom voices.** Typing in "Customize performance" adds a "Voice name" box (default
+  "<Preset> custom"), "Reset" and "Save new voice". Save sends `no0P6`
+  `[[[sample text, [[preset, name]], "gemini_v4s_tts_flow", style, 2]], [None, 22, …, project_id,
+  …, [<reCAPTCHA token>]]]`; about 30 s later the reply is the new audio media
+  `[[[media_id, project_id, workflow_id, …, [[…, sample, style, director's notes,
+  "models/gemini-v4s-tts-flow", [[preset, name]]]]]], …]`. The page then sends `lt8g5`
+  (`media.media_metadata.visibility` = 1) and `mYWVGd` (the workflow's `metadata.display_name`).
+  The voice does not attach itself: picking it in the list does. Credits stayed at 1,050.
+  In `Zzl0ze[2]` the audio record keeps its details at `[10][0]`: `[None x6, sample, style,
+  notes, model, "audio/wav", [[preset, name]]]`; its workflow (`Zzl0ze[1]`) carries the name.
+- **The sample needs the page.** `no0P6` carries a reCAPTCHA token, so aistudio drives the dialog
+  for a new voice and sends only the attach (`rzMKMb`) itself.
+- **Test leftovers in the "aistudio" project:** custom voices "Mila voice" (`d14e0551`, given to
+  Mila Vance) and "Paper boat voice" (`c876bc12`, made by the CLI's first `--style` run; Paper
+  boat's voice was then removed again).
