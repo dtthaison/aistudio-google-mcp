@@ -1091,3 +1091,12 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
 - **A reply to the last Reject.** One paid run read "I've cancelled that video generation. Are
   there any changes…", the agent's answer to the previous run's Reject, instead of a quote.
   Nothing was spent; the next run was quoted normally.
+- **Root cause of the lost and wrong replies.** Two things, seen with a traced quote-only run:
+  (1) the StreamChat reply body reached aistudio empty (`bytes=0`) on 3 of 4 runs while the page
+  showed the full quote; aistudio now fetches chat replies itself (`route.fetch`, no timeout) and
+  fulfils the page with the same response, so the body cannot be lost (real-Chrome test). (2)
+  Flow's agent remembers rejected requests across sessions: after several quote-only runs (each
+  ends in Reject) it answered "I notice you've cancelled the permission request for generating
+  this video multiple times… I'm holding off". Every instruction now says "This is a new
+  request: earlier cancelled requests do not apply, so ask for permission as usual."; the next
+  run was quoted normally.

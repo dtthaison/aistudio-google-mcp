@@ -94,7 +94,8 @@ class Ui(Protocol):
 
     async def pause(self, ms: int) -> None: ...
 
-    def responses(self, marker: str = ...) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
+    def responses(self, marker: str = ..., *, fetch_bodies: bool = False
+                  ) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
         ...
 
     async def type_text(self, selector: str, text: str) -> None: ...
@@ -524,9 +525,32 @@ class PlaywrightUi:
         await self._act(role, name, run)
 
     @contextlib.asynccontextmanager
-    async def responses(self, marker: str = RPC_MARKER) -> AsyncIterator[ResponseLog]:
+    async def responses(self, marker: str = RPC_MARKER, *,
+                        fetch_bodies: bool = False) -> AsyncIterator[ResponseLog]:
+        """Log replies whose URL holds ``marker``. With ``fetch_bodies`` aistudio fetches them
+        itself and fulfils the page with the same response: Chrome can hand a streamed reply's
+        body over empty (live, 2026-11-02: 3 of 4 StreamChat replies), which loses a quote."""
         log = _QueueLog()
         pending: set[asyncio.Task[None]] = set()
+        fetched: set[Any] = set()  # requests already logged from their own fetch
+
+        def matches(url: str) -> bool:
+            return marker in url
+
+        async def fetch(route: Any) -> None:
+            request = route.request
+            try:
+                response = await route.fetch(timeout=0)  # a free image's reply can take minutes
+                text = await response.text()
+            except Exception:  # noqa: BLE001 - let the page send it; on_response logs it
+                with contextlib.suppress(Exception):
+                    await route.continue_()
+                return
+            fetched.add(request)
+            for method in _methods(request.url):
+                log.put(CapturedResponse(method, response.status, text, request.post_data or ""))
+            with contextlib.suppress(Exception):  # the page may have gone; the log has it
+                await route.fulfill(response=response)
 
         async def store(response: Any) -> None:
             try:
@@ -538,7 +562,7 @@ class PlaywrightUi:
                                          response.request.post_data or ""))
 
         def on_response(response: Any) -> None:
-            if marker in response.url:
+            if marker in response.url and response.request not in fetched:
                 task = asyncio.ensure_future(store(response))
                 pending.add(task)
                 task.add_done_callback(pending.discard)
@@ -546,6 +570,8 @@ class PlaywrightUi:
         def on_close(_page: Any) -> None:
             log.close()
 
+        if fetch_bodies:
+            await self._page.route(matches, fetch)
         self._page.on("response", on_response)
         self._page.on("close", on_close)
         try:
@@ -553,6 +579,9 @@ class PlaywrightUi:
         finally:
             self._page.remove_listener("response", on_response)
             self._page.remove_listener("close", on_close)
+            if fetch_bodies:
+                with contextlib.suppress(Exception):  # the page may be closed
+                    await self._page.unroute(matches, fetch)
             for task in pending:
                 task.cancel()
 

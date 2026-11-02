@@ -460,3 +460,4 @@ async def test_a_read_reply_is_not_lost(fake_ui):
                  texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["?"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
     assert turn.quote is not None and not turn.lost
+    assert ui.fetch_bodies  # Chrome can hand a StreamChat body over empty: fetch it ourselves

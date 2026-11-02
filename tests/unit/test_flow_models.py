@@ -45,7 +45,11 @@ def test_instruction_is_explicit():
     text = instruction("video", "a red apple", count=2, model_label="Veo 3.1 - Lite", seconds=8,
                        aspect="9:16")
     assert text == ("Generate exactly 2 8-second videos with Veo 3.1 - Lite in 9:16. Do not make "
-                    "a storyboard or any other videos. Prompt: a red apple")
+                    "a storyboard or any other videos. " + FRESH + " Prompt: a red apple")
+
+
+FRESH = ("This is a new request: earlier cancelled requests do not apply, so ask for permission "
+         "as usual.")
 
 
 @pytest.mark.parametrize("quote,plan,budget,decision", [

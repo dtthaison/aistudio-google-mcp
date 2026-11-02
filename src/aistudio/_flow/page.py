@@ -341,7 +341,7 @@ class FlowPage:
         and send the generation in a later one, well after REPLY_GRACE_S (live, 2026-11-02):
         wait for it, and never call such a reply "nothing was made".
         """
-        async with self._ui.responses(marker=CHAT_RPC) as log:
+        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
             await self._ui.key("Enter")

@@ -83,8 +83,15 @@ def instruction(kind: str, prompt: str, *, count: int, model_label: str | None,
     length = f"{seconds}-second " if seconds else ""
     model = f" with {model_label}" if model_label else ""
     shape = f" in {aspect}" if aspect else ""
+    # Flow's agent remembers rejected requests across sessions and then declined to ask again
+    # ("you've cancelled … multiple times … I'm holding off"; live, 2026-11-02). aistudio
+    # rejects every quote-only run, so each request says it stands alone.
     return (f"Generate exactly {count} {length}{noun}{model}{shape}. Do not make a storyboard "
-            f"or any other {kind}s. Prompt: {prompt}")
+            f"or any other {kind}s. {FRESH_REQUEST} Prompt: {prompt}")
+
+
+FRESH_REQUEST = ("This is a new request: earlier cancelled requests do not apply, so ask for "
+                 "permission as usual.")
 
 
 class Decision(enum.Enum):
