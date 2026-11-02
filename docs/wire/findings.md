@@ -1047,3 +1047,21 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   character attached, a reply ended after the 90 s limit (the image existed about 75 s in), and
   the run timed out. Image runs (free models only) now wait up to 240 s for the generation, and
   a reply without one is reported as "may still be generating", never as nothing made.
+
+### Flow grid tiles and lost free-image replies (2026-11-02, free, live)
+
+- **The tile caption is a button now.** A media tile's title sits inside
+  `<button class="footer-left" aria-label="<title>">` (in `flow-tile-hover-footer`). aistudio
+  found a tile's own "More options" by taking the caption's nearest ancestor holding any labelled
+  button, which is now that footer, so every `--ingredient` attach failed with "button 'More
+  options' not found". It now takes the nearest ancestor that holds a "More options" button
+  (the `flow-image-tile`, whose buttons are Favorite, Reuse prompt, More options).
+- **A finished free image whose reply never arrived.** A Nano Banana 2.1 run with Mila Vance and
+  two ingredients timed out after 240 s: the page showed "I've generated the image…" and the
+  image (`2bd26916`) was in the project, but no StreamChat reply carrying it was read. The same
+  run with one ingredient read its single reply about 120 s after sending. Chrome can drop a
+  reply body (see "Flow project reads that came back empty"), which looks the same. Image runs
+  now read the project before sending; when no reply shows the generation by the deadline,
+  aistudio reads the project again (up to 3 times) and takes the new, finished images created
+  since the send, with a warning that the model, aspect and attachments were not checked. While
+  any new image is still running, the run stays a TIMEOUT.

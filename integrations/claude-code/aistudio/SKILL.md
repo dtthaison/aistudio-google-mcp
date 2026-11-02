@@ -101,7 +101,10 @@ quotes and write each `'` as `'\''`.
   (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
   the user wants the images. A `TIMEOUT` error saying Flow "was still generating without asking"
   or "had not finished replying" means Flow may still finish the images: tell the user to check
-  the project in Flow, never re-run it blindly. Video models quote first (verified). Other image models are
+  the project in Flow, never re-run it blindly: find the newest images with `flow media` and
+  `flow download` them. A warning that Flow's reply "never reached aistudio" means the image was
+  found in the project instead (its model and attachments were not checked: look at it). Video
+  models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's

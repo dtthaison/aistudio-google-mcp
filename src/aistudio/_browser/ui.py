@@ -512,7 +512,10 @@ class PlaywrightUi:
     async def dispatch_click_near(self, role: str, name: Name, text: str) -> None:
         """Click the control inside the tile captioned exactly ``text`` (the tile's own ⋮)."""
         caption = self._page.get_by_text(text, exact=True).first
-        tile = caption.locator("xpath=ancestor::*[.//button[@aria-label]][1]")
+        control = self._page.get_by_role(role, name=name, exact=True)
+        # The nearest box holding that control (ancestors come in document order, so the last).
+        # Not the nearest box with any labelled button: Flow's caption is one now (2026-11, live).
+        tile = caption.locator("xpath=ancestor::*").filter(has=control).last
 
         async def run() -> None:
             await tile.get_by_role(role, name=name, exact=True).first.dispatch_event(

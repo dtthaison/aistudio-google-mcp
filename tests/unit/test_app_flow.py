@@ -38,8 +38,9 @@ class FakePage:
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
                  restore_error=None, follow_error=None, reject_error=None, approve_error=None,
-                 credit_values=(1050, 1040), rejected=1, restore_fails=None):
+                 credit_values=(1050, 1040), rejected=1, restore_fails=None, project=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
+        self.project = list(project or [])  # contents() in order; the last one repeats
         self.credit_values, self.rejected = list(credit_values), rejected
         self.restore_fails = restore_fails  # None: always fail when restore_error is set
         self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
@@ -85,6 +86,8 @@ class FakePage:
 
     async def contents(self, pid):
         self.calls.append(("contents", pid))
+        if self.project:
+            return self.project.pop(0) if len(self.project) > 1 else self.project[0]
         return ProjectContents({"old1": "an older clip"}, [], {})
 
     async def approve_and_follow(self, *, count, credits, timeout_s, kind, known=frozenset()):
@@ -588,6 +591,45 @@ async def test_a_free_stream_still_running_is_a_timeout(logged_in_profile, tmp_p
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "still generating" in info.value.message and "re-running" in info.value.hint
     assert "charged" not in info.value.hint  # credits were not read (plan H review M3)
+
+
+def image(media_id, *, created, status=3):
+    return dataclasses.replace(DONE, media_id=media_id, model_key=None, seconds=None,
+                               video_url=None, status=status, created=created)
+
+
+SENT = int(NOW.timestamp())
+OLD = image("old1", created=SENT - 3600)
+
+
+async def test_a_lost_free_reply_finds_the_new_image_in_the_project(logged_in_profile, tmp_path):
+    # Live (2026-11-02): Flow said "I've generated the image" and the image was in the project,
+    # but the reply never reached aistudio (Chrome can drop a reply body): it was a TIMEOUT
+    after = ProjectContents({"old1": "x", "n1": "Mila on the bench"},
+                            [OLD, image("n1", created=SENT + 90)])
+    kw, pages, _ = harness(turn=AgentTurn("I've generated the image", None, generating=True),
+                           credit_values=(5, 5),
+                           project=[ProjectContents({"old1": "x"}, [OLD]), after])
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert result["status"] == "done"
+    assert [f["media_id"] for f in result["files"]] == ["n1"]
+    assert any("found it in the project" in w for w in result["warnings"])
+    assert ("details", "n1") in pages[0].calls
+
+
+async def test_a_lost_free_reply_with_the_image_still_running_is_a_timeout(logged_in_profile,
+                                                                         tmp_path):
+    from aistudio.exceptions import WaitTimeoutError
+
+    running = ProjectContents({"old1": "x", "n1": "y"},
+                              [OLD, image("n1", created=SENT + 90, status=2)])
+    kw, pages, _ = harness(turn=AgentTurn("Generating", None, generating=True),
+                           project=[ProjectContents({"old1": "x"}, [OLD]), running])
+    with pytest.raises(WaitTimeoutError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+    assert "still generating" in info.value.message
+    assert not any(call[0] == "details" for call in pages[0].calls)
 
 
 async def test_charge_wording_is_neutral(logged_in_profile, tmp_path):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import shlex
 from collections.abc import Callable
@@ -32,6 +33,7 @@ from aistudio._flow.rows import (
     FlowCharacter,
     FlowScene,
     FlowVoice,
+    Generated,
     ProjectContents,
     parse_plan,
 )
@@ -60,6 +62,10 @@ QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
 # A free image run: the reply carrying the generation ends only once the image is made; with a
 # character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
 FREE_REPLY_TIMEOUT_S = 240.0
+# A free image run whose reply never arrived: reads of the project that look for the image
+# (each reload takes seconds), and the clock skew allowed against Flow's creation times
+FOUND_READS = 3
+FOUND_SLACK_S = 120
 
 
 async def flow_credits(profile: Profile, *, visible: bool = False,
@@ -121,8 +127,8 @@ async def flow_generate(
             warnings.append("could not read Flow credits before the run")
         project_id = await _open(page, profile, project_id)
         paid_possible = max_credits is not None
-        contents = (await page.contents(project_id)
-                    if attachments or characters or paid_possible else None)
+        contents = (await page.contents(project_id)  # images: what existed before the run
+                    if attachments or characters or paid_possible or kind == "image" else None)
         existing = (set(contents.titles) | {m.media_id for m in contents.media}
                     if contents is not None else set())
         titles, known_ids = _attachment_titles(contents, attachments)
@@ -181,11 +187,23 @@ async def flow_generate(
             if chosen:
                 names = ", ".join(c.name for c in chosen)
                 prompt = f"Feature the attached characters: {names}. {prompt}"
+            sent_at = now().timestamp()
             turn = await page.submit_for_quote(instruction(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect), expect_generation=kind == "image",  # images: free models only
                 timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S)
+            if (turn.quote is None and not turn.generated and turn.generating
+                    and kind == "image"):
+                found = await _made_in_project(page, project_id, existing | set(attached_ids),
+                                               sent_at)
+                if found:  # sent with what was attached; the reply could not show it
+                    turn = dataclasses.replace(turn, generated=tuple(found), generating=False,
+                                               media=tuple(attached_ids),
+                                               characters=tuple(c.id for c in chosen))
+                    warnings.append("Flow's reply never reached aistudio, so its model, aspect "
+                                    "and attachments were not checked; aistudio found it in the "
+                                    "project: " + ", ".join(g.media_id for g in found))
             if turn.quote is None and not turn.generated and turn.generating:
                 waiting = await _reject_noting(page, expect=False)
                 still = ("Flow's agent had not finished replying" if not turn.answered
@@ -323,6 +341,21 @@ async def flow_generate(
             "credits_left": outcome.credits_left,
             "model": expected_id, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
+
+
+async def _made_in_project(page: Any, project_id: str, known: set[str],
+                           since: float) -> list[Generated]:
+    """Images that appeared in the project during a free run, all finished: what it made when
+    its reply never reached aistudio (live, 2026-11-02: Flow said "I've generated the image" and
+    the image was there; Chrome can drop a reply's body). Empty while any is still running."""
+    for _ in range(FOUND_READS):
+        contents = await page.contents(project_id)
+        new = [m for m in contents.media
+               if m.media_id not in known and _media_kind(m) == "image"
+               and m.created is not None and m.created >= since - FOUND_SLACK_S]
+        if new and all(m.status == 3 for m in new):
+            return [Generated(m.media_id, "success", "image", None, None) for m in new]
+    return []
 
 
 async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any,
