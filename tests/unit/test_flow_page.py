@@ -487,3 +487,17 @@ async def test_a_job_flow_failed_ends_the_follow_with_its_reason(fake_ui):
     assert not outcome.timed_out and outcome.media == []
     assert [(m.media_id, m.error) for m in outcome.failed] == [(MEDIA, FILTERED)]
     assert outcome.credits_left == 1040
+
+
+async def test_a_new_failed_card_in_the_chat_ends_the_follow(fake_ui):
+    # Live (2026-11-02): a job failed with no status-4 poll aistudio could tie to it; the chat
+    # showed a new "Failed – Something went wrong" card (flow-error-tile) and aistudio waited
+    from aistudio._flow.page import ERROR_TILE
+
+    ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1030, [record(status=2, with_links=False)]])]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    ui.counts = {ERROR_TILE: [2, 2, 3]}  # two old cards before Approve, then a new one
+    outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
+        count=1, credits=10, timeout_s=600, kind="video")
+    assert not outcome.timed_out and outcome.media == []
+    assert [(m.media_id, m.error) for m in outcome.failed] == [(MEDIA, "FLOW_SHOWED_FAILED")]

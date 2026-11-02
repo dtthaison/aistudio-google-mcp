@@ -9,6 +9,7 @@ out in a minimized window.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import re
 import time
@@ -173,6 +174,8 @@ TOOL_LIST_POLLS = 10  # x TOOL_POLL_MS for the list to show a finished build
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
 _FAILED = 4  # live (2026-11-02): with Flow's reason, e.g. a filter; the credits came back
+ERROR_TILE = "flow-error-tile"  # the chat's "Failed – Something went wrong" card (live)
+SHOWED_FAILED = "FLOW_SHOWED_FAILED"  # a new card, with no reason aistudio could read
 
 
 @dataclass(frozen=True)
@@ -441,13 +444,15 @@ class FlowPage:
             raise PlanMismatchError(f"Flow's waiting request shows {shown_credits} credits, not "
                                     f"the {credits} that were checked; nothing was spent",
                                     hint="re-run to get a fresh quote")
+        error_tiles = await self._ui.count(ERROR_TILE)  # "Failed" cards already in the chat
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True
             await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
             # ``known``: media that existed before the run, which a back-to-back run's clip
             # (inside the creation-time slack) would otherwise be taken for.
-            return await self._follow(log, count, timeout_s, kind, since, exclude=known)
+            return await self._follow(log, count, timeout_s, kind, since, exclude=known,
+                                      error_tiles=error_tiles)
 
     async def projects(self) -> list[FlowProject]:
         async with self._ui.responses(marker=FLOW_RPC) as log:
@@ -1050,8 +1055,12 @@ class FlowPage:
     async def _follow(self, log: ResponseLog, count: int, timeout_s: float, kind: str,
                       since: float, only: set[str] | None = None,
                       exclude: set[str] | frozenset[str] = frozenset(),
-                      model_key: str | None = None) -> FlowOutcome:
-        """Follow only media created by this job: the reused project lists older media too."""
+                      model_key: str | None = None,
+                      error_tiles: int | None = None) -> FlowOutcome:
+        """Follow only media created by this job: the reused project lists older media too.
+
+        ``error_tiles``: the chat's "Failed" cards before Approve; a new one ends the follow
+        (live: a job failed with no status-4 poll aistudio could tie to it)."""
         seen: dict[str, FlowMedia] = {}
         credits = None
         deadline = self._now() + timeout_s
@@ -1086,6 +1095,12 @@ class FlowPage:
             if len(ready) >= count or (failed and len(ready) + len(failed) >= len(seen)
                                        and len(ready) + len(failed) >= count):
                 return FlowOutcome(ready, credits, False, failed)
+            if (error_tiles is not None and len(ready) < count
+                    and await self._ui.count(ERROR_TILE) > error_tiles):
+                shown = [dataclasses.replace(m, status=_FAILED, error=m.error or SHOWED_FAILED)
+                         for m in seen.values() if m.status != _DONE]
+                return FlowOutcome(ready, credits, False, shown or [_unnamed_failure(
+                    self.paid_media[0] if self.paid_media else "this run's job")])
         return FlowOutcome(list(seen.values()), credits, True)
 
     async def _checked_one(self, kind, values, name, *, aspect: bool):
@@ -1098,6 +1113,12 @@ class FlowPage:
     async def _close_tune(self) -> None:
         await self._ui.goto(self._ui.current_url())  # Escape does not close it; a reload does
         await self._ui.wait_for(PROMPT_EDITOR, timeout_s=30.0)
+
+
+def _unnamed_failure(media_id: str) -> FlowMedia:
+    return FlowMedia(media_id=media_id, project_id=None, prompt=None, model_key=None,
+                     status=_FAILED, created=None, seconds=None, size=None, video_url=None,
+                     image_url=None, error=SHOWED_FAILED)
 
 
 def _merge(old: FlowMedia, new: FlowMedia) -> FlowMedia:

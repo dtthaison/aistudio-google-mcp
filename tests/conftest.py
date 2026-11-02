@@ -162,7 +162,11 @@ class FakeUi:
         self.ops.append(("click_selector", selector))
 
     async def count(self, selector):
-        return getattr(self, "counts", {}).get(selector, 0)
+        """A number per selector, or a list of answers in order (the last one repeats)."""
+        answer = getattr(self, "counts", {}).get(selector, 0)
+        if isinstance(answer, list):
+            return answer.pop(0) if len(answer) > 1 else answer[0]
+        return answer
 
     async def boxes(self, selector):
         """Scripted per selector in ``box_table`` (a list of answers, like the other tables)."""

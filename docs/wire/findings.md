@@ -1113,3 +1113,9 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   follow at once: `flow video|extend|edit` fail with `GENERATION_FAILED`, Flow's reason in words,
   and the measured charge. The same character's squat clip passed the filter; the face in a close,
   front-facing keyframe seems to be what trips it.
+- **A failure aistudio could not tie to a poll.** A third phone-clip run (character plus the gym
+  plate and the phone image, medium-wide) failed the same way and was refunded, but aistudio kept
+  waiting: no status-4 record it could link to the job arrived (after a reload the page polls no
+  failed jobs at all). The chat's "Failed – Something went wrong" card is a `flow-error-tile`;
+  `approve_and_follow` now counts those before Approve and ends the follow when a new one shows
+  (`GENERATION_FAILED`, reason `FLOW_SHOWED_FAILED`). This only ends a wait; it never approves.

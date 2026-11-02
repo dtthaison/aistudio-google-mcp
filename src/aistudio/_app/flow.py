@@ -710,6 +710,10 @@ async def _credits_before(page: Any) -> int | None:
 _FLOW_REASONS = {  # Flow's failure codes, in words (live)
     "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED":
         "Flow's filter for real or famous people blocked it: a face looked like a real person's",
+    "FLOW_SHOWED_FAILED":
+        "Flow showed \"Failed – Something went wrong\" with no reason aistudio could read (its "
+        "chat may blame high demand; on 2026-11-02 the same clip's earlier failures were the "
+        "filter for real or famous people)",
 }
 
 
