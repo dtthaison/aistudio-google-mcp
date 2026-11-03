@@ -1119,3 +1119,9 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   failed jobs at all). The chat's "Failed – Something went wrong" card is a `flow-error-tile`;
   `approve_and_follow` now counts those before Approve and ends the follow when a new one shows
   (`GENERATION_FAILED`, reason `FLOW_SHOWED_FAILED`). This only ends a wait; it never approves.
+- **Too many references.** Veo 3.1 Lite with a character plus two ingredients (the gym plate and
+  the phone image) failed at once with status 4, `INVALID_ARGUMENT`, refunded; the earlier
+  unexplained phone-clip failure had the same inputs. One ingredient plus the character was made
+  (10 credits). A shot with the face out of frame (hands holding the phone, the line spoken
+  off-screen) passed the filter for real or famous people that blocked the face-to-camera
+  versions.

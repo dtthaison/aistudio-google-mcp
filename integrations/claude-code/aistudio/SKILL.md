@@ -237,6 +237,11 @@ fixed inputs, not from Flow remembering.
    - `flow video --ingredient <keyframe id> --character '<Name>'`: the character's look and
      voice, with the keyframe only as a guide.
 
+   With a character, pass at most one `--ingredient`: a character plus two failed with
+   `INVALID_ARGUMENT` (refunded). Flow's filter for real or famous people can block realistic
+   face-to-camera shots of a made-up character (`GENERATION_FAILED`, refunded); a wider shot,
+   or the face out of frame with the line spoken off-screen, got through.
+
    Quote first and ask (the rules above). Draft on Veo 3.1 Lite (10 credits a clip, measured for
    both); Fast is about 20 and Quality about 100, so upgrade only approved shots.
    - Same shot continuing: `flow extend <last clip>` (10 credits, no quote: ask first).
