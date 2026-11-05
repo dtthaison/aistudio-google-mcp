@@ -128,8 +128,9 @@ quotes and write each `'` as `'\''`.
   the same prompt and images usually fails again: change the shot (wider, another keyframe)
   and ask the user before spending again. In a character run, dropping `--character` and keeping
   a keyframe that shows the character as `--ingredient` got past this filter once.
-  `RATE_LIMITED` ("unusual activity") is Flow's limit on many requests in a row, not the prompt:
-  nothing was spent; wait several minutes, then try once more. Never retry in a loop.
+  `RATE_LIMITED` ("unusual activity", or "too many generations are running") is Flow being busy,
+  not the prompt: nothing was spent; wait a few minutes (other sessions may be generating too),
+  then try once more. Never retry in a loop.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
