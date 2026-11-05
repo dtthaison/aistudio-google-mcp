@@ -14,8 +14,9 @@ _VIDEO = "https://flow-content.google/video/"
 _IMAGE = "https://flow-content.google/image/"
 _AUDIO = "https://flow-content.google/audio/"
 _SECONDS = re.compile(r"(\d+)-second", re.I)
-_MODEL = re.compile(r"\busing ((?:Veo|Omni|Nano Banana)[\w .\-]*?)"
-                    r"(?=[.,;!?](?:\s|$)|\s+(?:with|in|at|and|from|for|to)\b|$)", re.I)
+# A model name is the family then version numbers, "-" and capitalised words ("Veo 3.1 - Lite",
+# "Omni 1.1 Flash", "Nano Banana Pro"); it ends at the first other word ("featuring", "from"...).
+_MODEL = re.compile(r"\b[Uu]sing ((?:Veo|Omni|Nano Banana)(?:\s+(?:-|\d+(?:\.\d+)*|[A-Z]\w*))*)")
 
 
 @dataclass(frozen=True)

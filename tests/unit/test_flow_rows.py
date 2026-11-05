@@ -74,6 +74,16 @@ def test_parse_plan_stops_the_model_at_from():
     assert parse_plan(text) == Plan(model="Veo 3.1 - Lite", seconds=8)
 
 
+def test_parse_plan_stops_the_model_at_any_lowercase_word():
+    # Live (2026-11-05), a character run: "featuring ..." followed the model name
+    text = ("I'll generate an 8-second 9:16 video using Veo 3.1 - Lite featuring Mila Vance doing "
+            "back squats, using your gym image and character entity as references.")
+    assert parse_plan(text) == Plan(model="Veo 3.1 - Lite", seconds=8)
+    assert parse_plan("An image using Nano Banana Pro showing a cat.").model == "Nano Banana Pro"
+    assert parse_plan("A clip using Omni 1.1 Flash, 8 seconds.").model == "Omni 1.1 Flash"
+    assert parse_plan("A clip using Veo 3.1 - Quality").model == "Veo 3.1 - Quality"
+
+
 def permission(videos=1, images=0, cost=10):
     return [[None, [["c", None, None, ["open_chat_panel", "open_chat_panel", [[["_synthetic",
              [None, None, None, True]]]]]], ["c", None, None, ["ask_for_permission",
