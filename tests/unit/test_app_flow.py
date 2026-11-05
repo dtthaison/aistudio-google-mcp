@@ -16,6 +16,7 @@ from aistudio.exceptions import (
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
+    RateLimitError,
     ValidationError,
 )
 
@@ -639,6 +640,20 @@ async def test_a_lost_reply_says_so(logged_in_profile, tmp_path):
                             duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert "never reached aistudio" in info.value.message
     assert ("reject",) in pages[0].calls and "re-run" in info.value.hint
+
+
+async def test_unusual_activity_is_a_rate_limit_not_a_prompt_problem(logged_in_profile, tmp_path):
+    # Live (2026-11-05), after several runs in a row: Flow's agent refused every request
+    text = ("error We noticed some unusual activity. Note that browser extensions that modify the "
+            "page may cause issues. Please visit the Help Center for more information. Try again")
+    kw, pages, _ = harness(turn=AgentTurn(text, None))
+    with pytest.raises(RateLimitError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "unusual activity" in info.value.message
+    assert "nothing was spent" in info.value.hint and "wait" in info.value.hint
+    assert "rephrase" not in info.value.hint
+    assert ("reject",) in pages[0].calls and not pages[0].started
 
 
 def image(media_id, *, created, status=3):

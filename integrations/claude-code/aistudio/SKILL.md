@@ -126,7 +126,10 @@ quotes and write each `'` as `'\''`.
   `GENERATION_FAILED` means Flow started the job and then failed it, for example its filter for
   real or famous people; the hint says what was charged (failed jobs were refunded). Re-running
   the same prompt and images usually fails again: change the shot (wider, another keyframe)
-  and ask the user before spending again.
+  and ask the user before spending again. In a character run, dropping `--character` and keeping
+  a keyframe that shows the character as `--ingredient` got past this filter once.
+  `RATE_LIMITED` ("unusual activity") is Flow's limit on many requests in a row, not the prompt:
+  nothing was spent; wait several minutes, then try once more. Never retry in a loop.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before

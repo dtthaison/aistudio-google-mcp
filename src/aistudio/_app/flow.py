@@ -48,6 +48,7 @@ from aistudio.exceptions import (
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
+    RateLimitError,
     SchemaDriftError,
     ServerError,
     ValidationError,
@@ -56,6 +57,8 @@ from aistudio.exceptions import (
 from aistudio.paths import Profile
 
 STATE_FILE = "flow.json"
+# Flow's agent answers this, in place of a plan, after many requests in a row (live 2026-11-05).
+UNUSUAL_ACTIVITY = "noticed some unusual activity"
 DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
@@ -227,6 +230,12 @@ async def flow_generate(
                         f"was no quote to check: {turn.text[-300:]}",
                         hint=_with_note("nothing was spent and any request it showed was "
                                         "rejected; re-run", waiting))
+                if UNUSUAL_ACTIVITY in turn.text.lower():
+                    raise RateLimitError(
+                        "Flow refused the request: it noticed unusual activity",
+                        hint=_with_note("nothing was spent; this is Flow's limit on many requests "
+                                        "in a row, not the prompt: wait several minutes before "
+                                        "one more try, and never retry in a loop", waiting))
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint=_with_note("rephrase the prompt or add options; "
                                                       "nothing was spent", waiting))
