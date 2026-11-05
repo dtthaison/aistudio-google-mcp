@@ -16,6 +16,7 @@ from aistudio.exceptions import (
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
+    RateLimitError,
     ValidationError,
 )
 
@@ -38,8 +39,9 @@ class FakePage:
 
     def __init__(self, ui, *, turn=TURN, defaults=OMNI, outcome=None, missing=(),
                  restore_error=None, follow_error=None, reject_error=None, approve_error=None,
-                 credit_values=(1050, 1040), rejected=1, restore_fails=None):
+                 credit_values=(1050, 1040), rejected=1, restore_fails=None, project=None):
         self.calls, self.turn, self.defaults = [], turn, defaults
+        self.project = list(project or [])  # contents() in order; the last one repeats
         self.credit_values, self.rejected = list(credit_values), rejected
         self.restore_fails = restore_fails  # None: always fail when restore_error is set
         self.reject_error, self.approve_error, self.started = reject_error, approve_error, False
@@ -72,7 +74,8 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
-    async def submit_for_quote(self, text, *, timeout_s=90.0):
+    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False):
+        self.expect_generation, self.reply_timeout_s = expect_generation, timeout_s
         self.calls.append(("submit", text))
         return self.turn
 
@@ -84,6 +87,8 @@ class FakePage:
 
     async def contents(self, pid):
         self.calls.append(("contents", pid))
+        if self.project:
+            return self.project.pop(0) if len(self.project) > 1 else self.project[0]
         return ProjectContents({"old1": "an older clip"}, [], {})
 
     async def approve_and_follow(self, *, count, credits, timeout_s, kind, known=frozenset()):
@@ -256,7 +261,36 @@ async def test_a_timeout_reports_the_media_and_spent_credits(logged_in_profile, 
     result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
                                  duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
     assert result == {"status": "timeout", "media_ids": ["m1"], "credits_spent": 10,
+                      "credits_left": 1040,
                       "project_url": f"https://flow.google.com/project/{PID}"}
+
+
+async def test_a_job_flow_failed_is_an_error_with_its_reason(logged_in_profile, tmp_path):
+    # Live (2026-11-02): status 4, PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED; refunded
+    from aistudio.exceptions import GenerationFailedError
+
+    failed = FlowMedia(media_id="m1", project_id=PID, prompt=None, model_key=None, status=4,
+                       created=None, seconds=None, size=None, video_url=None, image_url=None,
+                       error="PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED")
+    kw, _, _ = harness(outcome=FlowOutcome([], 1050, False, [failed]), credit_values=(1050, 1050))
+    with pytest.raises(GenerationFailedError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "real or famous people" in info.value.message and "m1" in info.value.message
+    assert info.value.hint.startswith("nothing was charged")
+
+
+async def test_a_timeout_with_no_charge_says_so(logged_in_profile, tmp_path):
+    # Live (2026-11-02): Flow marked the approved clip "Failed" (high demand) and charged
+    # nothing, but the timeout reported the quote as spent
+    late = FlowMedia(media_id="m1", project_id=PID, prompt=None, model_key=None, status=6,
+                     created=None, seconds=None, size=None, video_url=None, image_url=None)
+    kw, _, _ = harness(outcome=FlowOutcome([late], None, True), credit_values=(1050, 1050))
+    result = await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                                 duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert result["status"] == "timeout"
+    assert result["credits_spent"] == 0 and result["credits_left"] == 1050
+    assert any("not charged" in w for w in result["warnings"])
 
 
 async def test_image_defaults_name_files_by_their_bytes(logged_in_profile, tmp_path, monkeypatch):
@@ -437,6 +471,17 @@ async def test_a_free_image_is_downloaded_without_approval(logged_in_profile, tm
     assert any("without asking" in w for w in result["warnings"])
     assert any("g2" in w for w in result["warnings"])
     assert not any(c[0] == "approve" for c in pages[0].calls)  # reject only clears leftovers
+    # Live 2026-11-02: the generation can come in a later reply, and with a character attached
+    # the reply ended past 90 s; an image run waits longer for it.
+    assert pages[0].expect_generation is True and pages[0].reply_timeout_s == 240.0
+
+
+async def test_a_video_run_does_not_wait_for_a_free_generation(logged_in_profile, tmp_path):
+    kw, pages, _ = harness(turn=AgentTurn("Which apple?", None))
+    with pytest.raises(AgentReplyError):
+        await flow_generate(logged_in_profile(), "video", "an apple", out=tmp_path / "x.mp4",
+                            **kw)
+    assert pages[0].expect_generation is False and pages[0].reply_timeout_s == 90.0
 
 
 async def test_a_reply_with_nothing_made_is_still_an_agent_reply(logged_in_profile, tmp_path):
@@ -576,6 +621,90 @@ async def test_a_free_stream_still_running_is_a_timeout(logged_in_profile, tmp_p
         await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
     assert "still generating" in info.value.message and "re-running" in info.value.hint
     assert "charged" not in info.value.hint  # credits were not read (plan H review M3)
+
+
+async def test_a_reply_without_a_quote_rejects_what_waits(logged_in_profile, tmp_path):
+    # Live (2026-11-02): a request Flow showed but aistudio could not read stayed waiting
+    kw, pages, _ = harness(turn=AgentTurn("costing 10 credits?", None))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert ("reject",) in pages[0].calls and not pages[0].started
+    assert "nothing was spent" in info.value.hint
+
+
+async def test_a_lost_reply_says_so(logged_in_profile, tmp_path):
+    kw, pages, _ = harness(turn=AgentTurn("costing 10 credits?", None, lost=True))
+    with pytest.raises(AgentReplyError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "never reached aistudio" in info.value.message
+    assert ("reject",) in pages[0].calls and "re-run" in info.value.hint
+
+
+async def test_unusual_activity_is_a_rate_limit_not_a_prompt_problem(logged_in_profile, tmp_path):
+    # Live (2026-11-05), after several runs in a row: Flow's agent refused every request
+    text = ("error We noticed some unusual activity. Note that browser extensions that modify the "
+            "page may cause issues. Please visit the Help Center for more information. Try again")
+    kw, pages, _ = harness(turn=AgentTurn(text, None))
+    with pytest.raises(RateLimitError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "unusual activity" in info.value.message
+    assert "nothing was spent" in info.value.hint and "wait" in info.value.hint
+    assert "rephrase" not in info.value.hint
+    assert ("reject",) in pages[0].calls and not pages[0].started
+
+
+async def test_too_many_running_is_a_rate_limit(logged_in_profile, tmp_path):
+    # Live (2026-11-05), seconds after a video finished
+    text = "error Too many generations are running. Please wait and try again. Try again"
+    kw, pages, _ = harness(turn=AgentTurn(text, None))
+    with pytest.raises(RateLimitError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "too many generations" in info.value.message
+    assert "nothing was spent" in info.value.hint and "rephrase" not in info.value.hint
+    assert ("reject",) in pages[0].calls and not pages[0].started
+
+
+def image(media_id, *, created, status=3):
+    return dataclasses.replace(DONE, media_id=media_id, model_key=None, seconds=None,
+                               video_url=None, status=status, created=created)
+
+
+SENT = int(NOW.timestamp())
+OLD = image("old1", created=SENT - 3600)
+
+
+async def test_a_lost_free_reply_finds_the_new_image_in_the_project(logged_in_profile, tmp_path):
+    # Live (2026-11-02): Flow said "I've generated the image" and the image was in the project,
+    # but the reply never reached aistudio (Chrome can drop a reply body): it was a TIMEOUT
+    after = ProjectContents({"old1": "x", "n1": "Mila on the bench"},
+                            [OLD, image("n1", created=SENT + 90)])
+    kw, pages, _ = harness(turn=AgentTurn("I've generated the image", None, generating=True),
+                           credit_values=(5, 5),
+                           project=[ProjectContents({"old1": "x"}, [OLD]), after])
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert result["status"] == "done"
+    assert [f["media_id"] for f in result["files"]] == ["n1"]
+    assert any("found it in the project" in w for w in result["warnings"])
+    assert ("details", "n1") in pages[0].calls
+
+
+async def test_a_lost_free_reply_with_the_image_still_running_is_a_timeout(logged_in_profile,
+                                                                         tmp_path):
+    from aistudio.exceptions import WaitTimeoutError
+
+    running = ProjectContents({"old1": "x", "n1": "y"},
+                              [OLD, image("n1", created=SENT + 90, status=2)])
+    kw, pages, _ = harness(turn=AgentTurn("Generating", None, generating=True),
+                           project=[ProjectContents({"old1": "x"}, [OLD]), running])
+    with pytest.raises(WaitTimeoutError) as info:
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+    assert "still generating" in info.value.message
+    assert not any(call[0] == "details" for call in pages[0].calls)
 
 
 async def test_charge_wording_is_neutral(logged_in_profile, tmp_path):

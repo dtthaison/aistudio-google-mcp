@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import shlex
 from collections.abc import Callable
@@ -28,16 +29,26 @@ from aistudio._flow.models import (
     model_by_label,
 )
 from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
-from aistudio._flow.rows import FlowCharacter, FlowScene, ProjectContents, parse_plan
+from aistudio._flow.rows import (
+    FlowCharacter,
+    FlowScene,
+    FlowVoice,
+    Generated,
+    ProjectContents,
+    parse_plan,
+)
+from aistudio._flow.voices import PRESET_VOICES, PresetVoice, preset_voice
 from aistudio._fs import read_json, write_private_json
 from aistudio._media.save import check_folder, free_name, write_file
 from aistudio.exceptions import (
     AgentReplyError,
     AIStudioError,
     BrowserError,
+    GenerationFailedError,
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
+    RateLimitError,
     SchemaDriftError,
     ServerError,
     ValidationError,
@@ -46,9 +57,21 @@ from aistudio.exceptions import (
 from aistudio.paths import Profile
 
 STATE_FILE = "flow.json"
+# Flow's agent answers this, in place of a plan, after many requests in a row (live 2026-11-05).
+UNUSUAL_ACTIVITY = "noticed some unusual activity"
+# ...and this right after a generation finished, while Flow still counted it as running (live).
+TOO_MANY_RUNNING = "too many generations are running"
 DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
+QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
+# A free image run: the reply carrying the generation ends only once the image is made; with a
+# character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
+FREE_REPLY_TIMEOUT_S = 240.0
+# A free image run whose reply never arrived: reads of the project that look for the image
+# (each reload takes seconds), and the clock skew allowed against Flow's creation times
+FOUND_READS = 3
+FOUND_SLACK_S = 120
 
 
 async def flow_credits(profile: Profile, *, visible: bool = False,
@@ -103,6 +126,7 @@ async def flow_generate(
     if on_start:
         on_start()
     free: tuple[list[Any], list[str]] | None = None
+    outcome: Any = None  # a paid run's follow result
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
         before = await _credits_before(page)  # free models generate without asking (plan F)
@@ -110,8 +134,8 @@ async def flow_generate(
             warnings.append("could not read Flow credits before the run")
         project_id = await _open(page, profile, project_id)
         paid_possible = max_credits is not None
-        contents = (await page.contents(project_id)
-                    if attachments or characters or paid_possible else None)
+        contents = (await page.contents(project_id)  # images: what existed before the run
+                    if attachments or characters or paid_possible or kind == "image" else None)
         existing = (set(contents.titles) | {m.media_id for m in contents.media}
                     if contents is not None else set())
         titles, known_ids = _attachment_titles(contents, attachments)
@@ -170,10 +194,23 @@ async def flow_generate(
             if chosen:
                 names = ", ".join(c.name for c in chosen)
                 prompt = f"Feature the attached characters: {names}. {prompt}"
+            sent_at = now().timestamp()
             turn = await page.submit_for_quote(instruction(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
-                aspect=aspect))
+                aspect=aspect), expect_generation=kind == "image",  # images: free models only
+                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S)
+            if (turn.quote is None and not turn.generated and turn.generating
+                    and kind == "image"):
+                found = await _made_in_project(page, project_id, existing | set(attached_ids),
+                                               sent_at)
+                if found:  # sent with what was attached; the reply could not show it
+                    turn = dataclasses.replace(turn, generated=tuple(found), generating=False,
+                                               media=tuple(attached_ids),
+                                               characters=tuple(c.id for c in chosen))
+                    warnings.append("Flow's reply never reached aistudio, so its model, aspect "
+                                    "and attachments were not checked; aistudio found it in the "
+                                    "project: " + ", ".join(g.media_id for g in found))
             if turn.quote is None and not turn.generated and turn.generating:
                 waiting = await _reject_noting(page, expect=False)
                 still = ("Flow's agent had not finished replying" if not turn.answered
@@ -187,9 +224,29 @@ async def flow_generate(
                                                        "project in Flow before re-running",
                                                        waiting))
             if turn.quote is None and not turn.generated:
+                # A request the page shows but aistudio could not read must not stay waiting
+                waiting = await _reject_noting(page, expect=False)
+                if turn.lost:
+                    raise AgentReplyError(
+                        "Flow's reply never reached aistudio (the browser dropped it), so there "
+                        f"was no quote to check: {turn.text[-300:]}",
+                        hint=_with_note("nothing was spent and any request it showed was "
+                                        "rejected; re-run", waiting))
+                if UNUSUAL_ACTIVITY in turn.text.lower():
+                    raise RateLimitError(
+                        "Flow refused the request: it noticed unusual activity",
+                        hint=_with_note("nothing was spent; this is Flow's limit on many requests "
+                                        "in a row, not the prompt: wait several minutes before "
+                                        "one more try, and never retry in a loop", waiting))
+                if TOO_MANY_RUNNING in turn.text.lower():
+                    raise RateLimitError(
+                        "Flow refused the request: too many generations are running",
+                        hint=_with_note("nothing was spent; this is not the prompt: wait a minute "
+                                        "or two for running generations (also in other tabs) to "
+                                        "finish, then try once more", waiting))
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
-                                      hint="rephrase the prompt or add options; nothing was "
-                                           "spent")
+                                      hint=_with_note("rephrase the prompt or add options; "
+                                                      "nothing was spent", waiting))
             if turn.quote is None:  # a free model: Flow generated without asking (live)
                 free = await _free_run(page, turn, kind, wanted.count, flow_model, aspect,
                                        attached_ids, [c.id for c in chosen])
@@ -266,6 +323,8 @@ async def flow_generate(
                         failure.hint = _with_note(failure.hint, note)
         if free is not None:  # after the restore: reading credits leaves the project page
             after, free_notes = await _credits_after(page, None)
+        elif outcome is not None and (outcome.timed_out or outcome.failed):  # measured
+            after, free_notes = await _credits_after(page, outcome.credits_left)
     if quoted is not None:
         return {**quoted, **({"warnings": warnings} if warnings else {})}
     project_url = PROJECT_URL.format(id=project_id)
@@ -291,9 +350,22 @@ async def flow_generate(
             and before - outcome.credits_left != turn.quote.credits):
         warnings.append(f"credits fell by {before - outcome.credits_left} during this run; the "
                         f"quote was {turn.quote.credits}")
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
+    if outcome.failed:
+        warnings.append(str(_failed(outcome.failed, before, after)))
     if outcome.timed_out:
+        spent = turn.quote.credits  # unverified: assume the quote was charged
+        warnings += free_notes
+        if before is not None and after is not None:
+            spent = before - after
+            if spent == 0:  # live (2026-11-02): a "Failed" job (high demand) charged nothing
+                warnings.append(f"Flow has not charged for it (credits unchanged at {after}): "
+                                f"the job failed or is still queued and may charge "
+                                f"{turn.quote.credits} when it finishes; check the project in "
+                                f"Flow before re-running")
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
-                "project_url": project_url, "credits_spent": turn.quote.credits,
+                "project_url": project_url, "credits_spent": spent, "credits_left": after,
                 **({"warnings": warnings} if warnings else {})}
     expected_id = flow_model.id if flow_model else label_to_id(wanted.model)
     made = {MODEL_KEYS[m.model_key] for m in outcome.media if m.model_key in MODEL_KEYS}
@@ -311,6 +383,21 @@ async def flow_generate(
             "credits_left": outcome.credits_left,
             "model": expected_id, "project": project_id,
             **({"warnings": warnings} if warnings else {})}
+
+
+async def _made_in_project(page: Any, project_id: str, known: set[str],
+                           since: float) -> list[Generated]:
+    """Images that appeared in the project during a free run, all finished: what it made when
+    its reply never reached aistudio (live, 2026-11-02: Flow said "I've generated the image" and
+    the image was there; Chrome can drop a reply's body). Empty while any is still running."""
+    for _ in range(FOUND_READS):
+        contents = await page.contents(project_id)
+        new = [m for m in contents.media
+               if m.media_id not in known and _media_kind(m) == "image"
+               and m.created is not None and m.created >= since - FOUND_SLACK_S]
+        if new and all(m.status == 3 for m in new):
+            return [Generated(m.media_id, "success", "image", None, None) for m in new]
+    return []
 
 
 async def _free_run(page: Any, turn: Any, kind: str, count: int, flow_model: Any,
@@ -554,6 +641,8 @@ def _iso(epoch: int | None) -> str | None:
 
 def _media_kind(media: Any) -> str:
     """Flow's project list carries no links (live), so judge by length and model too."""
+    if getattr(media, "audio", False):  # a voice sample (live: it was listed as an image)
+        return "audio"
     veo = bool(media.model_key) and "veo" in media.model_key
     return "video" if media.video_url or media.seconds or veo else "image"
 
@@ -605,6 +694,9 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
                                 hint='see "aistudio flow media"')
         found = await page.media_details(media_id) or listed  # the list has no links
     kind = _media_kind(listed)
+    if kind == "audio":
+        raise ValidationError(f"media {media_id} is a voice sample (audio); aistudio downloads "
+                              "images and videos", hint="play it on a character's page in Flow")
     if not (found.video_url if kind == "video" else found.image_url):
         raise ValidationError(f"media {media_id} has no download yet (still running or failed)",
                               hint="check it in Flow, then retry")
@@ -630,6 +722,33 @@ async def _credits_before(page: Any) -> int | None:
         return await page.credits()
     except Exception:  # noqa: BLE001 - e.g. a changed account menu
         return None
+
+
+_FLOW_REASONS = {  # Flow's failure codes, in words (live)
+    "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED":
+        "Flow's filter for real or famous people blocked it: a face looked like a real person's",
+    "FLOW_SHOWED_FAILED":
+        "Flow showed \"Failed – Something went wrong\" with no reason aistudio could read (its "
+        "chat may blame high demand; on 2026-11-02 the same clip's earlier failures were the "
+        "filter for real or famous people)",
+}
+
+
+def _failed(failed: list[Any], before: int | None, after: int | None) -> GenerationFailedError:
+    """Flow failed the job it started (status 4): say why, and what was charged."""
+    codes = list(dict.fromkeys(m.error or "no reason given" for m in failed))
+    reasons = "; ".join(_FLOW_REASONS.get(c, c) for c in codes)
+    if before is not None and after is not None:
+        charged = ("nothing was charged" if before == after
+                   else f"credits went from {before} to {after}")
+    else:
+        charged = "credits were not verified: check them with aistudio flow credits"
+    hint = f"{charged}; change the prompt or the images before trying again"
+    if "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED" in codes:
+        hint += (" (a close, front-facing realistic face trips it more often: try a wider shot "
+                 "or another reference image)")
+    ids = ", ".join(m.media_id for m in failed)
+    return GenerationFailedError(f"Flow failed {ids}: {reasons}", hint=hint)
 
 
 async def _credits_after(page: Any, fallback: int | None) -> tuple[int | None, list[str]]:
@@ -684,6 +803,8 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         after, read_notes = await _credits_after(page, outcome.credits_left)
         new_ids = page.paid_media or [m.media_id for m in outcome.media]
         scene_id = await _scene_holding(page, project_id, new_ids)
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     if scene_id is None:
@@ -753,6 +874,8 @@ async def flow_edit(profile: Profile, media_id: str, text: str, *,
             raise _spent(exc, page.paid_media, project_id,  # Start may have spent
                          about=f"editing {media_id}") from exc
         after, read_notes = await _credits_after(page, outcome.credits_left)
+    if outcome.failed and not outcome.media:
+        raise _failed(outcome.failed, before, after)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     project_url = PROJECT_URL.format(id=project_id)
@@ -1001,7 +1124,8 @@ async def flow_characters(profile: Profile, *, project: str | None = None, visib
                           page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
     project_id, contents = await _project_contents(profile, project, visible, browser,
                                                    page_factory)
-    items = [{"id": c.id, "name": c.name, "media_id": c.media_id, "created": _iso(c.created)}
+    items = [{"id": c.id, "name": c.name, "media_id": c.media_id, "created": _iso(c.created),
+              "voice": _voice_item(contents, c.voice)}
              for c in contents.characters]
     return {"characters": items, "count": len(items), "project": project_id}
 
@@ -1083,6 +1207,156 @@ async def flow_set_personality(profile: Profile, character_id: str, text: str, *
                                 hint='see "aistudio flow character list"')
         await page.set_personality(project_id, character_id, text)
     return {"character_id": character_id, "personality": text, "project": project_id}
+
+
+def _preset_item(voice: PresetVoice) -> dict[str, Any]:
+    return {"name": voice.name, "kind": "preset", "gender": voice.gender, "style": voice.style,
+            "pitch": voice.pitch}
+
+
+def _custom_item(voice: FlowVoice) -> dict[str, Any]:
+    return {"name": voice.name, "kind": "custom", "media_id": voice.media_id,
+            "base": voice.base, "style": voice.style, "created": _iso(voice.created)}
+
+
+def _voice_item(contents: ProjectContents, ref: str | None) -> dict[str, Any] | None:
+    """A character's voice for output: a preset, a custom voice of the project, or unknown."""
+    if ref is None:
+        return None
+    preset = preset_voice(ref)
+    if preset is not None:
+        return _preset_item(preset)
+    custom = next((v for v in contents.voices if v.media_id == ref), None)
+    return _custom_item(custom) if custom else {"name": None, "kind": "unknown", "ref": ref}
+
+
+def _custom_voice(contents: ProjectContents, value: str) -> FlowVoice | None:
+    """A custom voice of the project by media id, or by a name no other custom voice has."""
+    by_id = [v for v in contents.voices if v.media_id == value]
+    found = by_id or [v for v in contents.voices if _key(v.name) == _key(value)]
+    if len(found) > 1:
+        raise ValidationError(f"{len(found)} custom voices are named {found[0].name!r}",
+                              hint="pass the media id of one instead (see "
+                                   '"aistudio flow character voices"); nothing was changed')
+    return found[0] if found else None
+
+
+def _character_of(contents: ProjectContents, character_id: str) -> FlowCharacter:
+    found = next((c for c in contents.characters if c.id == character_id), None)
+    if found is None:
+        raise NotFoundError(f"no character {character_id} in this Flow project",
+                            hint='see "aistudio flow character list"')
+    return found
+
+
+async def flow_voices(profile: Profile, *, search: str | None = None,
+                      project: str | None = None, visible: bool = False,
+                      browser: Callable[..., Any] = open_browser,
+                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Voices a character can have: Flow's presets and the project's custom voices (free)."""
+    project_id, contents = await _project_contents(profile, project, visible, browser,
+                                                   page_factory)
+    needle = _key(search) if search else ""
+    items = ([_custom_item(v) for v in contents.voices]
+             + [_preset_item(v) for v in PRESET_VOICES])
+    if needle:
+        items = [i for i in items if needle in _key(" ".join(
+            str(i.get(k) or "") for k in ("name", "gender", "style", "pitch", "base")))]
+    return {"voices": items, "count": len(items), "project": project_id}
+
+
+async def flow_character_voice(profile: Profile, character_id: str, voice: str | None, *,
+                               style: str | None = None, voice_name: str | None = None,
+                               clear: bool = False, project: str | None = None,
+                               visible: bool = False,
+                               browser: Callable[..., Any] = open_browser,
+                               page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Give a character a voice (free): a preset, a custom voice of the project, or, with
+    ``style``, a new custom voice made from a preset ("Save new voice"). ``clear`` removes it."""
+    if clear == bool(voice):
+        raise ValidationError("give a VOICE or --clear (exactly one)")
+    style = " ".join(style.split()) if style is not None else None
+    if style == "":
+        raise ValidationError("--style is empty")
+    if voice_name is not None and style is None:
+        raise ValidationError("--voice-name names a new custom voice: it needs --style")
+    preset = preset_voice(voice) if voice else None
+    if style is not None and preset is None:
+        raise ValidationError(f"{voice!r} is not one of Flow's preset voices; --style makes a "
+                              "new voice from a preset",
+                              hint='see "aistudio flow character voices"; nothing was changed')
+    project_id = _project_id(project) if project else None
+    created: dict[str, Any] | None = None
+    warnings: list[str] = []
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await _open(page, profile, project_id)
+        contents = await page.contents(project_id)
+        character = _character_of(contents, character_id)
+        if clear:
+            ref, item = None, None
+        elif style is not None:
+            assert preset is not None
+            name = _name(voice_name or f"{character.name or 'Character'} voice")
+            taken = [v for v in contents.voices if _key(v.name) == _key(name)]
+            if taken:
+                raise ValidationError(f"custom voice {taken[0].media_id} is already named "
+                                      f"{name!r}",
+                                      hint="pass another --voice-name, or use that voice: "
+                                           f"aistudio flow character voice {character_id} "
+                                           f"{taken[0].media_id}")
+            before = await _credits_before(page)
+            try:
+                ref, _ = await page.save_voice(
+                    project_id, character_id, preset.name, style, name,
+                    description=f"{preset.gender}, {preset.style}, {preset.pitch}")
+            except Exception as exc:
+                if not page.started:
+                    raise
+                raise _voice_made(exc, page.paid_media, name) from exc
+            after, warnings = await _credits_after(page, None)
+            spent = before - after if before is not None and after is not None else None
+            if spent:  # measured free (2026-11-02); say so if Flow ever charges for it
+                warnings.append(f"credits fell by {spent} while the voice was saved")
+            created = {"media_id": ref, "name": name, "credits_spent": spent}
+            item = {"name": name, "kind": "custom", "media_id": ref, "base": preset.name,
+                    "style": style}
+        elif preset is not None:
+            ref, item = preset.ref, _preset_item(preset)
+        else:
+            assert voice is not None
+            custom = _custom_voice(contents, voice)
+            if custom is None:
+                raise NotFoundError(f"no voice {voice!r}: not a Flow preset or a custom voice "
+                                    "of this project",
+                                    hint='see "aistudio flow character voices"; nothing was '
+                                         "changed")
+            ref, item = custom.media_id, _custom_item(custom)
+        try:
+            await page.set_voice(project_id, character_id, ref)
+        except Exception as exc:
+            if created is None:
+                raise
+            raise _voice_made(exc, [ref] if ref else [], created["name"],
+                              set_on=character_id) from exc
+    return {"character_id": character_id, "voice": item, "project": project_id,
+            **({"created_voice": created} if created else {}),
+            **({"warnings": warnings} if warnings else {})}
+
+
+def _voice_made(exc: Exception, media: list[str], name: str, *,
+                set_on: str | None = None) -> AIStudioError:
+    """An error once Flow may hold the new custom voice: never invite a re-run with --style,
+    which would save a second one."""
+    where = f"saved as media {media[0]}" if media else "may have been saved"
+    note = (f"the custom voice {name!r} {where}; do not re-run with --style: see "
+            f'"aistudio flow character voices"')
+    if set_on and media:
+        note += f", then: aistudio flow character voice {set_on} {media[0]}"
+    if not isinstance(exc, AIStudioError):
+        return BrowserError(f"{type(exc).__name__}: {exc}", hint=note)
+    exc.hint = f"{note} ({exc.hint})" if exc.hint else note
+    return exc
 
 
 async def flow_scenes(profile: Profile, *, project: str | None = None, visible: bool = False,

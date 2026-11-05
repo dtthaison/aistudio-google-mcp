@@ -67,7 +67,27 @@ async def test_read_defaults_for_video(fake_ui):
     defaults = await FlowPage(ui).read_defaults("video")
     assert defaults == Defaults("Omni 1.1 Flash", "9:16", 2)
     assert defaults.asks is False  # not scripted as "Always": treated as not asking
-    assert ui.ops[0] == ("activate", "button", TUNE, 0)
+    # Live 2026-11-02: the top bar's "Settings" (View settings) comes first; the agent's
+    # settings button is the prompt box's, the last one.
+    assert ui.ops[0] == ("activate", "button", TUNE, -1)
+
+
+async def test_apply_defaults_opens_the_agent_settings_too(fake_ui):
+    from aistudio._flow.page import Defaults as D
+
+    ui = fake_ui({"Kcr7Ub": [rpc_ok("Kcr7Ub")]},
+                 inner={("button", "Image generation default model"): ["Nano Banana 2.1"]},
+                 checks={("radio", r"(^|\s)9:16$", 0): [True], ("radio", r"^x1$", 0): [True]},
+                 url=f"https://flow.google.com/project/{PID}")
+    await FlowPage(ui).apply_defaults("image", D("Nano Banana 2.1", "9:16", 1))
+    tune = [op for op in ui.ops if op[:3] == ("activate", "button", TUNE)]
+    assert tune and all(op[3] == -1 for op in tune)
+
+
+def rpc_ok(method):
+    from aistudio._browser.ui import CapturedResponse
+
+    return CapturedResponse(method, 200, "", "")
 
 
 async def test_read_defaults_reports_whether_flow_asks_before_spending(fake_ui):
@@ -324,6 +344,17 @@ async def test_reject_waits_for_the_request_and_says_how_many(fake_ui):
     ui = fake_ui(enabled={("radio", "Reject"): [[]]}, record_pauses=True)
     assert await FlowPage(ui).reject(expect=False) == 0
     assert len([op for op in ui.ops if op[0] == "pause"]) == 0
+    assert ui.waits == []  # nothing pressed: no reply to wait for
+
+
+async def test_reject_waits_for_the_agents_reply_to_it(fake_ui):
+    # Live (2026-11-02): Reject starts an agent turn whose reply ("I've cancelled…") took ~24 s.
+    # Closing the browser first left it to answer the next run's prompt instead of a quote.
+    from aistudio._flow.page import REJECT_REPLY_TIMEOUT_S
+
+    ui = fake_ui(enabled={("radio", "Reject"): [[True], [True], [False]]})
+    assert await FlowPage(ui).reject() == 1
+    assert ui.waits == [("StreamChat", REJECT_REPLY_TIMEOUT_S)]
 
 
 async def test_approve_presses_only_the_newest_request(fake_ui):
@@ -387,9 +418,86 @@ async def test_a_quote_turn_also_reports_what_flow_made(fake_ui):
     assert turn.quote is not None and [g.media_id for g in turn.generated] == ["g1"]
 
 
+ANNOUNCED = [[[[["text", [None, None, "I will generate 1 image of Mila."]]]], None, "e0"]]
+
+
+async def test_a_free_image_whose_result_comes_after_the_grace_is_still_followed(fake_ui):
+    # Live 2026-11-02: the agent's "I will generate 1 image…" ended one StreamChat reply and the
+    # generation came in a later one, after REPLY_GRACE_S: the run said "no quote; nothing was
+    # spent" while Flow made the image. A free image run always generates, so it waits.
+    from tests.unit.test_flow_rows import generated_call, generated_result
+
+    later = [chat(stream(ANNOUNCED)), *[None] * 30,
+             chat(stream(generated_call(), generated_result()))]
+    ui = fake_ui({"StreamChat": later}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["done"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", expect_generation=True)
+    assert turn.quote is None and [g.media_id for g in turn.generated] == ["g1"]
+
+
+async def test_a_free_image_reply_without_its_result_is_never_nothing_spent(fake_ui):
+    ui = fake_ui({"StreamChat": [chat(stream(ANNOUNCED))]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["I will generate 1 image"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60,
+                                                            expect_generation=True)
+    assert turn.quote is None and turn.generating and turn.answered
+
+
+async def test_a_paid_run_still_stops_soon_after_a_reply_without_a_quote(fake_ui):
+    later = [chat(stream(ANNOUNCED)), *[None] * 30, chat(stream(permission(cost=10)))]
+    ui = fake_ui({"StreamChat": later}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is None and not turn.generating and turn.answered
+
+
 async def test_an_unfinished_reply_is_a_timeout(fake_ui):
     # Deferred minor #78: a StreamChat reply is captured only when its stream ends, so a free
     # run streaming past the limit looked like "no quote; nothing was spent".
     ui = fake_ui({}, texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["Generating your images…"]})
     turn = await FlowPage(ui, now=Clock()).submit_for_quote("x", timeout_s=60)
     assert turn.quote is None and turn.generating and not turn.answered
+
+
+async def test_a_reply_chrome_lost_is_flagged(fake_ui):
+    # Live (2026-11-02): the page showed "…costing 10 credits?" with Approve/Reject, but the
+    # StreamChat body reached aistudio empty (Chrome can drop a reply body)
+    ui = fake_ui({"StreamChat": [chat("")]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["costing 10 credits?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is None and turn.lost
+
+
+async def test_a_read_reply_is_not_lost(fake_ui):
+    ui = fake_ui({"StreamChat": [chat(stream(permission(cost=10)))]},
+                 texts={PROMPT_EDITOR: ["x"], AGENT_MESSAGE: ["?"]})
+    turn = await FlowPage(ui, now=Clock()).submit_for_quote("x")
+    assert turn.quote is not None and not turn.lost
+    assert ui.fetch_bodies  # Chrome can hand a StreamChat body over empty: fetch it ourselves
+
+
+async def test_a_job_flow_failed_ends_the_follow_with_its_reason(fake_ui):
+    # Live (2026-11-02): Flow showed "Failed" and the poll said status 4,
+    # PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED; aistudio waited out the 25-minute timeout
+    from tests.unit.test_flow_rows import FILTERED, failed_poll
+
+    ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1030, [record(status=2, with_links=False)]]),
+                             poll("jwpduf", [None, 1040, [failed_poll()]])]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
+        count=1, credits=10, timeout_s=600, kind="video")
+    assert not outcome.timed_out and outcome.media == []
+    assert [(m.media_id, m.error) for m in outcome.failed] == [(MEDIA, FILTERED)]
+    assert outcome.credits_left == 1040
+
+
+async def test_a_new_failed_card_in_the_chat_ends_the_follow(fake_ui):
+    # Live (2026-11-02): a job failed with no status-4 poll aistudio could tie to it; the chat
+    # showed a new "Failed – Something went wrong" card (flow-error-tile) and aistudio waited
+    from aistudio._flow.page import ERROR_TILE
+
+    ui = fake_ui({"jwpduf": [poll("jwpduf", [None, 1030, [record(status=2, with_links=False)]])]},
+                 texts={PERMISSION_LAST: [ASKING]})
+    ui.counts = {ERROR_TILE: [2, 2, 3]}  # two old cards before Approve, then a new one
+    outcome = await FlowPage(ui, now=Clock(), clock=lambda: CREATED - 30).approve_and_follow(
+        count=1, credits=10, timeout_s=600, kind="video")
+    assert not outcome.timed_out and outcome.media == []
+    assert [(m.media_id, m.error) for m in outcome.failed] == [(MEDIA, "FLOW_SHOWED_FAILED")]

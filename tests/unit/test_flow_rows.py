@@ -67,6 +67,23 @@ def test_parse_plan_from_the_agent_text():
     assert parse_plan("Here you go.") == Plan(model=None, seconds=None)
 
 
+def test_parse_plan_stops_the_model_at_from():
+    # Live (2026-11-02), a start-frame run: the model name was read with the rest of the phrase
+    text = ("I'm going to generate an 8-second video in 9:16 using Veo 3.1 - Lite from your start "
+            "frame image. Would you like me to kick off this 1 video generation?")
+    assert parse_plan(text) == Plan(model="Veo 3.1 - Lite", seconds=8)
+
+
+def test_parse_plan_stops_the_model_at_any_lowercase_word():
+    # Live (2026-11-05), a character run: "featuring ..." followed the model name
+    text = ("I'll generate an 8-second 9:16 video using Veo 3.1 - Lite featuring Mila Vance doing "
+            "back squats, using your gym image and character entity as references.")
+    assert parse_plan(text) == Plan(model="Veo 3.1 - Lite", seconds=8)
+    assert parse_plan("An image using Nano Banana Pro showing a cat.").model == "Nano Banana Pro"
+    assert parse_plan("A clip using Omni 1.1 Flash, 8 seconds.").model == "Omni 1.1 Flash"
+    assert parse_plan("A clip using Veo 3.1 - Quality").model == "Veo 3.1 - Quality"
+
+
 def permission(videos=1, images=0, cost=10):
     return [[None, [["c", None, None, ["open_chat_panel", "open_chat_panel", [[["_synthetic",
              [None, None, None, True]]]]]], ["c", None, None, ["ask_for_permission",
@@ -179,3 +196,19 @@ def test_personality_notes_come_from_the_character_record():
     record = [["p", "c1", None, [1, "Paper boat", [[["r1"]], None, "Calm, curious"]]]]
     assert personality_notes(record) == "Calm, curious"
     assert personality_notes([["p", "c1", None, [1, "Boat", [[["r1"]]]]]]) is None
+
+
+FILTERED = "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"
+
+
+def failed_poll(media_id=MEDIA, reason=FILTERED):
+    # Live (2026-11-02, jwpduf): a failed job's record carries status 4 and Flow's reason
+    return [media_id, None, None, None, None,
+            [None, None, None, None, None, None, None, None, [4, [3, reason], [reason]]]]
+
+
+def test_a_failed_job_carries_flows_reason():
+    (failed,) = media_records("jwpduf", [None, 1040, [failed_poll()]])
+    assert (failed.status, failed.error) == (4, FILTERED)
+    (done,) = media_records("as29s", record())
+    assert done.error is None

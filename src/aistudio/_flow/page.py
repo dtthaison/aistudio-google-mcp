@@ -9,6 +9,7 @@ out in a minimized window.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import re
 import time
@@ -32,6 +33,7 @@ from aistudio._flow.rows import (
     agent_pending,
     character_id,
     character_name,
+    character_voice,
     credits_left,
     decode_contents,
     decode_projects,
@@ -43,6 +45,7 @@ from aistudio._flow.rows import (
     parse_permission,
     personality_notes,
     saved_frame,
+    saved_voice,
     sent_characters,
     sent_media,
     stitch_job,
@@ -50,6 +53,7 @@ from aistudio._flow.rows import (
 )
 from aistudio._flow.rows import character_id as record_character_id
 from aistudio._flow.wire import decode_batch, payloads
+from aistudio._rpc.wire import opt_index
 from aistudio.exceptions import (
     BrowserError,
     NotFoundError,
@@ -71,6 +75,9 @@ PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission r
 _SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
 TITLE = "Editable text"
 TUNE = "Settings"
+# Live 2026-11-02: the top bar gained its own "Settings" (tooltip "View settings": grid size,
+# sound on hover), which comes first; the agent's settings are the prompt box's button, the last.
+TUNE_NTH = -1
 NEW_PROJECT = re.compile(r"New project")
 NEW_SESSION = "Start new session"
 EXPAND = "Expand"  # a collapsed prompt box hides "Start new session" (live)
@@ -88,6 +95,19 @@ EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
 CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
 BODY_MODE = "Ingredient"  # shown only in body mode, with or without an earlier body (live)
+# Flow ignores "Create body" until the character has loaded, and its editor shows before that
+# (live, 2026-11-02: a click at once did nothing, one 3 s later worked): click again until the
+# body mode shows. The click itself sends nothing.
+BODY_TRIES = 8
+BODY_PAUSE_MS = 1500
+# The character page's voice control (live, 2026-11-02): "Select a voice" without a voice, a
+# card with the voice's name once it has one; both open the "Select a voice" dialog.
+VOICE_BUTTON = ".voice-card-start-btn, .voice-selector-empty-btn"
+VOICE_STYLE = "Customize performance"  # the dialog's style box (a textbox)
+VOICE_NAME = 'input[placeholder="Enter voice name"]'  # shown once a style is typed
+SAVE_VOICE = "Save new voice"
+VOICE_FIELD = "entity_info.character_info.audio_references"
+VOICE_SAVE_TIMEOUT_S = 120.0  # live: the sample took about 30 s
 EDIT_MODEL_KEY = "abra_edit"  # the model key of a clip an Omni edit makes (live)
 # The clip editor's own box: "Describe how to edit this video… add pen_magic Omni 1.1 Flash →"
 _EDIT_MODEL = re.compile(r"Describe how to edit this video…\s+(?:add\s+)?(?:pen_magic\s+)?"
@@ -138,6 +158,7 @@ TILE_RELOADS = 4  # reloads to wait for a new upload's tile (the list can lag th
 TILE_POLLS = 8  # x 1 s per reload
 REJECT_ROUNDS = 5  # waiting requests rejected per call, at most
 REJECT_WAIT_POLLS = 10  # x 500 ms for a just-quoted request to show its radios
+REJECT_REPLY_TIMEOUT_S = 60.0  # the agent's reply to a Reject (~24 s live)
 STITCH_FAILURES = 5  # failed polls in a row (an expired session, say) before giving up
 # Tool builds (live, findings "Flow Tools discovery"): one took 95 s with the page text unchanged
 # for 50 s, so Stop is the only sign of progress, and a reload at 50 s lost the build
@@ -152,6 +173,9 @@ TOOL_QUIET_POLLS = 3  # polls in a row without Stop before a build counts as end
 TOOL_LIST_POLLS = 10  # x TOOL_POLL_MS for the list to show a finished build
 _CREDITS = re.compile(r"([\d,]+) Google Flow credits")
 _DONE = 3
+_FAILED = 4  # live (2026-11-02): with Flow's reason, e.g. a filter; the credits came back
+ERROR_TILE = "flow-error-tile"  # the chat's "Failed – Something went wrong" card (live)
+SHOWED_FAILED = "FLOW_SHOWED_FAILED"  # a new card, with no reason aistudio could read
 
 
 @dataclass(frozen=True)
@@ -173,6 +197,7 @@ class AgentTurn:
     generated: tuple[Generated, ...] = ()  # made without asking (free models)
     generating: bool = False  # a free generation was still running when the wait ended
     answered: bool = True  # a StreamChat reply ended; False: the stream was still open
+    lost: bool = False  # a reply ended but its body never reached aistudio (Chrome dropped it)
 
 
 @dataclass(frozen=True)
@@ -192,6 +217,7 @@ class FlowOutcome:
     media: list[FlowMedia]
     credits_left: int | None
     timed_out: bool
+    failed: list[FlowMedia] = field(default_factory=list)  # Flow failed them (status 4)
 
 
 def _aspect_name(aspect: str) -> re.Pattern[str]:
@@ -274,7 +300,7 @@ class FlowPage:
         await self._ui.pause(1000)
 
     async def read_defaults(self, kind: str) -> Defaults:
-        await self._ui.activate("button", TUNE, exact=True)
+        await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
         await self._ui.pause(1200)
         model = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
         aspect = await self._checked_one(kind, ASPECTS[kind], _aspect_name, aspect=True)
@@ -287,7 +313,7 @@ class FlowPage:
         return Defaults(model, str(aspect), int(count), asks=asks)
 
     async def apply_defaults(self, kind: str, wanted: Defaults) -> None:
-        await self._ui.activate("button", TUNE, exact=True)
+        await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
         await self._ui.pause(1200)
         current = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
         if current != wanted.model:
@@ -309,19 +335,25 @@ class FlowPage:
             raise BrowserError(f"Flow's {kind} settings did not take effect",
                                hint="re-run; if it persists, the Flow UI changed")
 
-    async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0) -> AgentTurn:
+    async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0,
+                               expect_generation: bool = False) -> AgentTurn:
         """Send the instruction and read Flow's structured permission request for it.
 
         The quote comes from the StreamChat response to this message, never from page text, so
         an echoed prompt or an older message cannot fake a price.
+
+        ``expect_generation``: the model generates without asking (free images), so a reply
+        without a quote is no answer yet. The agent can end one reply with "I will generate…"
+        and send the generation in a later one, well after REPLY_GRACE_S (live, 2026-11-02):
+        wait for it, and never call such a reply "nothing was made".
         """
-        async with self._ui.responses(marker=CHAT_RPC) as log:
+        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             seen: list[object] = []
-            answered = False
+            answered = lost = False
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
                 if response is None:
@@ -329,6 +361,7 @@ class FlowPage:
                 answered = True
                 if response.status >= 400:
                     continue
+                lost = lost or not response.text  # live: Chrome can drop a reply body
                 body = response.request_body
                 quote = None
                 for _, payload in payloads(response.text):
@@ -343,11 +376,13 @@ class FlowPage:
                     return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                                      tuple(sent_characters(body)), tuple(sent_media(body)),
                                      tuple(generated))
-                deadline = min(deadline, self._now() + REPLY_GRACE_S)
+                if not expect_generation:
+                    deadline = min(deadline, self._now() + REPLY_GRACE_S)
         # A reply is captured only when its stream ends (live: ~47 s for free images): an open
         # stream at the deadline may still be generating, so it is never "nothing was spent"
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
-                         generating=agent_pending(seen) or not answered, answered=answered)
+                         generating=agent_pending(seen) or not answered or expect_generation,
+                         answered=answered, lost=lost)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
@@ -372,15 +407,23 @@ class FlowPage:
                 break
             await self._ui.pause(500)
         pressed = 0
-        for _ in range(REJECT_ROUNDS):
-            waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject")) if ok]
-            if not waiting:
-                return pressed
-            await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
-            await self._ui.pause(1000)
-            pressed += 1
-        raise BrowserError("Flow still shows a waiting request after Reject",
-                           hint="press Reject on it in Flow, never Approve")
+        # Each Reject starts an agent turn ("I've cancelled…", ~24 s live). Wait for its reply:
+        # left unfinished, Flow gave it as the answer to the next run's prompt (2026-11-02).
+        async with self._ui.responses(marker=CHAT_RPC) as log:
+            for _ in range(REJECT_ROUNDS):
+                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject"))
+                           if ok]
+                if not waiting:
+                    break
+                await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
+                await self._ui.pause(1000)
+                pressed += 1
+            else:
+                raise BrowserError("Flow still shows a waiting request after Reject",
+                                   hint="press Reject on it in Flow, never Approve")
+            for _ in range(pressed):
+                await log.next(CHAT_METHOD, timeout_s=REJECT_REPLY_TIMEOUT_S)
+        return pressed
 
     async def approve_and_follow(self, *, count: int, credits: int, timeout_s: float,
                                  kind: str, known: set[str] | frozenset[str] = frozenset()
@@ -401,13 +444,15 @@ class FlowPage:
             raise PlanMismatchError(f"Flow's waiting request shows {shown_credits} credits, not "
                                     f"the {credits} that were checked; nothing was spent",
                                     hint="re-run to get a fresh quote")
+        error_tiles = await self._ui.count(ERROR_TILE)  # "Failed" cards already in the chat
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True
             await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
             # ``known``: media that existed before the run, which a back-to-back run's clip
             # (inside the creation-time slack) would otherwise be taken for.
-            return await self._follow(log, count, timeout_s, kind, since, exclude=known)
+            return await self._follow(log, count, timeout_s, kind, since, exclude=known,
+                                      error_tiles=error_tiles)
 
     async def projects(self) -> list[FlowProject]:
         async with self._ui.responses(marker=FLOW_RPC) as log:
@@ -697,20 +742,80 @@ class FlowPage:
             return await self._follow(log, 1, timeout_s, "video", since, exclude=known,
                                       model_key=EDIT_MODEL_KEY)
 
-    async def open_body(self, project_id: str, character_id: str) -> str:
-        """Open the character's page in body mode; return the image model it will use."""
+    async def _open_character_page(self, project_id: str, character_id: str) -> None:
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/character/{character_id}")
         await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
         if not self._ui.current_url().split("?", 1)[0].endswith(f"/character/{character_id}"):
             raise BrowserError("Flow opened another page than the character; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
-        await self._ui.dispatch_click("button", CREATE_BODY)
-        await self._ui.pause(2000)
-        # Without body mode, Start would run the page's other, unpriced action.
-        if not await self._ui.visible("button", BODY_MODE, exact=True):
+
+    async def open_body(self, project_id: str, character_id: str) -> str:
+        """Open the character's page in body mode; return the image model it will use."""
+        await self._open_character_page(project_id, character_id)
+        for _ in range(BODY_TRIES):
+            await self._ui.dispatch_click("button", CREATE_BODY)
+            await self._ui.pause(BODY_PAUSE_MS)
+            if await self._ui.visible("button", BODY_MODE, exact=True):
+                break
+        else:  # without body mode, Start would run the page's other, unpriced action
             raise BrowserError("Flow did not switch to body mode; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
         return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+
+    async def set_voice(self, project_id: str, character_id: str, ref: str | None) -> None:
+        """Give the character a voice: a preset's lower-case name or a custom voice's media id;
+        None removes it (free; what picking a voice or "Remove" sends, live)."""
+        info: list[Any] = [None, [[None, ref]]] if ref else []
+        args = [[project_id, character_id, None, [1, None, info]], [[VOICE_FIELD]]]
+        status, reply = await self._ui.batch_rpc("rzMKMb", json.dumps(args))
+        record = decode_batch(reply).get("rzMKMb") if status < 400 else None
+        if record_character_id(record) != character_id or character_voice(record) != ref:
+            raise BrowserError(f"Flow did not save the voice of character {character_id}"
+                               + (f" (HTTP {status})" if status >= 400 else ""),
+                               hint="check it on the character's page in Flow; re-run to retry")
+
+    async def save_voice(self, project_id: str, character_id: str, base: str, style: str,
+                         name: str, *, description: str) -> tuple[str, str | None]:
+        """Save a custom voice (``base`` spoken in ``style``) from the character's "Select a
+        voice" dialog, as "Save new voice" does: Flow renders a sample (with a reCAPTCHA token
+        only the page can make) and keeps it as an audio media. Returns its media id and its
+        workflow id. ``description`` is the preset's dialog text, e.g. "Female, upbeat, …"."""
+        await self._open_character_page(project_id, character_id)
+        await self._ui.click_selector(VOICE_BUTTON)
+        await self._ui.pause(1500)
+        await self._ui.fill_first(SEARCH_ASSETS, base)
+        await self._ui.pause(1500)
+        shown = [" ".join(label.replace("voice_selection", " ").split())
+                 for label in await self._ui.labels("option", re.compile("."))]
+        if not shown or shown[0] != f"{base} {description}":  # the style applies to the first
+            raise ValidationError(f"Flow's voice search for {base!r} lists "
+                                  f"{shown[:3] or 'nothing'} first; nothing was saved",
+                                  hint="re-run; if it persists, the Flow UI changed")
+        await self._ui.fill("textbox", VOICE_STYLE, style)
+        await self._ui.pause(800)
+        await self._ui.fill_first(VOICE_NAME, name, timeout_s=10.0)
+        await self._ui.pause(500)
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            self.started = True
+            await self._ui.dispatch_click("button", SAVE_VOICE, exact=True)
+            saved = await log.next("no0P6", timeout_s=VOICE_SAVE_TIMEOUT_S)
+            payload = decode_batch(saved.text).get("no0P6") if saved else None
+            media_id = saved_voice(payload)
+            if media_id is None:
+                raise BrowserError("Flow did not confirm the new voice",
+                                   hint='check "aistudio flow character voices" for it before '
+                                        "re-running")
+            self.paid_media = [media_id]
+            named = await log.next("mYWVGd", timeout_s=30.0)  # the page names it (live)
+        workflow = opt_index(payload, 0, 0, 2)
+        workflow_id = workflow if isinstance(workflow, str) and workflow else None
+        if named is None and workflow_id:  # finish it as the page does after a save (live)
+            await self._ui.batch_rpc("lt8g5", json.dumps(
+                [[media_id, None, None, None, None, [None] * 9 + [1]],
+                 [["media.media_metadata.visibility"]]]))
+            await self._ui.batch_rpc("mYWVGd", json.dumps(
+                [[workflow_id, None, None, [name], project_id], [["metadata.display_name"]]]))
+        return media_id, workflow_id
 
     async def start_body(self, prompt: str) -> list[FlowMedia]:
         """Call after open_body. Generates the body image (a direct spend: priced first)."""
@@ -950,8 +1055,12 @@ class FlowPage:
     async def _follow(self, log: ResponseLog, count: int, timeout_s: float, kind: str,
                       since: float, only: set[str] | None = None,
                       exclude: set[str] | frozenset[str] = frozenset(),
-                      model_key: str | None = None) -> FlowOutcome:
-        """Follow only media created by this job: the reused project lists older media too."""
+                      model_key: str | None = None,
+                      error_tiles: int | None = None) -> FlowOutcome:
+        """Follow only media created by this job: the reused project lists older media too.
+
+        ``error_tiles``: the chat's "Failed" cards before Approve; a new one ends the follow
+        (live: a job failed with no status-4 poll aistudio could tie to it)."""
         seen: dict[str, FlowMedia] = {}
         credits = None
         deadline = self._now() + timeout_s
@@ -982,8 +1091,16 @@ class FlowPage:
                     # queued (6) before running (2), so only the deadline ends the wait.
             ready = [m for m in seen.values()
                      if m.status == _DONE and (m.video_url if kind == "video" else m.image_url)]
-            if len(ready) >= count:
-                return FlowOutcome(ready, credits, False)
+            failed = [m for m in seen.values() if m.status == _FAILED]
+            if len(ready) >= count or (failed and len(ready) + len(failed) >= len(seen)
+                                       and len(ready) + len(failed) >= count):
+                return FlowOutcome(ready, credits, False, failed)
+            if (error_tiles is not None and len(ready) < count
+                    and await self._ui.count(ERROR_TILE) > error_tiles):
+                shown = [dataclasses.replace(m, status=_FAILED, error=m.error or SHOWED_FAILED)
+                         for m in seen.values() if m.status != _DONE]
+                return FlowOutcome(ready, credits, False, shown or [_unnamed_failure(
+                    self.paid_media[0] if self.paid_media else "this run's job")])
         return FlowOutcome(list(seen.values()), credits, True)
 
     async def _checked_one(self, kind, values, name, *, aspect: bool):
@@ -998,6 +1115,12 @@ class FlowPage:
         await self._ui.wait_for(PROMPT_EDITOR, timeout_s=30.0)
 
 
+def _unnamed_failure(media_id: str) -> FlowMedia:
+    return FlowMedia(media_id=media_id, project_id=None, prompt=None, model_key=None,
+                     status=_FAILED, created=None, seconds=None, size=None, video_url=None,
+                     image_url=None, error=SHOWED_FAILED)
+
+
 def _merge(old: FlowMedia, new: FlowMedia) -> FlowMedia:
     """Later responses fill in what earlier ones lacked (links arrive with as29s); "done" never
     goes back, since a late "running" or "queued" poll can follow the "done" record."""
@@ -1005,4 +1128,6 @@ def _merge(old: FlowMedia, new: FlowMedia) -> FlowMedia:
               else getattr(old, field) for field in old.__dataclass_fields__}
     if _DONE in (old.status, new.status):  # done is final; codes are not ordered (6 = queued)
         merged["status"] = _DONE
+    elif _FAILED in (old.status, new.status):  # so is failed
+        merged["status"] = _FAILED
     return FlowMedia(**merged)

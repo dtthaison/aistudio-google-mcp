@@ -996,3 +996,132 @@ or a drop (`dataTransfer.files`). A synthetic dragenter/dragover/drop with a `Da
 the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8 s sample came back
 1280×2274 (9:16), 8 s, H.264 with audio, in 48 s total in headless Chrome.
 
+
+### Flow character voices and body mode (2026-11-02, free, live)
+
+- **Body mode timing.** A character page shows its prompt editor before the character has loaded,
+  and Flow ignores a "Create body" click made then: three runs of the old `open_body` failed at
+  once, while a click 3 s or 6 s later switched to body mode within 250 ms. The click sends
+  nothing, so `open_body` now clicks again (up to 8 times, 1.5 s apart) until the "Ingredient"
+  button shows. A body made this way on Nano Banana 2.1 cost 0 credits (1,050 → 1,050).
+- **The voice control.** The character page has `.voice-selector-empty-btn` ("Select a voice")
+  without a voice and `.voice-card-start-btn` (the voice's name and style) with one, plus "Play
+  preview" and "Remove". Either button opens the "Select a voice" dialog: a project picker, a
+  "Search assets" box, a listbox "Asset list" (the project's custom voices first, then 30 presets,
+  each "Name Gender, style, pitch"), a "Sample dialogue" box, a "Customize performance" box and
+  "Add to character". The earlier note that choosing a voice sent nothing no longer holds.
+- **Picking a voice** (clicking an option) closes the dialog and sends `rzMKMb`
+  `[[project_id, character_id, None, [1, None, [None, [[None, ref]]]]],
+  [["entity_info.character_info.audio_references"]]]`. `ref` is the preset's lower-case name
+  (`"laomedeia"`) or a custom voice's audio media id. The reply is the character record, with the
+  voice at `[0][3][2][1][0][1]`. "Remove" sends the same mask with `[1, None, []]`. The call works
+  from `batch_rpc` without the dialog, and the project list (`Zzl0ze[5]`) holds the same field.
+- **Custom voices.** Typing in "Customize performance" adds a "Voice name" box (default
+  "<Preset> custom"), "Reset" and "Save new voice". Save sends `no0P6`
+  `[[[sample text, [[preset, name]], "gemini_v4s_tts_flow", style, 2]], [None, 22, …, project_id,
+  …, [<reCAPTCHA token>]]]`; about 30 s later the reply is the new audio media
+  `[[[media_id, project_id, workflow_id, …, [[…, sample, style, director's notes,
+  "models/gemini-v4s-tts-flow", [[preset, name]]]]]], …]`. The page then sends `lt8g5`
+  (`media.media_metadata.visibility` = 1) and `mYWVGd` (the workflow's `metadata.display_name`).
+  The voice does not attach itself: picking it in the list does. Credits stayed at 1,050.
+  In `Zzl0ze[2]` the audio record keeps its details at `[10][0]`: `[None x6, sample, style,
+  notes, model, "audio/wav", [[preset, name]]]`; its workflow (`Zzl0ze[1]`) carries the name.
+- **The sample needs the page.** `no0P6` carries a reCAPTCHA token, so aistudio drives the dialog
+  for a new voice and sends only the attach (`rzMKMb`) itself.
+- **Test leftovers in the "aistudio" project:** custom voices "Mila voice" (`d14e0551`, given to
+  Mila Vance) and "Paper boat voice" (`c876bc12`, made by the CLI's first `--style` run; Paper
+  boat's voice was then removed again).
+
+### Flow image runs: a second "Settings" button and late replies (2026-11-02, free, live)
+
+- **Two "Settings" buttons.** The project page's top bar gained an icon button named "Settings"
+  (tooltip "View settings": view mode, grid size, sound on hover, tile details). It comes before
+  the prompt box's "Settings" (class `agent-action-button`), which still opens "Agent settings"
+  (Confirm before generating, image and video defaults, Save). Pressing the first one made every
+  `flow image`/`flow video` run wait 30 s for "Image generation default model" and fail with
+  "the page did not show what aistudio expected in time". aistudio now presses the last one.
+- **A free image's result can come after the agent's first reply.** One run's agent ended a
+  StreamChat reply with "I will generate 1 image…" and sent the generation later; the 10 s
+  grace after a reply without a quote ran out, and the run said "replied without a quote …
+  nothing was spent" while Flow made the image. In other runs one reply held everything. With a
+  character attached, a reply ended after the 90 s limit (the image existed about 75 s in), and
+  the run timed out. Image runs (free models only) now wait up to 240 s for the generation, and
+  a reply without one is reported as "may still be generating", never as nothing made.
+
+### Flow grid tiles and lost free-image replies (2026-11-02, free, live)
+
+- **The tile caption is a button now.** A media tile's title sits inside
+  `<button class="footer-left" aria-label="<title>">` (in `flow-tile-hover-footer`). aistudio
+  found a tile's own "More options" by taking the caption's nearest ancestor holding any labelled
+  button, which is now that footer, so every `--ingredient` attach failed with "button 'More
+  options' not found". It now takes the nearest ancestor that holds a "More options" button
+  (the `flow-image-tile`, whose buttons are Favorite, Reuse prompt, More options).
+- **A finished free image whose reply never arrived.** A Nano Banana 2.1 run with Mila Vance and
+  two ingredients timed out after 240 s: the page showed "I've generated the image…" and the
+  image (`2bd26916`) was in the project, but no StreamChat reply carrying it was read. The same
+  run with one ingredient read its single reply about 120 s after sending. Chrome can drop a
+  reply body (see "Flow project reads that came back empty"), which looks the same. Image runs
+  now read the project before sending; when no reply shows the generation by the deadline,
+  aistudio reads the project again (up to 3 times) and takes the new, finished images created
+  since the send, with a warning that the model, aspect and attachments were not checked. While
+  any new image is still running, the run stays a TIMEOUT.
+- **A start frame and a character do not mix.** `flow video --start-frame <image> --character
+  <name>` got no quote: the agent said its first-frame tool (`generate_video_with_first_frame`)
+  takes one start image and no character, and asked whether to use reference-to-video instead.
+  `--start-frame` alone and `--ingredient <same image> --character <name>` were both quoted at
+  10 credits (Veo 3.1 Lite, 8 s, 9:16). The start-frame plan says "using Veo 3.1 - Lite from your
+  start frame image", which the plan parser read as the model name; it now stops at "from",
+  "for" and "to" as well.
+
+### Paid Flow clips on a busy day (2026-11-02, Veo 3.1 Lite, 0 credits charged)
+
+- **An approved clip can fail with no charge.** One approved 10-credit clip (ingredient plus
+  character) showed "Failed – Something went wrong" in the chat, and the agent added that it was
+  "waiting in the queue due to high demand". The media never appeared in the project and credits
+  stayed at 1050. aistudio followed it until `--timeout` (20 minutes) and reported
+  `credits_spent: 10`, the quote. A timeout now reads the credits again and reports what was
+  charged (`credits_spent`, `credits_left`), with a warning when nothing was. The failed job's
+  status code is still unknown (its record was gone), so the follow still waits until the deadline.
+- **A lost quote.** On the retry, the page showed the agent's "…costing 10 credits?" with Approve
+  and Reject, but aistudio read no permission request (the reply body did not arrive) and said
+  "replied without a quote". It did not press Reject, so the request stayed waiting in Flow (it
+  was rejected by hand afterwards). Now any reply without a quote is followed by Reject, and an
+  empty reply body is reported as "Flow's reply never reached aistudio"; nothing is spent, and
+  re-running is safe.
+- **A reply to the last Reject.** One paid run read "I've cancelled that video generation. Are
+  there any changes…", the agent's answer to the previous run's Reject, instead of a quote.
+  Nothing was spent; the next run was quoted normally.
+- **Root cause of the lost and wrong replies.** Two things, seen with a traced quote-only run:
+  (1) the StreamChat reply body reached aistudio empty (`bytes=0`) on 3 of 4 runs while the page
+  showed the full quote; aistudio now fetches chat replies itself (`route.fetch`, no timeout) and
+  fulfils the page with the same response, so the body cannot be lost (real-Chrome test). (2)
+  Flow's agent remembers rejected requests across sessions: after several quote-only runs (each
+  ends in Reject) it answered "I notice you've cancelled the permission request for generating
+  this video multiple times… I'm holding off". Every instruction now says "This is a new
+  request: earlier cancelled requests do not apply, so ask for permission as usual."; the next
+  run was quoted normally.
+- **The reply to a Reject.** Pressing Reject sends a StreamChat request; its reply ("I've
+  cancelled the video generation…") finished about 24 s later (traced). aistudio closed the
+  browser right after pressing, and every run that came next got that reply instead of its
+  quote ("I've cancelled the generation since permission was denied…"). `reject()` now waits up
+  to 60 s for the reply to each Reject it pressed.
+- **What "Failed" was.** Traced on the retry of the phone clip (Mila Vance plus a keyframe of her
+  holding the AptusFit phone): the job's `jwpduf` poll went from status 2 to
+  `[4, [3, "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED"], [reason]]` about a minute in, and the
+  credits went 1040 → 1030 (reserved at Approve) → 1040 (returned). The agent's chat text still
+  said "waiting in the queue due to high demand", which is not the reason. Status 4 now ends the
+  follow at once: `flow video|extend|edit` fail with `GENERATION_FAILED`, Flow's reason in words,
+  and the measured charge. The same character's squat clip passed the filter; the face in a close,
+  front-facing keyframe seems to be what trips it.
+- **A failure aistudio could not tie to a poll.** A third phone-clip run (character plus the gym
+  plate and the phone image, medium-wide) failed the same way and was refunded, but aistudio kept
+  waiting: no status-4 record it could link to the job arrived (after a reload the page polls no
+  failed jobs at all). The chat's "Failed – Something went wrong" card is a `flow-error-tile`;
+  `approve_and_follow` now counts those before Approve and ends the follow when a new one shows
+  (`GENERATION_FAILED`, reason `FLOW_SHOWED_FAILED`). This only ends a wait; it never approves.
+- **Too many references.** Veo 3.1 Lite with a character plus two ingredients (the gym plate and
+  the phone image) failed at once with status 4, `INVALID_ARGUMENT`, refunded; the earlier
+  unexplained phone-clip failure had the same inputs. One ingredient plus the character was made
+  (10 credits). A shot with the face out of frame (hands holding the phone, the line spoken
+  off-screen) passed the filter for real or famous people that blocked the face-to-camera
+  versions.

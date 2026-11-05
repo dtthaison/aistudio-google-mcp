@@ -115,6 +115,10 @@ aistudio flow character create Apple --photo <image-media-id>   # free: the phot
 aistudio flow character list
 aistudio flow character personality <id> "calm and curious"     # free
 aistudio flow character body <id> "full body, standing"         # 0 credits on Nano Banana 2.1
+aistudio flow character voices --search upbeat                  # Flow's 30 presets + your custom voices
+aistudio flow character voice <id> Laomedeia                    # free: a preset voice
+aistudio flow character voice <id> Laomedeia --style "upbeat fitness coach"   # free: a new custom voice
+aistudio flow character voice <id> --clear
 aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
 aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 aistudio flow scene download <scene-id> -o scene.mp4

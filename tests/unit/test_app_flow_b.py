@@ -108,7 +108,8 @@ class FakePage:
         by_title = {t: m for m, t in self.contents_value.titles.items() if m not in hidden}
         self.attached.append(self.uploaded.get(title) or by_title[title])
 
-    async def submit_for_quote(self, text, *, timeout_s=90.0):
+    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False):
+        self.expect_generation = expect_generation
         self.calls.append(("submit", text))
         media = self.attached if self.turn_media is None else self.turn_media
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",

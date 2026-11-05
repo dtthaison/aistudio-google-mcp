@@ -63,7 +63,7 @@ quotes and write each `'` as `'\''`.
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
-| Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image] --json` |
+| Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
 | Flow character from a description (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<Name>' '<description>' -o robot.png --json` |
@@ -73,6 +73,8 @@ quotes and write each `'` as `'\''`.
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Save a frame of a Flow clip as an image (free; for shot-to-shot chaining) | `aistudio flow frame save <clip media id> [--at SECONDS] [-o frame.jpg] --json`: the last frame by default, or the nearest frame to `--at`; pass the returned `media_id` to `--start-frame`, `--end-frame` or `--ingredient` (no upload, no `--i-have-rights`) |
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
+| Character voices: list, set, remove (free) | `aistudio flow character voices [--search TEXT] --json` (Flow's 30 presets and the project's custom voices), `aistudio flow character voice <id> <preset or custom voice name or media id> --json`, `aistudio flow character voice <id> --clear --json`; `flow character list` shows each character's `voice` |
+| New custom voice for a character (0 credits measured) | `aistudio flow character voice <id> <preset> --style '<performance style>' [--voice-name '<Name>'] --json`: Flow saves a sample of the preset spoken in that style as a project voice, then gives it to the character |
 | Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
 | Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
 | Flow Tools: list, read, save the code (free) | `aistudio flow tool list [--kind mine\|template\|community] [--search TEXT] --json`, `aistudio flow tool get <id> --json`, `aistudio flow tool export <id> <empty folder> --json` |
@@ -99,7 +101,10 @@ quotes and write each `'` as `'\''`.
   (`"status": "done"`, `credits_spent` 0, a warning saying Flow did not ask). Run it only when
   the user wants the images. A `TIMEOUT` error saying Flow "was still generating without asking"
   or "had not finished replying" means Flow may still finish the images: tell the user to check
-  the project in Flow, never re-run it blindly. Video models quote first (verified). Other image models are
+  the project in Flow, never re-run it blindly: find the newest images with `flow media` and
+  `flow download` them. A warning that Flow's reply "never reached aistudio" means the image was
+  found in the project instead (its model and attachments were not checked: look at it). Video
+  models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
@@ -113,7 +118,19 @@ quotes and write each `'` as `'\''`.
   `flow character body`, `OVER_BUDGET` is aistudio's own refusal before anything was sent.
   A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
   `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
-  `"status": "timeout"` means credits were spent: give the user `project_url`.
+  `"status": "timeout"` means the job was approved: give the user `project_url`. Its
+  `credits_spent` is measured (`credits_left` too); 0 with a warning means Flow has not charged:
+  the job failed (Flow shows "Failed" when busy) or is still queued, so check Flow before a
+  re-run. An `AGENT_REPLY` saying Flow's reply "never reached aistudio" spent nothing (the
+  request was rejected): re-running is safe.
+  `GENERATION_FAILED` means Flow started the job and then failed it, for example its filter for
+  real or famous people; the hint says what was charged (failed jobs were refunded). Re-running
+  the same prompt and images usually fails again: change the shot (wider, another keyframe)
+  and ask the user before spending again. In a character run, dropping `--character` and keeping
+  a keyframe that shows the character as `--ingredient` got past this filter once.
+  `RATE_LIMITED` ("unusual activity", or "too many generations are running") is Flow being busy,
+  not the prompt: nothing was spent; wait a few minutes (other sessions may be generating too),
+  then try once more. Never retry in a loop.
   After a `--max-credits` run, any other error may mean credits were spent (the hint says so and
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
@@ -126,6 +143,10 @@ quotes and write each `'` as `'\''`.
   Flow's request carried other attachments than asked (e.g. a leftover in Flow's prompt box): it
   was rejected and nothing was spent. Tell the user to check the prompt box in Flow before a
   re-run. A character's image id is not an ingredient: use `--character` instead.
+- Character voices: `--style` saves a new custom voice in the project each time it runs, so run
+  it once per user ask. After an error that mentions a saved voice, never re-run with `--style`:
+  give the character that voice by its media id (the hint names it). Custom voice names are
+  unique per project; a clash is refused before anything is saved.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   `scene_id` can be null when Flow had not listed the scene yet: find it with `flow scene list`.
   To make it longer, run `flow extend` again on the newest clip (the scene's last clip); each
@@ -192,6 +213,52 @@ quotes and write each `'` as `'\''`.
   wait for it rather than retrying in a loop.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
   without the user's OK.
+
+## Making a Flow scene (story, character and setting that stay the same)
+
+A **clip** is one generation (4–10 s, 8 s on Veo 3.1 Lite). A **scene** is Flow's timeline of
+clips: `flow extend` adds a clip to the same scene, and `flow scene stitch` joins clips into a new
+one. Flow keeps nothing between generations except what you attach, so consistency comes from
+fixed inputs, not from Flow remembering.
+
+1. **Story bible (free).** Before any video, write down and reuse word for word:
+   - the character: a Flow character (`flow character create`, then `body` and `voice`), attached
+     with `--character '<Name>'` on every image and clip;
+   - the setting: one or two free **location plates** (`flow image`, no people, same aspect as the
+     video), passed as `--ingredient <plate id>` on every shot in that place;
+   - fixed sentences for wardrobe, setting and style (light, lens, colour, aspect). Paste them
+     unchanged into every prompt; a changed adjective gives a different gym or outfit;
+   - product or brand images (app screens, logos) as `--ingredient` ids from `flow media`.
+2. **Storyboard.** One line per shot: framing, action, spoken line (under about 20 words for an
+   8-second clip), and how it joins the next shot (extend, cut, or a saved frame).
+3. **Keyframes (free).** Make each shot's first frame with `flow image --character …
+   --ingredient <plate> [--ingredient <product>]`, review them together, and redo only the weak
+   ones. Check face, outfit, setting and props against the bible before any credits are spent.
+4. **Clips (credits).** Flow cannot combine a start frame with a character (its agent replies
+   with a question, `AGENT_REPLY`, nothing spent). Pick one per clip:
+   - `flow video --start-frame <keyframe id>`: the clip opens on the exact keyframe, but the
+     character (and its saved voice) is not attached;
+   - `flow video --ingredient <keyframe id> --character '<Name>'`: the character's look and
+     voice, with the keyframe only as a guide.
+
+   With a character, pass at most one `--ingredient`: a character plus two failed with
+   `INVALID_ARGUMENT` (refunded). Flow's filter for real or famous people can block realistic
+   face-to-camera shots of a made-up character (`GENERATION_FAILED`, refunded); a wider shot,
+   or the face out of frame with the line spoken off-screen, got through.
+
+   Quote first and ask (the rules above). Draft on Veo 3.1 Lite (10 credits a clip, measured for
+   both); Fast is about 20 and Quality about 100, so upgrade only approved shots.
+   - Same shot continuing: `flow extend <last clip>` (10 credits, no quote: ask first).
+   - New angle in the same moment: `flow frame save <clip>` and pass the frame as
+     `--start-frame` or `--ingredient` of the next clip.
+   - Hard cut: a new keyframe from step 3.
+5. **Assemble (free).** `flow scene stitch <id>@START-END …` (whole seconds) and
+   `flow scene download`.
+
+Prompt tips: say who speaks and put the line in quotes (`She says: "…"`); keep one action per
+clip; describe camera and light the same way every time; name the brand on screen only when a
+brand image is attached (models misspell text). Check each result for a changed face, outfit,
+setting or prop before the next step, and fix the keyframe rather than paying to re-roll a clip.
 
 ## Not available yet
 
