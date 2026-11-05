@@ -656,6 +656,18 @@ async def test_unusual_activity_is_a_rate_limit_not_a_prompt_problem(logged_in_p
     assert ("reject",) in pages[0].calls and not pages[0].started
 
 
+async def test_too_many_running_is_a_rate_limit(logged_in_profile, tmp_path):
+    # Live (2026-11-05), seconds after a video finished
+    text = "error Too many generations are running. Please wait and try again. Try again"
+    kw, pages, _ = harness(turn=AgentTurn(text, None))
+    with pytest.raises(RateLimitError) as info:
+        await flow_generate(logged_in_profile(), "video", "an apple", model="veo-3.1-lite",
+                            duration=8, max_credits=10, out=tmp_path / "a.mp4", **kw)
+    assert "too many generations" in info.value.message
+    assert "nothing was spent" in info.value.hint and "rephrase" not in info.value.hint
+    assert ("reject",) in pages[0].calls and not pages[0].started
+
+
 def image(media_id, *, created, status=3):
     return dataclasses.replace(DONE, media_id=media_id, model_key=None, seconds=None,
                                video_url=None, status=status, created=created)

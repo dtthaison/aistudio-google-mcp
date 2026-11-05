@@ -59,6 +59,8 @@ from aistudio.paths import Profile
 STATE_FILE = "flow.json"
 # Flow's agent answers this, in place of a plan, after many requests in a row (live 2026-11-05).
 UNUSUAL_ACTIVITY = "noticed some unusual activity"
+# ...and this right after a generation finished, while Flow still counted it as running (live).
+TOO_MANY_RUNNING = "too many generations are running"
 DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
@@ -236,6 +238,12 @@ async def flow_generate(
                         hint=_with_note("nothing was spent; this is Flow's limit on many requests "
                                         "in a row, not the prompt: wait several minutes before "
                                         "one more try, and never retry in a loop", waiting))
+                if TOO_MANY_RUNNING in turn.text.lower():
+                    raise RateLimitError(
+                        "Flow refused the request: too many generations are running",
+                        hint=_with_note("nothing was spent; this is not the prompt: wait a minute "
+                                        "or two for running generations (also in other tabs) to "
+                                        "finish, then try once more", waiting))
                 raise AgentReplyError(f"Flow's agent replied without a quote: {turn.text[-500:]}",
                                       hint=_with_note("rephrase the prompt or add options; "
                                                       "nothing was spent", waiting))
