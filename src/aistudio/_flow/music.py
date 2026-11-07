@@ -204,3 +204,113 @@ def credits_left(text: str) -> int | None:
     except (ValueError, KeyError, TypeError):
         return None
     return int(value) if isinstance(value, (int, float)) else None
+
+
+LIBRARY_PAGE = 20  # the Songs page asks for 20 at a time (live 2026-11-07)
+
+
+@dataclasses.dataclass(frozen=True)
+class LibrarySong:
+    """One song of the user's Flow Music library, as ``GET /clips/auth-user`` and
+    ``POST /clips`` describe it. ``model`` is ``None``: the records seen name none."""
+
+    clip_id: str
+    title: str
+    created: str | None
+    seconds: float | None
+    model: str | None
+    status: str  # "done", "in_progress" or "failed"
+    has_lyrics: bool
+    prompt: str | None
+    lyrics: str | None
+    audio_url: str | None
+    wav_url: str | None
+    session_id: str | None
+
+
+def library_path(offset: int) -> str:
+    return (f"/clips/auth-user?limit={LIBRARY_PAGE}&offset={offset}&filter=generations"
+            "&include_disliked=false")
+
+
+def check_clip_id(value: str) -> str:
+    """The song id in canonical form; the server answers anything else with HTTP 422."""
+    try:
+        return str(uuid.UUID(value.strip()))
+    except ValueError:
+        raise ValidationError(f"{value!r} is not a Flow Music song id",
+                              hint='ids look like 3f2c15b6-1166-4111-8937-3ecf40ad6f83; see '
+                                   '"aistudio flow music list"') from None
+
+
+def _status(row: dict[str, Any], seconds: float | None, audio: str | None) -> str:
+    for field in ("duration", "lyrics"):
+        record = row.get(field)
+        state = str(record.get("status") or "").lower() if isinstance(record, dict) else ""
+        if "fail" in state or "error" in state:
+            return "failed"
+    return "done" if seconds is not None and audio else "in_progress"
+
+
+def _song_of(row: Any, where: str) -> LibrarySong:
+    if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"]:
+        raise SchemaDriftError(where, ("id",), "a song record")
+    duration = row.get("duration")
+    seconds = None
+    value = duration.get("value") if isinstance(duration, dict) else None
+    if isinstance(duration, dict) and duration.get("status") == "completed" \
+            and isinstance(value, (str, int, float)):
+        try:
+            seconds = round(float(value), 1)
+        except ValueError:  # a non-numeric string
+            seconds = None
+    lyrics_record = row.get("lyrics")
+    body = lyrics_record.get("value") if isinstance(lyrics_record, dict) else None
+    text = body.get("text") if isinstance(body, dict) else None
+    lyrics = text if isinstance(text, str) and text.strip() else None
+    operation = row.get("operation")
+    operation = operation if isinstance(operation, dict) else {}
+    audio, wav = row.get("audio_url"), row.get("wav_url")
+    audio = audio if isinstance(audio, str) and audio else None
+    prompt, model = operation.get("sound_prompt"), operation.get("model")
+    session, created = operation.get("conversation_id"), row.get("created_at")
+    return LibrarySong(
+        clip_id=row["id"], title=str(row.get("title") or "Untitled"),
+        created=created if isinstance(created, str) else None, seconds=seconds,
+        model=model if isinstance(model, str) and model else None,
+        status=_status(row, seconds, audio),
+        has_lyrics=lyrics is not None and lyrics.strip().lower() != "[instrumental]",
+        prompt=prompt if isinstance(prompt, str) else None, lyrics=lyrics,
+        audio_url=audio, wav_url=wav if isinstance(wav, str) and wav else None,
+        session_id=session if isinstance(session, str) and session else None)
+
+
+def library_page(text: str) -> list[LibrarySong]:
+    """One page of the user's songs (``{"clips": [...]}``), deleted ones left out."""
+    try:
+        rows = json.loads(text)["clips"]
+    except (ValueError, KeyError, TypeError):
+        rows = None
+    if not isinstance(rows, list):
+        raise SchemaDriftError("GET /clips/auth-user", ("clips",), "a list of songs")
+    songs = [_song_of(row, "GET /clips/auth-user") for row in rows]
+    return [song for song, row in zip(songs, rows, strict=True) if not row.get("deleted_at")]
+
+
+def clip_record(text: str, clip_id: str) -> LibrarySong | None:
+    """The song ``POST /clips`` describes, or ``None`` for an id the server does not know (it
+    answers ``{"clips": {id: null}}``)."""
+    try:
+        row = json.loads(text)["clips"][clip_id]
+    except (ValueError, KeyError, TypeError):
+        raise SchemaDriftError("POST /clips", ("clips", clip_id), "the clip record") from None
+    if row is None:
+        return None
+    song = _song_of(row, "POST /clips")
+    return None if row.get("deleted_at") else song
+
+
+def song_matches(song: LibrarySong, search: str) -> bool:
+    needle = search.strip().lower()
+    return not needle or any(needle in (field or "").lower()
+                             for field in (song.title, song.prompt, song.lyrics))

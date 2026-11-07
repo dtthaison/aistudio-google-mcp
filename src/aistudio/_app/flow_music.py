@@ -15,14 +15,21 @@ from aistudio._app.flow import _check_output
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_music
 from aistudio._flow.music import (
+    LIBRARY_PAGE,
     SESSION_URL,
     SITE,
     SONG_PRICE,
     Clip,
+    LibrarySong,
+    check_clip_id,
     clip_of,
+    clip_record,
     credits_left,
     find_model,
     job_id,
+    library_page,
+    library_path,
+    song_matches,
     song_of,
     song_request,
 )
@@ -30,6 +37,7 @@ from aistudio._media.save import free_name, write_file
 from aistudio.exceptions import (
     AIStudioError,
     AuthError,
+    NotFoundError,
     OverBudgetError,
     ServerError,
     ValidationError,
@@ -43,6 +51,7 @@ GOOGLE_SAVE_TIMEOUT_S = 20.0
 CLIP_POLLS = 20
 CLIP_POLL_MS = 3000
 LENGTH_SLACK_S = 10
+MAX_LIBRARY_PAGES = 100  # 2,000 songs; a stop for a server that never returns an empty page
 
 
 async def flow_music(
@@ -150,6 +159,106 @@ async def flow_music_credits(profile: Profile, *, visible: bool = False,
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         credits = await _signed_in_credits(ui)
     return {"credits": credits}
+
+
+def _row(song: LibrarySong) -> dict[str, Any]:
+    return {"clip_id": song.clip_id, "title": song.title, "created": song.created,
+            "seconds": song.seconds, "model": song.model, "status": song.status,
+            "has_lyrics": song.has_lyrics}
+
+
+def _session_url(song: LibrarySong) -> str:
+    return f"{SESSION_URL}/{song.session_id}" if song.session_id else f"{SITE}/library/my-songs"
+
+
+async def flow_music_list(profile: Profile, *, search: str | None = None, visible: bool = False,
+                          browser: Callable[..., Any] = open_browser) -> dict[str, Any]:
+    """The user's Flow Music songs, newest first (free: reads the Songs page's own list)."""
+    songs: list[LibrarySong] = []
+    seen: set[str] = set()
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        await _signed_in_credits(ui)
+        for page in range(MAX_LIBRARY_PAGES):
+            status, text = await ui.music_api("GET", library_path(page * LIBRARY_PAGE))
+            if status != 200:
+                raise _api_error("listing your songs", status, text)
+            fresh = [s for s in library_page(text) if s.clip_id not in seen]
+            if not fresh:
+                break  # an empty page, or one the server repeated
+            seen.update(s.clip_id for s in fresh)
+            songs.extend(fresh)
+    shown = [s for s in songs if song_matches(s, search or "")]
+    return {"songs": [_row(s) for s in shown], "count": len(shown)}
+
+
+async def _find_song(ui: Any, clip_id: str) -> LibrarySong:
+    await _signed_in_credits(ui)
+    status, text = await ui.music_api("POST", "/clips", {"clip_ids": [clip_id]})  # a lookup
+    if status != 200:
+        raise _api_error("looking up the song", status, text)
+    song = clip_record(text, clip_id)
+    if song is None:
+        raise NotFoundError(f"Flow Music has no song {clip_id}",
+                            hint='see "aistudio flow music list"')
+    return song
+
+
+async def flow_music_get(profile: Profile, clip_id: str, *, visible: bool = False,
+                         browser: Callable[..., Any] = open_browser) -> dict[str, Any]:
+    """One song with its prompt, lyrics and file links (free)."""
+    clip_id = check_clip_id(clip_id)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        song = await _find_song(ui, clip_id)
+    return {**_row(song), "prompt": song.prompt, "lyrics": song.lyrics,
+            "audio_url": song.audio_url, "wav_url": song.wav_url,
+            "project_url": _session_url(song)}
+
+
+async def flow_music_download(
+    profile: Profile,
+    clip_id: str,
+    *,
+    wav: bool = False,
+    out: Path | None = None,
+    overwrite: bool = False,
+    visible: bool = False,
+    browser: Callable[..., Any] = open_browser,
+    downloader: Callable[[str], Any] = download_music,
+) -> dict[str, Any]:
+    """Save a song that already exists (free). Without ``overwrite`` nothing is replaced."""
+    clip_id = check_clip_id(clip_id)
+    _check_output(out, 1, overwrite)
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        song = await _find_song(ui, clip_id)
+    place = _session_url(song)
+    if song.status != "done":
+        what = "failed" if song.status == "failed" else "still in progress"
+        raise ValidationError(f"song {clip_id} {what}: there is no file to download",
+                              hint='check it with "aistudio flow music list"')
+    url = song.wav_url if wav else song.audio_url
+    if not url:
+        raise ServerError(f"Flow Music has song {clip_id} but gave no "
+                          f"{'wav' if wav else 'audio'} link",
+                          hint=f"download it in Flow Music: {place}")
+    try:
+        data = await downloader(url)
+    except AIStudioError as exc:
+        exc.hint = f"{exc.hint} ({place})" if exc.hint else place
+        raise
+    mime, ext = _audio_type(data)
+    warnings: list[str] = []
+    if out is not None:
+        path = out
+        if out.suffix.lower() != ext:
+            warnings.append(f"{out} holds {mime} data; its extension says otherwise")
+    else:
+        path = free_name(Path(".") / f"flow-music-{clip_id}{ext}")
+    saved = write_file(path, data, overwrite=overwrite and path == out)
+    return {"clip_id": clip_id, "title": song.title, "seconds": song.seconds,
+            "project_url": place,
+            "files": [{"path": str(saved), "mime_type": mime, "bytes": len(data),
+                       "media_id": clip_id}],
+            "warnings": warnings}
 
 
 async def _signed_in_credits(ui: Any) -> int | None:

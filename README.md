@@ -89,7 +89,8 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
 | Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
 | Google Flow | `flow video/image/extend/edit`, `flow character ...` | Flow credits, only with `--max-credits` |
-| Google Flow Music | `flow music` (songs on flowmusic.app), `flow credits --music` | 5 Flow Music credits a song, only with `--max-credits`; the credits read is free |
+| Google Flow Music | `flow music list/get/download`, `flow credits --music` | free |
+| Google Flow Music | `flow music` (make a song on flowmusic.app) | 5 Flow Music credits a song, only with `--max-credits` |
 | Google Flow | `flow tool list/get/export`, `flow tool use` | free (a tool that calls `Flow.generate` needs `--allow-spend`) |
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
@@ -117,6 +118,9 @@ aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 
 aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8 --max-credits 10 -o apple.mp4
 aistudio flow music "upbeat lofi beat with soft piano"                 # price only (5 credits)
 aistudio flow music "warm acoustic pop" --lyrics-file song.txt --length 90 --max-credits 5 -o song.m4a
+aistudio flow music list --search lofi         # your songs: id, title, length, status (free)
+aistudio flow music get <song-id>              # its prompt and lyrics (free)
+aistudio flow music download <song-id> -o lofi.m4a   # a song you already have (free; --wav, --force)
 aistudio flow media --type video               # media ids in the "aistudio" Flow project
 aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
 aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
@@ -193,7 +197,10 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
 - **Flow Music** (flowmusic.app) is its own site with its own credits. `flow music` uses its
   Compose panel's request: one song per run (about 3 minutes unless `--length`), saved as .m4a
   (or `--wav`). It signs in with your Google account the first time, and the song also stays in
-  your Flow Music library.
+  your Flow Music library. `flow music list`, `get` and `download` only read that library and
+  cost nothing; `download` never overwrites a file unless you pass `--force`. A prompt that is
+  exactly `list`, `get` or `download` needs the word `generate` first. Extending or remixing a
+  song is not offered yet.
 - **One browser run per profile at a time.** Each profile has one Chrome profile; a second
   command that needs it waits for you to finish the first. Plain reads always work.
 - Each browser run also refreshes the saved session that the plain reads use. If you sign into

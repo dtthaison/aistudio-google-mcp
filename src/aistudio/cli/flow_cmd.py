@@ -29,7 +29,13 @@ from aistudio._app.flow import (
     flow_stitch,
     flow_voices,
 )
-from aistudio._app.flow_music import flow_music, flow_music_credits
+from aistudio._app.flow_music import (
+    flow_music,
+    flow_music_credits,
+    flow_music_download,
+    flow_music_get,
+    flow_music_list,
+)
 from aistudio._app.flow_tools import (
     flow_tool_create,
     flow_tool_edit,
@@ -172,7 +178,30 @@ video = _command("video")
 image = _command("image")
 
 
-@flow.command("music")
+class _MusicGroup(click.Group):
+    """``flow music PROMPT`` keeps generating a song: anything that is not a subcommand name
+    goes to ``generate``. A prompt that is exactly ``list``, ``get`` or ``download`` needs the
+    ``generate`` word."""
+
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> Any:
+        if args and args[0] in self.commands:
+            return super().resolve_command(ctx, args)
+        return "generate", self.commands["generate"], args
+
+
+@flow.group("music", cls=_MusicGroup, context_settings={"ignore_unknown_options": True})
+def music() -> None:
+    """Songs on Google Flow Music (flowmusic.app).
+
+    \b
+    flow music PROMPT              make a song (same as: flow music generate PROMPT); 5 credits
+    flow music list                your songs, with ids (free)
+    flow music get ID              one song's prompt and lyrics (free)
+    flow music download ID         save a song you already have (free)
+    """
+
+
+@music.command("generate")
 @click.argument("prompt", required=False)
 @click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help="Read the sound prompt from a file instead.")
@@ -222,6 +251,74 @@ def music_cmd(state: CliState, prompt: str | None, prompt_file: Path | None,
     emit(result, json_output=json_output, render=_render_music)
     if result["status"] == "timeout":
         raise SystemExit(2)
+
+
+def _clock(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes}:{rest:02d}"
+
+
+@music.command("list")
+@click.option("--search", help="Only songs whose title, prompt or lyrics contain TEXT.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_list(state: CliState, search: str | None, visible: bool, json_output: bool) -> None:
+    """Your Flow Music songs, newest first, with failed and unfinished ones (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_list(state.profile(), search=search, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        if not data["songs"]:
+            stdout.print("No songs.", markup=False)
+        _print_lines(f"{s['clip_id']}  {s['status']:11}  {_clock(s['seconds']):>5}  {s['title']}"
+                     for s in data["songs"])
+    emit(result, json_output=json_output, render=render)
+
+
+@music.command("get")
+@click.argument("song_id")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_get(state: CliState, song_id: str, visible: bool, json_output: bool) -> None:
+    """One Flow Music song with its prompt and lyrics (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_get(state.profile(), song_id, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"{data['title']}  ({data['clip_id']})", markup=False)
+        stdout.print(f"{data['status']}, {_clock(data['seconds'])}, created "
+                     f"{data['created'] or '?'}, model {data['model'] or '?'}", markup=False)
+        stdout.print(f"Prompt: {data['prompt'] or '-'}", markup=False)
+        stdout.print(f"Lyrics: {data['lyrics'] or '-'}", markup=False)
+        stdout.print(f"Session: {data['project_url']}", markup=False)
+    emit(result, json_output=json_output, render=render)
+
+
+@music.command("download")
+@click.argument("song_id")
+@click.option("--wav", is_flag=True,
+              help="Save the WAV file (about 34 MB for 3 minutes) instead of the .m4a.")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Output file (default: flow-music-<song id>.m4a).")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_download(state: CliState, song_id: str, wav: bool, out: Path | None, force: bool,
+                   visible: bool, json_output: bool) -> None:
+    """Download a Flow Music song you already have, by id (free; never overwrites without
+    --force)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_download(state.profile(), song_id, wav=wav, out=out,
+                                             overwrite=force, visible=visible))
+    emit(result, json_output=json_output, render=_render_files)
 
 
 def _render_music(data: dict[str, Any]) -> None:
