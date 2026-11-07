@@ -1,6 +1,6 @@
 ---
 name: aistudio
-description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, editing an image, transcribing audio to text, or video/images with Google Flow, or Google Flow Tools (list, read, build, change or use one) — or mentions the aistudio CLI.
+description: Use when the user asks about their own Google AI Studio (aistudio.google.com) account — which models they can use and what they cost, their saved prompts or chats, their Build apps (aistudio.google.com/apps) and the prompts behind them, the Build gallery, token counts, TTS voices, generating speech, images or music with AI Studio, editing an image, transcribing audio to text, or video/images with Google Flow, songs with Google Flow Music (flowmusic.app), or Google Flow Tools (list, read, build, change or use one) — or mentions the aistudio CLI.
 ---
 
 # aistudio CLI
@@ -60,7 +60,8 @@ quotes and write each `'` as `'\''`.
 | Edit or combine images (same price) | the same command plus `--image <file>` (repeatable) |
 | Speech to text (uses quota, a fraction of a cent per short clip) | `aistudio transcribe <audio file> [--timestamps] [--diarize] [--vocabulary '<names>'] -o out.txt --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
-| Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` |
+| Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` (`--music` for Flow Music's own credits) |
+| Song with Google Flow Music (flowmusic.app; **5 Flow Music credits, no quote from Flow Music**; writes .m4a, or .wav with `--wav`) | `aistudio flow music --prompt-file <file> [--lyrics-file <file>] [--length SECONDS] [--bpm N] [--seed N] [--title T] [-m 'Lyria 3.5'\|'Lyria 3 Pro'] --max-credits 5 -o song.m4a --json`; without `--max-credits` it only reports the price. No lyrics means an instrumental |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
@@ -112,6 +113,10 @@ quotes and write each `'` as `'\''`.
      waiting: tell the user to press Reject on it in Flow, never Approve.
   2. Show the user the cost and ask.
   3. Re-run with `--max-credits <credits>`.
+
+  `flow music` works the same way, but its price (5 credits) is aistudio's measured one: Flow
+  Music shows no quote. A `GENERATION_FAILED` or `TIMEOUT` names the job; look in the user's
+  Flow Music Songs before any re-run.
 
   For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
   and nothing was spent. For `flow extend`, `flow edit`, `flow character create` and

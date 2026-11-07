@@ -15,8 +15,11 @@ how to reproduce it and the aistudio version (`aistudio --version`).
 - Your session stays in your profile folder (`~/.aistudio/profiles/<name>/`, or under
   `$AISTUDIO_HOME`). The folders are owner-only (0700) and the session files are 0600.
 - It only talks to Google: `aistudio.google.com`, its internal RPC host
-  (`alkalimakersuite-pa.clients6.google.com`), `flow.google.com` and the hosts those pages load.
-  There is no telemetry.
+  (`alkalimakersuite-pa.clients6.google.com`), `flow.google.com`, Google Flow Music
+  (`www.flowmusic.app`, and its public song files on `storage.googleapis.com`) and the hosts
+  those pages load. There is no telemetry.
+- It never spends Flow Music credits without `--max-credits`. Flow Music shows no price before
+  a song, so aistudio holds a run to its measured price and reports what was charged.
 - It never spends Flow credits without `--max-credits`, and never approves a Flow quote above
   that budget. It reads your credits before and after, and warns if Flow charged something
   other than its quote.
