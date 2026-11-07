@@ -183,10 +183,13 @@ def clip_of(text: str, clip_id: str) -> Clip:
         raise SchemaDriftError("POST /clips", ("clips", clip_id), "the clip record") from None
     duration = row.get("duration") or {}
     seconds = None
-    if isinstance(duration, dict) and duration.get("status") == "completed":
+    if not isinstance(duration, dict):
+        duration = {}
+    value = duration.get("value")
+    if duration.get("status") == "completed" and isinstance(value, (str, int, float)):
         try:
-            seconds = float(duration.get("value"))
-        except (TypeError, ValueError):
+            seconds = float(value)
+        except ValueError:  # a non-numeric string
             seconds = None
     audio, wav = row.get("audio_url"), row.get("wav_url")
     return Clip(clip_id, str(row.get("title") or "Untitled"), seconds,
