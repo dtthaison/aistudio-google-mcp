@@ -26,6 +26,12 @@ def aistudio_home(tmp_path, monkeypatch):
     return home
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(aistudio_home):
+    """No test reads or writes the real ~/.aistudio (the spend log is written by every run)."""
+    return aistudio_home
+
+
 @pytest.fixture
 def logged_in_profile(aistudio_home):
     def make(name="default", api_key=TEST_API_KEY, authuser=1):

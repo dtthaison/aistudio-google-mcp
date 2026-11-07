@@ -92,6 +92,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Google Flow Music | `flow music` (songs on flowmusic.app), `flow credits --music` | 5 Flow Music credits a song, only with `--max-credits`; the credits read is free |
 | Google Flow | `flow tool list/get/export`, `flow tool use` | free (a tool that calls `Flow.generate` needs `--allow-spend`) |
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
+| Spend log | `spend` | free (reads a local file) |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
 
 ```sh
@@ -176,6 +177,15 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
   photo you upload. aistudio never answers it for you. Pass it only when it's true.
 - A run that times out may still finish, and be charged, on Google's side. Check AI Studio or
   Flow before you run it again.
+- **The spend log.** Every run that spent, or may have spent, is added to a local file
+  (`profiles/<name>/spend.jsonl`): finished runs, timeouts and failures (a failed paid run is
+  logged with its spend as unknown and the `--max-credits` it was allowed). Quote-only runs and
+  refusals that sent nothing are not logged. A line holds the time, command, model, status,
+  credits spent as measured, media ids, output paths and the job or project link. It never holds
+  prompt text, lyrics, titles or error messages. `aistudio spend [--since 7d|2026-11-01]
+  [--command flow] [--json]` lists them with totals per unit: Flow credits, Flow Music credits
+  and an AI Studio dollar estimate (catalog price per run; models without one are counted but
+  not priced). If the log cannot be written, the command prints a warning and carries on.
 
 ## Good to know
 
@@ -219,7 +229,8 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
 
 Everything lives in `~/.aistudio/` (override with `AISTUDIO_HOME`): `config.json` (the default
 profile) and `profiles/<name>/`, which holds `storage_state.json` and `session.json` (your
-sign-in), `chrome/` (that profile's Chrome profile) and small caches. `aistudio auth logout`
+sign-in), `chrome/` (that profile's Chrome profile), `spend.jsonl` (the spend log) and small
+caches. `aistudio auth logout`
 deletes a profile's sign-in and Chrome profile; `aistudio profile delete NAME` deletes the
 whole profile.
 

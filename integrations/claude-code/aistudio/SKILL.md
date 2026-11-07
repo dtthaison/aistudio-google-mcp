@@ -60,6 +60,7 @@ quotes and write each `'` as `'\''`.
 | Edit or combine images (same price) | the same command plus `--image <file>` (repeatable) |
 | Speech to text (uses quota, a fraction of a cent per short clip) | `aistudio transcribe <audio file> [--timestamps] [--diarize] [--vocabulary '<names>'] -o out.txt --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
+| What paid commands spent (free; local file, no browser) | `aistudio spend [--since 1h\|7d\|2026-11-01] [--command flow] --json`: `entries` (time, command, model, `status` done/timeout/failed, `credits_spent`, `max_credits`, media ids, output paths, job or project link) and `totals` per unit (`flow_credits`, `flow_music_credits`, `usd_estimate`) |
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` (`--music` for Flow Music's own credits) |
 | Song with Google Flow Music (flowmusic.app; **5 Flow Music credits, no quote from Flow Music**; writes .m4a, or .wav with `--wav`) | `aistudio flow music --prompt-file <file> [--lyrics-file <file>] [--length SECONDS] [--bpm N] [--seed N] [--title T] [-m 'Lyria 3.5'\|'Lyria 3 Pro'] --max-credits 5 -o song.m4a --json`; without `--max-credits` it only reports the price. No lyrics means an instrumental |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
@@ -140,6 +141,15 @@ quotes and write each `'` as `'\''`.
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
   generating" is set to Never. Tell the user; aistudio will not change it.
+- **After any error from a paid command, check the spend log before a re-run.** Run
+  `aistudio spend --since 1h --json` (add `--command flow` to narrow it). Every run that spent or
+  may have spent is logged there, including failures and timeouts: a `"failed"` entry has
+  `credits_spent: null` (unknown) and `max_credits`, the most it could have cost; a `"timeout"`
+  entry names the job (`media_ids`, `job_id`, `url`). If the log shows an entry for the run, treat
+  the run as possibly paid: look at the named media or job in Flow first and ask the user before
+  spending again. No entry means nothing was sent (a refusal such as `OVER_BUDGET`, or a quote),
+  so a re-run is safe. The log holds no prompt text or error messages: those are in the error
+  output. If `aistudio spend` cannot read the log, treat the run as possibly paid.
 - **Never pass `--i-have-rights`** unless the user confirmed they have the rights to that exact
   file. It answers Flow's "Rights to use this image" question for them.
 - Flow character names are unique per project (Flow attaches characters by name). If
