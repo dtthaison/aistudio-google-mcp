@@ -83,7 +83,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 
 | Area | Commands | Cost |
 |---|---|---|
-| Models and account | `models list/get/star/unstar`, `count-tokens`, `prompt list`, `voices list`, `status` | free |
+| Models and account | `models list/get/star/unstar`, `count-tokens`, `prompt list/get`, `voices list`, `status` | free |
 | Build apps | `app list/get/recent/export`, `gallery list/get` | free |
 | Build apps | `app create`, `app prompt` | your Build quota |
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
@@ -99,6 +99,8 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 aistudio models list --category images
 aistudio models get lyria-3.5
 aistudio prompt list --type chat
+aistudio prompt get <id-prefix>                # one prompt in full: system instructions, settings, turns
+aistudio prompt get <id-prefix> -o chat.md     # the same as a markdown file (--force to overwrite)
 aistudio count-tokens "hello world" -m gemini-flash-latest
 aistudio app list
 aistudio app get <id-prefix>                   # one app and its builder runs

@@ -26,13 +26,13 @@ from aistudio._rpc.rows.apps import (
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
 from aistudio._rpc.rows.preferences import decode_starred
-from aistudio._rpc.rows.prompts import decode_prompt_list
+from aistudio._rpc.rows.prompts import decode_prompt, decode_prompt_list
 from aistudio._rpc.rows.status import decode_incidents
 from aistudio._transport.http import HttpTransport
 from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem
 from aistudio._types.chat import TokenCount
 from aistudio._types.models import Model
-from aistudio._types.prompts import PromptSummary
+from aistudio._types.prompts import PromptDetail, PromptSummary
 from aistudio._types.status import Incident
 from aistudio.exceptions import ValidationError
 from aistudio.paths import Profile
@@ -102,6 +102,10 @@ class _Prompts:
     async def list(self, page_size: int = 100) -> list[PromptSummary]:
         raw = await self._client.call(registry.LIST_PROMPTS, prompts_params.list_prompts(page_size))
         return decode_prompt_list(raw)
+
+    async def get(self, prompt_id: str) -> PromptDetail:
+        raw = await self._client.call(registry.GET_PROMPT, prompts_params.get_prompt(prompt_id))
+        return decode_prompt(raw)
 
 
 class _Chat:

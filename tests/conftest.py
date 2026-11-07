@@ -260,3 +260,52 @@ class FakeUi:
 @pytest.fixture
 def fake_ui():
     return FakeUi
+
+
+@pytest.fixture
+def prompt_wire():
+    """Builders for synthetic ``GetPrompt`` responses (the live shape, made-up content).
+
+    Shape: ``[name, , , run settings, metadata, , , , , , , , system instruction,
+    [chunks, pending inputs]]``; a Veo prompt has its body at index 16 instead.
+    """
+
+    def chunk(text=None, *, role="user", drive=None, inline=None, thought=False, at=None):
+        row = [None] * 35
+        row[0] = text
+        if drive:
+            row[1] = [drive]
+        if inline:
+            row[12] = [inline, "QUJD"]
+        row[8] = role
+        if thought:
+            row[19] = 1
+        if at is not None:
+            row[32] = [str(at), 123000000]
+        return row
+
+    def settings(model="models/gemini-test", *, top_p=0.95, top_k=64, max_tokens=65536,
+                 temperature=None, safety=None, modalities=None):
+        row = [1, None, model, temperature, top_p, top_k, max_tokens]
+        row += [safety] + [None] * 7 + [modalities]
+        return row
+
+    def prompt(chunks, *, name="prompts/synthetic-id-1", title="A synthetic chat",
+               description=None, kind="CHUNKED_PROMPT", modified=1778571344,
+               system=None, run=None):
+        meta = [title, description, ["Test User", 1, "https://example.invalid/photo"], None,
+                [[str(modified), 328000000], ["Test User", 1, "https://example.invalid/photo"]],
+                [1, 1, 1], None, None, None, None, [],
+                [["version", "1"], ["promptType", kind], ["hasImages", "false"]]]
+        row = [name, None, None, run if run is not None else settings(), meta]
+        row += [None] * 7 + [[system] if system is not None else [], [chunks, [chunk("")]]]
+        return row
+
+    def veo(text, *, image="image/jpeg", name="prompts/synthetic-veo-1"):
+        run = [None, None, "models/veo-test"] + [None] * 18 + ["9:16", None, ["8"]]
+        meta = ["A synthetic video", None, None, None, [["1759497321", 1]], None, None, None,
+                None, None, [], [["promptType", "VEO_PROMPT"]]]
+        body = [text, None, [image, "QUJD"] if image else None, None, None]
+        return [name, None, None, run, meta] + [None] * 11 + [body]
+
+    return SimpleNamespace(chunk=chunk, settings=settings, prompt=prompt, veo=veo)

@@ -17,6 +17,10 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
   characters and ingredients apply to every prompt. A paid model is quoted for every prompt
   first and `--max-credits` is the budget for the whole batch; the first error stops the batch,
   lists what finished and gives `--start-at N` to resume. Nothing is retried.
+- `aistudio prompt get <id-or-prefix>` reads one saved prompt or chat in full: title, model,
+  system instructions, generation settings and every turn, untruncated. Attachments show as types
+  only. `--json` for scripts, `--thoughts` for saved thinking summaries, `-o file.md` to save it as
+  markdown (`--force` to overwrite).
 
 ### Security
 - `certifi` 2026.10.23 and, on Python 3.11 or later, `filelock` 4.2.9, which fix known

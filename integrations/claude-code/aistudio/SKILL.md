@@ -30,6 +30,7 @@ apps.
 | Models, categories, prices, release dates | `aistudio models list --json [--category featured\|gemini\|gemma\|images\|video\|audio\|music\|live\|agents] [--search TEXT]` |
 | One model's card | `aistudio models get <id-or-unique-prefix> --json` |
 | Saved prompts/chats | `aistudio prompt list --json [--type chat\|video]` |
+| One saved prompt/chat in full (title, model, system instructions, settings, every turn untruncated; attachments as types only) | `aistudio prompt get <id-or-unique-prefix> --json [--thoughts] [-o file.md [--force]]` |
 | Token count | `aistudio count-tokens "text" -m <model> --json` (or `--prompt-file F`) |
 | Build apps | `aistudio app list --json` |
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
@@ -42,6 +43,10 @@ JSON notes:
   holds free-text pricing.
 - `command` says which CLI command runs the model.
 - `models list` is cached for 1 hour; add `--refresh` for fresh data.
+- `prompt get --json` gives `{id, title, type, model, system_instruction, settings, turns, modified}`.
+  A turn is `{role, text, thoughts, attachments, at}`; `attachments` hold `{source, id, mime}`, never
+  bytes. `thoughts` is the model's saved thinking summary (kept out of `text`). The listing's 1000
+  newest prompts resolve prefixes; a full id older than that also works.
 
 ## Commands that change things (only when the user asks)
 
