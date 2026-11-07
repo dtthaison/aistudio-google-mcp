@@ -54,7 +54,7 @@ class BotGuardError(AIStudioError):
 class SchemaDriftError(AIStudioError):
     code = "SCHEMA_DRIFT"
 
-    def __init__(self, method: str, index_path: tuple[int, ...], expected: str) -> None:
+    def __init__(self, method: str, index_path: tuple[int | str, ...], expected: str) -> None:
         path = "".join(f"[{i}]" for i in index_path) or "root"
         super().__init__(
             f"{method}: expected {expected} at {path}; the response shape changed",
