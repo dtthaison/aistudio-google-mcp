@@ -23,6 +23,7 @@ class RpcSpec:
 
 LIST_MODELS = RpcSpec("ListModels", Transport.HTTP, idempotent=True)
 LIST_PROMPTS = RpcSpec("ListPrompts", Transport.HTTP, idempotent=True)
+GET_PROMPT = RpcSpec("GetPrompt", Transport.HTTP, idempotent=True)
 COUNT_TOKENS = RpcSpec("CountTokens", Transport.HTTP, idempotent=True)
 LIST_APPLETS = RpcSpec("ListApplets", Transport.HTTP, idempotent=True)
 LIST_RECENT_APPLETS = RpcSpec("ListRecentApplets", Transport.HTTP, idempotent=True)

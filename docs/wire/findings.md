@@ -47,6 +47,7 @@ The session did **not** exercise:
 | ListModels | yes | http-ok | http | ListModels/1–2 |
 | ListPrompts | yes | http-ok | http | ListPrompts/1–4 |
 | CountTokens | yes | http-ok | http | CountTokens/1–4 |
+| GetPrompt | yes | http-ok (live probe 2026-11, no fixture: the reply is the user's private text) | http | none; synthetic builder in `tests/conftest.py` |
 | GetUserPreferences | yes | http-ok | http | GetUserPreferences/1–2 |
 | GetAiStudioBenefitTier, GetGdpProfileAndBenefits, GetLoggingContext, GetWorkspaceAppConfig, GetAppletGalleryConfig, GetPendingArenaInteraction | yes | http-ok | http | respective `/1` |
 | ListApplets, ListRecentApplets, ListBundledApplets, ListAppletSecrets, ListUnsetAppletSecrets, ListAppletTrajectories | yes | http-ok | http (Phase 3 Build) | respective |
@@ -1175,3 +1176,42 @@ from the Compose panel. The scratch scripts were not kept.
   3 s after the page load. On load the page sends `POST /auth/google/save` twice (replies at
   3.4 s and 4.4 s), which hands the Google sign-in to the server. aistudio now waits for that
   reply first. A paid run from aistudio has not been made since that change.
+
+## Reading one saved prompt: `GetPrompt` (2026-11)
+
+Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard
+token. Six chats and one Veo prompt were read. No fixture is committed (the replies hold the
+account's own prompt text and, for chats with images, megabytes of base64). The unit tests use
+made-up bodies of the same shape (`prompt_wire` in `tests/conftest.py`).
+
+- **Request:** `["prompts/<id>"]`. An unknown id answers a gRPC `NOT_FOUND` ("Requested entity
+  was not found.").
+- **Response:** one prompt row, the same row `ListPrompts` returns, now with its body:
+
+  | index | field |
+  |---|---|
+  | 0 | `"prompts/<id>"` |
+  | 3 | run settings: `[2]` model, `[3]` temperature, `[4]` top-p, `[5]` top-k, `[6]` max output tokens, `[7]` safety `[[, , category, threshold], ...]`, `[15]` response modalities |
+  | 4 | metadata as in `ListPrompts` (`[0]` title, `[4][0]` modified `[seconds, nanos]`) |
+  | 12 | system instruction message `[text]`; `[]` when none |
+  | 13 | chat body `[chunks, pending inputs]` |
+  | 16 | Veo body `[prompt text, , [mime, base64 image], , ...]` |
+
+  The indexes follow the page's own protobuf classes (field number = index + 1: model 4 = run
+  settings, 13 = system instruction, 14 = chunked prompt), checked against the live replies.
+- **Chunks** (one message part each): `[0]` text, `[1]` `[drive file id]` for an uploaded file,
+  `[8]` role (`user` or `model`), `[12]` `[mime, base64]` for inline data, `[18]` token count,
+  `[19]` = 1 for a thinking summary, `[29]` the text again split into parts (each `[, text, ...,
+  [12] = 1]` for thinking), `[32]` `[seconds, nanos]`. A model turn is several chunks: thinking
+  text, generated images, then the answer. `aistudio` merges consecutive chunks of one role.
+- **Run settings notes.** In all seven prompts `[3]` was empty; AI Studio's default
+  temperature is then used. Its position (before top-p) is inferred from the order of the
+  fields, not from a non-default value. Safety categories 7-11 and thresholds 1-5 are named
+  with the public API's enums (all four categories with threshold 5 showed on one chat: "off");
+  that naming is inferred. A Veo prompt keeps `[21]` the aspect ratio (`"9:16"`) and `[23]`
+  `["<seconds>"]`.
+- **Not seen:** a system instruction with text (none of the six chats had one, so `[12][0]` as
+  the text is from the page's class, not from a live value); a creation time (only the
+  modified time, so `prompt get` shows no "created"); attachment names (Drive files carry only
+  an id, and their mime type is not in the reply); audio/video/PDF inline attachments.
+- **Pending inputs** (`[13][1]`) held one empty user chunk in every chat: the unsent draft box.

@@ -21,3 +21,34 @@ class PromptSummary:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class PromptTurn:
+    """One message: consecutive same-role chunks merged (attachments, text, thinking)."""
+
+    role: str  # "user" or "model"
+    text: str
+    thoughts: str | None  # the model's thinking summary, when AI Studio saved one
+    attachments: list[dict[str, Any]]  # {"source": "drive"|"inline", "id", "mime"}: no bytes
+    at: str | None  # ISO-8601 UTC of the first chunk
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class PromptDetail:
+    id: str
+    title: str | None
+    description: str | None
+    type: str
+    model: str | None  # without the "models/" prefix
+    system_instruction: str | None
+    settings: dict[str, Any]
+    turns: list[PromptTurn]
+    modified: str | None
+    parent_app_id: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

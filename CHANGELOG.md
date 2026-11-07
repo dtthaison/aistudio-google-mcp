@@ -5,6 +5,12 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
 
 ## Unreleased
 
+### Added
+- `aistudio prompt get <id-or-prefix>` reads one saved prompt or chat in full: title, model,
+  system instructions, generation settings and every turn, untruncated. Attachments show as types
+  only. `--json` for scripts, `--thoughts` for saved thinking summaries, `-o file.md` to save it as
+  markdown (`--force` to overwrite).
+
 ### Security
 - `certifi` 2026.10.23 and, on Python 3.11 or later, `filelock` 4.2.9, which fix known
   vulnerabilities. Python 3.10 keeps `filelock` 4.1.0, the last release for it; the accepted
