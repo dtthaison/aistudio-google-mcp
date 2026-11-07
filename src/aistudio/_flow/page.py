@@ -22,6 +22,9 @@ from typing import Any
 from aistudio._browser.ui import ResponseLog, Ui
 from aistudio._flow.models import ASPECTS
 from aistudio._flow.rows import (
+    BODY_SLOT,
+    PORTRAIT_SLOT,
+    FlowCharacter,
     FlowMedia,
     FlowProject,
     FlowTool,
@@ -31,6 +34,7 @@ from aistudio._flow.rows import (
     ToolFile,
     agent_generated,
     agent_pending,
+    body_request_target,
     character_id,
     character_name,
     character_voice,
@@ -40,6 +44,7 @@ from aistudio._flow.rows import (
     decode_tool_files,
     decode_tools,
     extend_started,
+    is_image_request,
     linked_image,
     media_records,
     parse_permission,
@@ -93,12 +98,19 @@ START = "Start generation"
 ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
-CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
-BODY_MODE = "Ingredient"  # shown only in body mode, with or without an earlier body (live)
+# A character page's body slot chip (findings, plan G): "Create body" while the slot is empty,
+# "Body" once it has an image (live 2026-11-07). Its accessible name may start with its icon.
+CREATE_BODY = re.compile(r"(?:^|\s)(?:Create body|Body)$")
+# The slot chip that is active (live 2026-11-07). "Ingredient" shows in both slots once the
+# portrait has an image, so only the chip tells the body slot from the portrait slot.
+BODY_CHIP = 'flow-slot-chip-button button.chip-button-active:has-text("Body")'  # either label
 # Flow ignores "Create body" until the character has loaded, and its editor shows before that
 # (live, 2026-11-02: a click at once did nothing, one 3 s later worked): click again until the
 # body mode shows. The click itself sends nothing.
 BODY_TRIES = 8
+# Writes a body run must keep off the portrait: the image itself, and a workflow update (one
+# probe, 2026-11-07, saw the portrait's current version move to the body image).
+BODY_GUARDED = ("ogiZ0b", "mYWVGd")
 BODY_PAUSE_MS = 1500
 # The character page's voice control (live, 2026-11-02): "Select a voice" without a voice, a
 # card with the voice's name once it has one; both open the "Select a voice" dialog.
@@ -661,15 +673,22 @@ class FlowPage:
 
     async def link_photo(self, project_id: str, character_id: str, media_id: str) -> str:
         """Make a project image the character's image; returns the copy Flow makes (free)."""
+        return await self._copy_into_slot(
+            project_id, character_id, media_id, PORTRAIT_SLOT,
+            f"Flow created character {character_id} but did not add the photo",
+            "do not re-run; add a photo to it in Flow's Characters, or rename it")
+
+    async def _copy_into_slot(self, project_id: str, character_id: str, media_id: str,
+                              slot: int, failure: str, hint: str) -> str:
+        """``Sc7aEb``: copy a project image into a character slot (0 portrait, 1 body)."""
         args = [media_id, None, None, project_id, None, None, None,
-                [None, None, [character_id, [0]]], None,
+                [None, None, [character_id, [slot]]], None,
                 str(uuid.uuid4()).upper(), str(uuid.uuid4()).upper()]  # client ids, as the page
         status, text = await self._ui.batch_rpc("Sc7aEb", json.dumps(args))
         image = linked_image(decode_batch(text).get("Sc7aEb")) if status < 400 else None
         if image is None:
-            raise BrowserError(f"Flow created character {character_id} but did not add the photo",
-                               hint="do not re-run; add a photo to it in Flow's Characters, "
-                                    "or rename it")
+            raise BrowserError(failure + (f" (HTTP {status})" if status >= 400 else ""),
+                               hint=hint)
         return image
 
     async def stitch(self, clips: list[list[Any]], *, timeout_s: float) -> bytes:
@@ -752,15 +771,20 @@ class FlowPage:
     async def open_body(self, project_id: str, character_id: str) -> str:
         """Open the character's page in body mode; return the image model it will use."""
         await self._open_character_page(project_id, character_id)
+        await self._body_slot()
+        return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
+
+    async def _body_slot(self) -> None:
+        """Make the body slot the active one (clicking "Create body" again when the page has
+        not loaded yet or fell back to the portrait); raise when it never takes."""
         for _ in range(BODY_TRIES):
+            if await self._ui.count(BODY_CHIP):
+                return
             await self._ui.dispatch_click("button", CREATE_BODY)
             await self._ui.pause(BODY_PAUSE_MS)
-            if await self._ui.visible("button", BODY_MODE, exact=True):
-                break
-        else:  # without body mode, Start would run the page's other, unpriced action
+        if not await self._ui.count(BODY_CHIP):  # Start would add to the portrait instead
             raise BrowserError("Flow did not switch to body mode; nothing was spent",
                                hint="re-run; if it persists, the Flow UI changed")
-        return _label(await self._ui.inner_text("button", CHARACTER_MODEL, exact=True))
 
     async def set_voice(self, project_id: str, character_id: str, ref: str | None) -> None:
         """Give the character a voice: a preset's lower-case name or a custom voice's media id;
@@ -817,20 +841,43 @@ class FlowPage:
                 [[workflow_id, None, None, [name], project_id], [["metadata.display_name"]]]))
         return media_id, workflow_id
 
-    async def start_body(self, prompt: str) -> list[FlowMedia]:
-        """Call after open_body. Generates the body image (a direct spend: priced first)."""
+    async def start_body(self, prompt: str, character: FlowCharacter) -> list[FlowMedia]:
+        """Call after open_body. Generates the body image (a direct spend: priced first) into
+        the character's body slot. The page can fall back to the portrait slot (live,
+        2026-11-07: the image then became a new portrait version and no body showed), so a
+        request that does not write to the body slot, or that touches the portrait's workflow,
+        is held back before it leaves Chrome."""
         await self._ui.type_text(EDITOR_LAST, prompt)
         await self._wait_for_prompt(EDITOR_LAST, prompt)
-        async with self._ui.responses(marker=FLOW_RPC) as log:
+        await self._body_slot()  # typing must not have moved it
+
+        def to_body(body: str) -> bool:
+            return body_request_target(body, character.id, character.body_workflow,
+                                       character.portrait_workflow)
+
+        async with self._ui.refuse_requests(BODY_GUARDED, to_body) as refused, \
+                self._ui.responses(marker=FLOW_RPC) as log:
             self.started = True
             await self._ui.click("button", START, exact=True, nth=-1)
             image = await log.next("ogiZ0b", timeout_s=180.0)
+            if any(is_image_request(body) for body in refused):
+                self.started = False  # the image request never reached Flow
+                raise BrowserError("Flow's page aimed the body at the portrait; aistudio held "
+                                   "the request back, nothing was sent or spent",
+                                   hint="re-run; if it persists, the Flow UI changed")
         media = media_records("ogiZ0b", decode_batch(image.text).get("ogiZ0b")) if image else []
         if not media:
             raise BrowserError("Flow sent no body image",
                                hint="check the character in Flow before re-running")
         self.paid_media = [m.media_id for m in media]
         return media
+
+    async def link_body(self, project_id: str, character_id: str, media_id: str) -> str:
+        """Make a project image the character's body, as "Add from project" in body mode does
+        (``Sc7aEb`` with slot 1; free). Returns the copy Flow makes."""
+        return await self._copy_into_slot(project_id, character_id, media_id, BODY_SLOT,
+                                          f"Flow did not add the body to character "
+                                          f"{character_id}", "re-run; nothing was spent")
 
     async def choose_character_model(self, label: str) -> None:
         """Pick the image model in the character page's "Select model family" (findings)."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import re
@@ -1155,37 +1156,54 @@ async def flow_rename_character(profile: Profile, character_id: str, name: str, 
     return {"character_id": character_id, "name": name, "project": project_id}
 
 
-async def flow_character_body(profile: Profile, character_id: str, prompt: str, *,
-                              max_credits: int | None = None, project: str | None = None,
-                              out: Path | None = None, overwrite: bool = False,
-                              visible: bool = False, browser: Callable[..., Any] = open_browser,
+async def flow_character_body(profile: Profile, character_id: str, prompt: str | None = None,
+                              *, media_id: str | None = None, max_credits: int | None = None,
+                              project: str | None = None, out: Path | None = None,
+                              overwrite: bool = False, visible: bool = False,
+                              browser: Callable[..., Any] = open_browser,
                               downloader: Callable[[str], Any] = download_signed,
                               now: Callable[[], datetime] = datetime.now,
-                              page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
-    """A full-body image for a character ("Create body"; a direct spend priced from the table)."""
-    prompt = " ".join(prompt.split())
-    if not prompt:
-        raise ValidationError("nothing to make: the body prompt is empty")
+                              page_factory: Callable[[Any], Any] = FlowPage,
+                              sleep: Callable[[float], Any] = asyncio.sleep) -> dict[str, Any]:
+    """A full-body image for a character ("Create body"): generated from ``prompt`` (a direct
+    spend priced from the table), or, with ``media_id``, a project image added as the body
+    ("Add from project"; free). Done only once Flow lists the image in the character's body
+    slot."""
+    prompt = " ".join((prompt or "").split())
+    if bool(prompt) == bool(media_id):
+        raise ValidationError("give either a body prompt or --media, not both" if prompt
+                              else "nothing to make: the body prompt is empty",
+                              hint="--media adds an image already in the project as the body")
     project_id = _project_id(project) if project else None
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = page_factory(ui)
-        before = await _credits_before(page)  # reporting only: a failed read never blocks
         project_id = await _open(page, profile, project_id)
+        if media_id:
+            contents = await page.contents(project_id)
+            character = _character(contents, character_id)
+            if not any(m.media_id == media_id for m in contents.media):
+                raise NotFoundError(f"no media {media_id} in this Flow project",
+                                    hint='see "aistudio flow media --type image"')
+            copy = await page.link_body(project_id, character_id, media_id)
+            body = await _body_slot(page, project_id, character_id, None, sleep)
+            return {"status": "done", "character_id": character_id, "media_id": copy,
+                    "source_media_id": media_id, "body_workflow": body, "credits_spent": 0,
+                    "project": project_id}
+        before = await _credits_before(page)  # reporting only: a failed read never blocks
         contents = await page.contents(project_id)
-        if not any(c.id == character_id for c in contents.characters):
-            raise NotFoundError(f"no character {character_id} in this Flow project",
-                                hint='see "aistudio flow character list"')
+        character = _character(contents, character_id)
         label = await page.open_body(project_id, character_id)
         price = check_direct_spend("body", label, max_credits)  # before any spend
         try:
-            media = await page.start_body(prompt)
+            media = await page.start_body(prompt, character)
         except Exception as exc:
-            if not page.started:  # a check before Start: nothing was made
+            if not page.started:  # a check before Start, or a request held back: nothing made
                 raise
             raise _spent(exc, page.paid_media, project_id, paid=price > 0,
                          about=f"the body of character {character_id}") from exc
         after, read_notes = await _credits_after(page, None)
+        body = await _body_slot(page, project_id, character_id, media[0], sleep)
     spent, warnings = _cost_warning(before, after, price)
     warnings = read_notes + warnings
     files, saved_notes = await _save_all("image", media, out=out, overwrite=overwrite,
@@ -1193,8 +1211,43 @@ async def flow_character_body(profile: Profile, character_id: str, prompt: str, 
                                          project_url=PROJECT_URL.format(id=project_id))
     warnings += saved_notes
     return {"status": "done", "character_id": character_id, "files": files,
-            "credits_spent": spent, "credits_left": after, "model": label_to_id(label),
-            "project": project_id, **({"warnings": warnings} if warnings else {})}
+            "body_workflow": body, "credits_spent": spent, "credits_left": after,
+            "model": label_to_id(label), "project": project_id,
+            **({"warnings": warnings} if warnings else {})}
+
+
+BODY_READS = 3  # Flow can list a new slot a moment after the image (reads 3 s apart)
+BODY_READ_PAUSE_S = 3.0
+
+
+def _character(contents: ProjectContents, character_id: str) -> FlowCharacter:
+    found = next((c for c in contents.characters if c.id == character_id), None)
+    if found is None:
+        raise NotFoundError(f"no character {character_id} in this Flow project",
+                            hint='see "aistudio flow character list"')
+    return found
+
+
+async def _body_slot(page: Any, project_id: str, character_id: str, made: Any,
+                     sleep: Callable[[float], Any]) -> str:
+    """Re-read the character until its body slot lists the new image's workflow (or, for a
+    copy, any workflow); return that workflow. Raise when it never does: the run is not done
+    while Flow's character page shows no body."""
+    wanted = getattr(made, "workflow_id", None)
+    body = None
+    for attempt in range(BODY_READS):
+        if attempt:
+            await sleep(BODY_READ_PAUSE_S)
+        character = _character(await page.contents(project_id), character_id)
+        body = character.body_workflow
+        if body and body != character.portrait_workflow and wanted in (None, body):
+            return body
+    what = f"image {made.media_id}" if made is not None else "the image"
+    raise ServerError(f"Flow made {what} but did not put it in the body of character "
+                      f"{character_id}" + (f" (its body slot is {body})" if body else ""),
+                      hint=f"check the character's page in {PROJECT_URL.format(id=project_id)}"
+                           + (f'; add it with "aistudio flow character body {character_id} '
+                              f'--media {made.media_id}"' if made is not None else ""))
 
 
 async def flow_set_personality(profile: Profile, character_id: str, text: str, *,

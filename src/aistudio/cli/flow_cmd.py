@@ -649,7 +649,9 @@ def character_rename(state: CliState, character_id: str, name: str, project: str
 
 @character.command("body")
 @click.argument("character_id")
-@click.argument("prompt")
+@click.argument("prompt", required=False)
+@click.option("--media", "media_id", metavar="MEDIA_ID",
+              help="Add an image already in the project as the body instead (free).")
 @click.option("--max-credits", type=click.IntRange(0),
               help="Needed only when aistudio's price table says the body costs credits.")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
@@ -659,15 +661,22 @@ def character_rename(state: CliState, character_id: str, name: str, project: str
 @json_option
 @click.pass_obj
 @handle_errors
-def character_body(state: CliState, character_id: str, prompt: str, max_credits: int | None,
-                   project: str | None, out: Path | None, force: bool, visible: bool,
-                   json_output: bool) -> None:
-    """A full-body image for a character, described by PROMPT ("Create body"; 0 credits on
-    Nano Banana 2.1, Flow charges without a quote)."""
+def character_body(state: CliState, character_id: str, prompt: str | None, media_id: str | None,
+                   max_credits: int | None, project: str | None, out: Path | None, force: bool,
+                   visible: bool, json_output: bool) -> None:
+    """Give a character a full body ("Create body"): an image generated from PROMPT (0 credits
+    on Nano Banana 2.1, Flow charges without a quote), or with --media an image already in the
+    project (free). Done only once Flow lists it as the character's body."""
     state.require_browser()
-    _finish(asyncio.run(flow_character_body(state.profile(), character_id, prompt,
-                                            max_credits=max_credits, project=project, out=out,
-                                            overwrite=force, visible=visible)), json_output)
+    result = asyncio.run(flow_character_body(state.profile(), character_id, prompt,
+                                             media_id=media_id, max_credits=max_credits,
+                                             project=project, out=out, overwrite=force,
+                                             visible=visible))
+    if "files" in result:
+        _finish(result, json_output)
+    else:
+        emit(result, json_output=json_output, render=lambda d: stdout.print(
+            f"Added {d['source_media_id']} as the body of {d['character_id']}", markup=False))
 
 
 @character.command("personality")
