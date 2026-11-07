@@ -59,6 +59,8 @@ quotes and write each `'` as `'\''`.
 |---|---|
 | Star / unstar a model (saved to the account) | `aistudio models star <id> --json`, `aistudio models unstar <id> --json` |
 | Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
+| What the last builder turn changed in an app (free; unified diff per file) | `aistudio app diff <app-id-or-prefix> [--turn N] --json` |
+| How an app's current code differs from a folder (e.g. an earlier export) | `aistudio app diff <app-id-or-prefix> --against <dir> --json` |
 | TTS voices (opens a hidden Chrome; no quota) | `aistudio voices list --json [--search T]` |
 | Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
 | Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
@@ -253,6 +255,12 @@ quotes and write each `'` as `'\''`.
   Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;
   wait for it rather than retrying in a loop.
+- `app diff --json`: `files[]` has `path`, `status` (`added`, `removed`, `changed`), `binary`,
+  `added`/`removed` line counts and the unified `diff` text; `summary` totals them. A turn is one
+  builder prompt (turn 1 is the first, and shows every file as added); `prompt` is only the start of
+  what was asked. With `--against` the folder is the "before" and `turn` is null. It reads only: the
+  app and the folder are never changed. `--turn` and `--against` do not combine. The files of older
+  Drive apps cannot be diffed.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
   without the user's OK.
 

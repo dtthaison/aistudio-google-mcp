@@ -331,6 +331,29 @@ was made: one image ($0.034) and one clip ($0.04).
   - Each file is a plain `GET https://aistudio.google.com/_/upload/<app_id>/file/<sha256>` with
     session cookies only. The body is the raw file, and its SHA-256 equals the listed hash.
   - Both RPCs replayed `http-ok`.
+- **Build keeps a code snapshot per builder turn** (2026-11-07, free read-only probes on five of
+  the user's own apps; `app diff`).
+  - `ListAppletTrajectories` gives one run per app (its id is the app id), so `app get` shows no
+    per-turn data. `GetApplet` / `GetCodeAssistantSnapshot` give only the latest snapshot.
+  - **`LoadCodeAssistantInteractionHistory`** (plain HTTP) has all turns. Request
+    `[app_id, page_size, null, null, offset, app_id]`; response `[_, [step, ...], next_offset?]`.
+    Steps are the agent's tool calls and thoughts. The step that ends a turn also has `[8]`, a
+    snapshot in the same shape `GetCodeAssistantSnapshot` returns:
+    `["model", "Snapshot from <start of the prompt>", _, [s, ns], [[path, sha256], ...]]`. Other
+    steps have `[8]` null. `[16]` is an id shared by the steps of one turn.
+  - **Pages run newest first**; inside a page the steps are oldest first. `[4]` of the request is
+    the offset of the page to read; `[2]` of the response is the offset of the next, older page,
+    absent on the last. `page_size` does not count steps: size 100 returned 73 of an app's 84
+    steps and size 30 returned 16, 24, 24 and 20 steps. Following the offsets until none is left
+    always gave every step once (no overlap). A turn's snapshot is the one `[8]` per turn.
+  - Counts seen: 2, 2, 18, 1 and 2 turn snapshots. The last equals the app's current files in the
+    two apps checked (`GetApplet` stamp, `app export`). The label is the start of the prompt,
+    cut off; an app made while the builder ran two options (arena) had a timestamp as its label.
+  - **Old files stay downloadable**: `GET /_/upload/<app>/file/<sha256>` for a file that a later
+    turn replaced returned the old bytes, and their SHA-256 matched. So a turn diff needs no
+    stored copies: list two snapshots, download the files whose hashes differ.
+  - Not mapped: how a manual edit in the Build code editor shows up in the history, and whether
+    "Restore code from this checkpoint" rewrites it. `app diff` reads whatever snapshots exist.
 - **Playground chat is gated by an API key.** On a new chat (default model, with Code execution,
   Search and URL context switches all on by default), pressing Run calls `BatchGetProjectUsageLimits`
   and opens **"Link an API key"** ("Your project does not have an API key yet"; choose a project,
