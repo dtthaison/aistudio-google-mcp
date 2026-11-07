@@ -223,8 +223,11 @@ Claude run the CLI with `--json` against your own account.
 
 ```sh
 uv sync --extra dev
+uv run pre-commit install           # fast checks before each commit
 uv run pytest -q                    # offline: replays recorded, redacted AI Studio traffic
-uv run ruff check src tests
+uv run ruff check src tests         # lint, including bandit's security rules
+uv run mypy                         # types
+scripts/audit-deps.sh               # known-vulnerable dependencies
 uv run pytest -m live               # opt-in: the real service, with your signed-in session
 uv run aistudio dev capture         # record AI Studio traffic into tests/fixtures, redacted
 ```
@@ -241,9 +244,11 @@ explains the design.
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `uv run pytest -q` and `uv run ruff check src tests`
-before sending a change; neither needs a Google account. If Google changed a page and something
-broke, say what the page shows now (`--visible`).
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the
+checks CI runs (none needs a Google account) and what a pull request should say;
+[CLAUDE.md](CLAUDE.md) lists each project rule and what enforces it. If Google changed a page
+and something broke, say what the page shows now (`--visible`). Everyone follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 

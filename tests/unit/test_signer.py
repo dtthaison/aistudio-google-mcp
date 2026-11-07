@@ -5,7 +5,7 @@ from aistudio._auth.signer import authorization_header, build_headers, sapisid_h
 from aistudio.exceptions import AuthError
 
 TS = 1700000000
-SAPISID_DIGEST = "8bb7c14d3d8aadd9a715140f82ef17b924c19bfd"
+SAPISID_DIGEST = "8bb7c14d3d8aadd9a715140f82ef17b924c19bfd"  # gitleaks:allow (fake digest)
 ONEP_DIGEST = "9dcc26d7523b112e44859b26f3b92dc3f84100df"
 THREEP_DIGEST = "c3288cfe57bfdb9ae86d5ab7863d1c8774942ce4"
 

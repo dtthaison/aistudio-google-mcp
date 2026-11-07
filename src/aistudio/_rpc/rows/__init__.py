@@ -21,6 +21,8 @@ def as_strs(value: Any) -> tuple[str, ...]:
 def as_timestamp(value: Any) -> str | None:
     """``[seconds, nanos]`` (seconds as str or int) as ISO-8601 UTC, or None."""
     seconds = value[0] if isinstance(value, list) and value else None
+    if seconds is None:
+        return None
     try:
         moment = datetime.fromtimestamp(int(seconds), timezone.utc)
     except (TypeError, ValueError, OverflowError, OSError):

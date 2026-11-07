@@ -216,8 +216,9 @@ async def flow_generate(
                 still = ("Flow's agent had not finished replying" if not turn.answered
                          else "Flow was still generating without asking")
                 if not turn.answered:  # a quote may still arrive after the browser closes
+                    # a note is given, so the result is never None
                     waiting = _with_note(waiting, "if Flow asks to approve something from this "
-                                                  "run, press Reject, never Approve")
+                                                  "run, press Reject, never Approve") or ""
                 raise WaitTimeoutError(f"{still} when aistudio stopped waiting: "
                                        f"{turn.text[-300:]}",
                                        hint=_with_note("Flow may still finish it; check the "
@@ -513,15 +514,15 @@ def _attachment_titles(contents: ProjectContents | None,
             raise ValidationError(f"{value} is the image of character {owner.name or owner.id!r}",
                                   hint=f'use --character "{owner.name or owner.id}" instead; '
                                        f'nothing was sent')
-        title = contents.titles.get(value)
-        if title is None:
+        grid_title = contents.titles.get(value)
+        if grid_title is None:
             raise NotFoundError(f"no media {value} in this Flow project",
                                 hint='see "aistudio flow media"; nothing was sent')
-        if len(by_title.get(title, [])) > 1:
-            raise ValidationError(f"several media share the same title {title!r}",
+        if len(by_title.get(grid_title, [])) > 1:
+            raise ValidationError(f"several media share the same title {grid_title!r}",
                                   hint="rename one in Flow so aistudio can attach the right one; "
                                        "nothing was sent")
-        titles.append(title)
+        titles.append(grid_title)
     return titles, set(contents.titles) | {m.media_id for m in contents.media}
 
 
@@ -1296,7 +1297,7 @@ async def flow_character_voice(profile: Profile, character_id: str, voice: str |
         if clear:
             ref, item = None, None
         elif style is not None:
-            assert preset is not None
+            assert preset is not None  # noqa: S101 (narrowing: --style needs a preset)
             name = _name(voice_name or f"{character.name or 'Character'} voice")
             taken = [v for v in contents.voices if _key(v.name) == _key(name)]
             if taken:
@@ -1324,7 +1325,7 @@ async def flow_character_voice(profile: Profile, character_id: str, voice: str |
         elif preset is not None:
             ref, item = preset.ref, _preset_item(preset)
         else:
-            assert voice is not None
+            assert voice is not None  # noqa: S101 (narrowing: not clear and no preset)
             custom = _custom_voice(contents, voice)
             if custom is None:
                 raise NotFoundError(f"no voice {voice!r}: not a Flow preset or a custom voice "

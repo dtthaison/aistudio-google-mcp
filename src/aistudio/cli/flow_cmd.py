@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,11 @@ def credits_cmd(state: CliState, visible: bool, json_output: bool) -> None:
     result = asyncio.run(flow_credits(state.profile(), visible=visible))
     emit(result, json_output=json_output,
          render=lambda d: stdout.print(f"{d['credits']} Flow credits left", markup=False))
+
+
+def _print_lines(lines: Iterable[str]) -> None:
+    for line in lines:
+        stdout.print(line, markup=False)
 
 
 def _left(data: dict[str, Any]) -> str:
@@ -185,9 +191,8 @@ def projects_cmd(state: CliState, visible: bool, json_output: bool) -> None:
     """Your Flow projects (free)."""
     state.require_browser()
     result = asyncio.run(flow_projects(state.profile(), visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{p['id']}  {p['title'] or '(untitled)'}", markup=False)
-        for p in d["projects"]])
+    emit(result, json_output=json_output, render=lambda d: _print_lines(
+        f"{p['id']}  {p['title'] or '(untitled)'}" for p in d["projects"]))
 
 
 @flow.command("media")
@@ -203,9 +208,9 @@ def media_cmd(state: CliState, project: str | None, kind: str | None, visible: b
     """Media in a Flow project, with ids for --start-frame, --ingredient and extend (free)."""
     state.require_browser()
     result = asyncio.run(flow_media(state.profile(), project=project, kind=kind, visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{m['media_id']}  {m['kind']:5}  {m['status']:7}  {m['title'] or ''}",
-                     markup=False) for m in d["media"]])
+    emit(result, json_output=json_output, render=lambda d: _print_lines(
+        f"{m['media_id']}  {m['kind']:5}  {m['status']:7}  {m['title'] or ''}"
+        for m in d["media"]))
 
 
 @flow.command("download")
@@ -284,11 +289,10 @@ def character_list(state: CliState, project: str | None, visible: bool,
     """Characters in a Flow project, with ids and names for --character (free)."""
     state.require_browser()
     result = asyncio.run(flow_characters(state.profile(), project=project, visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{c['id']}  {c['name'] or '(unnamed)'}"
-                     f"{'' if c['media_id'] else '  (no image)'}"
-                     f"{_voice_note(c.get('voice'))}",
-                     markup=False) for c in d["characters"]])
+    emit(result, json_output=json_output, render=lambda d: _print_lines(
+        f"{c['id']}  {c['name'] or '(unnamed)'}"
+        f"{'' if c['media_id'] else '  (no image)'}"
+        f"{_voice_note(c.get('voice'))}" for c in d["characters"]))
 
 
 def _voice_note(voice: dict[str, Any] | None) -> str:
@@ -316,8 +320,8 @@ def character_voices(state: CliState, search: str | None, project: str | None, v
     state.require_browser()
     result = asyncio.run(flow_voices(state.profile(), search=search, project=project,
                                      visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(_voice_line(v), markup=False) for v in d["voices"]])
+    emit(result, json_output=json_output,
+         render=lambda d: _print_lines(_voice_line(v) for v in d["voices"]))
 
 
 @character.command("voice")
@@ -429,10 +433,9 @@ def scene_list(state: CliState, project: str | None, visible: bool, json_output:
     """Scenes in a Flow project, with their clips in order (free)."""
     state.require_browser()
     result = asyncio.run(flow_scenes(state.profile(), project=project, visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{s['id']}  {s['title'] or '(untitled)'}  {len(s['clips'])} clip(s), "
-                     f"{sum(c['seconds'] for c in s['clips'])} s", markup=False)
-        for s in d["scenes"]])
+    emit(result, json_output=json_output, render=lambda d: _print_lines(
+        f"{s['id']}  {s['title'] or '(untitled)'}  {len(s['clips'])} clip(s), "
+        f"{sum(c['seconds'] for c in s['clips'])} s" for s in d["scenes"]))
 
 
 @scene.command("stitch")
@@ -568,9 +571,8 @@ def tool_list(state: CliState, kind: str | None, search: str | None, project: st
     state.require_browser()
     result = asyncio.run(flow_tools(state.profile(), kind=kind, search=search, project=project,
                                     visible=visible))
-    emit(result, json_output=json_output, render=lambda d: [
-        stdout.print(f"{t['id']}  [{t['kind']}]  {t['name']}", markup=False)
-        for t in d["tools"]])
+    emit(result, json_output=json_output, render=lambda d: _print_lines(
+        f"{t['id']}  [{t['kind']}]  {t['name']}" for t in d["tools"]))
 
 
 @tool.command("get")

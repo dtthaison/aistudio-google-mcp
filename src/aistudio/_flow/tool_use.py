@@ -234,7 +234,7 @@ class ToolSession:
                         self._frame = frame
                         await self.settle(timeout_s=10.0)
                         return
-                except Exception:  # the frame was replaced while it compiled
+                except Exception:  # noqa: S112 (the frame was replaced while it compiled)
                     continue
         raise BrowserError("the Tool did not start in Flow",
                            hint="open it in Flow to check it works: " + url)

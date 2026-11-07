@@ -1,0 +1,26 @@
+# Fast checks before each commit: `uv run pre-commit install` once per clone.
+# CI runs the same tools plus the slower ones (mypy, pytest, the dependency audit).
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint + security rules)
+        entry: uv run ruff check
+        language: system
+        types: [python]
+        files: ^(src|tests)/  # the same scope as CI; scripts/spikes are throwaway probes
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        entry: gitleaks protect --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+      - id: no-secrets
+        name: no credentials or real emails in tracked files
+        entry: uv run pytest -q tests/unit/test_no_secrets.py -p no:cacheprovider
+        language: system
+        pass_filenames: false
+      - id: zizmor
+        name: zizmor (workflow audit)
+        entry: uvx zizmor@1.16.3 --persona=regular
+        language: system
+        files: ^\.github/workflows/

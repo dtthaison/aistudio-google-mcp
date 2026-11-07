@@ -1,0 +1,24 @@
+# Vulnerabilities accepted on purpose. Format: <ID> <reason>. Review by the date given;
+# drop an ID as soon as the fixed version is installable everywhere the CLI supports.
+#
+# filelock 4.1.0 is the last release for Python 3.10 (4.2.x needs 3.11+; 3.11+ locks 4.2.9).
+# aistudio only takes a Unix FileLock on its own sibling ".<name>.lock" files inside an
+# owner-only (0700) folder; it uses no soft, strict-soft, read/write or SQLite locks and does not
+# support Windows. Accepted 2026-11-07, review by 2027-02-01 or when Python 3.10 is dropped.
+CVE-2026-112906 filelock soft-lock marker eviction (soft locks unused)
+CVE-2026-112907 filelock Windows soft locks (Windows unsupported)
+CVE-2026-112908 filelock strict soft lock modes (unused)
+CVE-2026-112909 filelock UnixFileLock truncates an existing file at the lock path (lock paths are aistudio's own dotfiles in a 0700 folder)
+CVE-2026-112910 filelock Windows ignores mode (Windows unsupported)
+CVE-2026-112911 filelock strict soft / soft read-write state files (unused)
+CVE-2026-112912 filelock soft-lock writability check (soft locks unused)
+CVE-2026-112913 filelock Windows SQLite read-write lock (unused)
+CVE-2026-112914 filelock soft-lock stale break (soft locks unused)
+CVE-2026-112915 filelock SQLite read-write lock journal mode (unused)
+CVE-2026-112934 filelock soft read-write holder refresh (unused)
+CVE-2026-112935 filelock soft-lock stale break (soft locks unused)
+CVE-2026-112937 filelock SQLite read-write link directories (unused)
+CVE-2026-112938 filelock strict soft lock directory check (unused)
+CVE-2026-112939 filelock soft-lock ENOSYS fallback (soft locks unused)
+CVE-2026-112940 filelock SQLite read-write lock naming (unused)
+CVE-2026-112941 filelock soft read-write directory check (unused)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -169,7 +169,7 @@ def _render_build(d: dict[str, Any]) -> None:
         stdout.print(f"Built {len(d['options'])} options; {kept}", markup=False)
 
 
-def _build(state: CliState, run: Callable[..., Awaitable[dict[str, Any]]], *args: Any,
+def _build(state: CliState, run: Callable[..., Coroutine[Any, Any, dict[str, Any]]], *args: Any,
            timeout: int, visible: bool, json_output: bool) -> None:
     state.require_browser()
 
@@ -229,11 +229,11 @@ def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_outpu
 
     def progress(done: int, total: int) -> None:
         now = _now()
-        last[0] = now if last[0] is None else last[0]
+        previous = last[0] = now if last[0] is None else last[0]
         files = "file" if total == 1 else "files"
         if done == 0:
             stderr.print(f"Downloading {total} {files}…", markup=False)
-        elif done == total or done % 10 == 0 or now - last[0] >= PROGRESS_EVERY_S:
+        elif done == total or done % 10 == 0 or now - previous >= PROGRESS_EVERY_S:
             stderr.print(f"Downloaded {done}/{total} {files}", markup=False)
         else:
             return

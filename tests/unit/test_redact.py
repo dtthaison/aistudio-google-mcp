@@ -98,7 +98,7 @@ def test_full_record_contains_no_secrets():
         assert secret not in dumped
 
 
-ACCESS_TOKEN = "ya29.a0AfH6SMBx-y_z.123abc"
+ACCESS_TOKEN = "ya29.a0AfH6SMBx-y_z.123abc"  # gitleaks:allow (fake test token)
 REFRESH_TOKEN = "1//0g" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 3 + "-xyz_123"
 JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnX3BhcnQtMQ"
 

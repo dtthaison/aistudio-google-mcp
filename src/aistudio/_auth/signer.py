@@ -19,7 +19,7 @@ _HASH_COOKIES = (
 
 
 def sapisid_hash(secret: str, ts: int, origin: str = ORIGIN) -> str:
-    digest = hashlib.sha1(f"{ts} {secret} {origin}".encode()).hexdigest()
+    digest = hashlib.sha1(f"{ts} {secret} {origin}".encode(), usedforsecurity=False).hexdigest()
     return f"{ts}_{digest}"
 
 
