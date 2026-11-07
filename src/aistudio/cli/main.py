@@ -17,6 +17,7 @@ from aistudio.cli import (
     profile_cmd,
     prompt_cmd,
     session_cmd,
+    spend_cmd,
     status_cmd,
 )
 from aistudio.cli.state import CliState
@@ -57,6 +58,7 @@ cli.add_command(generate_cmd.generate)
 cli.add_command(generate_cmd.voices)
 cli.add_command(generate_cmd.transcribe_cmd)
 cli.add_command(flow_cmd.flow)
+cli.add_command(spend_cmd.spend)
 
 
 def main() -> None:
