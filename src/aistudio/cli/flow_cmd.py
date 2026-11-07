@@ -28,6 +28,7 @@ from aistudio._app.flow import (
     flow_stitch,
     flow_voices,
 )
+from aistudio._app.flow_music import flow_music, flow_music_credits
 from aistudio._app.flow_tools import (
     flow_tool_create,
     flow_tool_edit,
@@ -37,6 +38,8 @@ from aistudio._app.flow_tools import (
     flow_tools,
 )
 from aistudio._flow.models import ASPECTS, MODELS
+from aistudio._flow.music import MAX_LENGTH_S, SONG_PRICE
+from aistudio._flow.music import MODELS as MUSIC_MODELS
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.inputs import read_text
 from aistudio.cli.output import emit, json_option, stderr, stdout
@@ -45,20 +48,25 @@ from aistudio.cli.state import CliState
 
 @click.group()
 def flow() -> None:
-    """Google Flow (flow.google.com): video and images, paid in Flow credits."""
+    """Google Flow (flow.google.com): video and images, paid in Flow credits; and songs with
+    Google Flow Music (flowmusic.app), paid in Flow Music credits."""
 
 
 @flow.command("credits")
+@click.option("--music", is_flag=True,
+              help="Flow Music's credits instead (flowmusic.app has its own).")
 @click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
 @json_option
 @click.pass_obj
 @handle_errors
-def credits_cmd(state: CliState, visible: bool, json_output: bool) -> None:
-    """How many Flow credits are left (reads the account menu; free)."""
+def credits_cmd(state: CliState, music: bool, visible: bool, json_output: bool) -> None:
+    """How many Flow credits are left (free): the account menu, or Flow Music's with --music."""
     state.require_browser()
-    result = asyncio.run(flow_credits(state.profile(), visible=visible))
+    run = flow_music_credits if music else flow_credits
+    result = asyncio.run(run(state.profile(), visible=visible))
+    what = "Flow Music credits" if music else "Flow credits"
     emit(result, json_output=json_output,
-         render=lambda d: stdout.print(f"{d['credits']} Flow credits left", markup=False))
+         render=lambda d: stdout.print(f"{d['credits']} {what} left", markup=False))
 
 
 def _left(data: dict[str, Any]) -> str:
@@ -156,6 +164,70 @@ def _command(kind: str) -> click.Command:
 
 video = _command("video")
 image = _command("image")
+
+
+@flow.command("music")
+@click.argument("prompt", required=False)
+@click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Read the sound prompt from a file instead.")
+@click.option("--lyrics", help="Song lyrics (sections like [Verse] work); without lyrics the "
+                               "song is instrumental.")
+@click.option("--lyrics-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Read the lyrics from a file.")
+@click.option("--length", "length_s", type=click.IntRange(1, MAX_LENGTH_S),
+              help="Song length in seconds (default: Flow Music's own, about 3 minutes).")
+@click.option("--bpm", type=click.IntRange(1, 400), help="Tempo in beats per minute.")
+@click.option("--seed", type=click.IntRange(0), help="Seed, to repeat a result.")
+@click.option("--title", help="Song title (default: Untitled).")
+@click.option("-m", "--model", type=click.Choice(list(MUSIC_MODELS), case_sensitive=False),
+              help="Model (default: Lyria 3.5).")
+@click.option("--wav", is_flag=True,
+              help="Save the WAV file (about 34 MB for 3 minutes) instead of the .m4a.")
+@click.option("--max-credits", type=click.IntRange(0),
+              help=f"Spend at most this many Flow Music credits (a song costs {SONG_PRICE}); "
+                   "without it only the price is shown.")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Output file (default: flow-music-<time>.m4a).")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
+              help="Seconds to wait for Flow Music to finish the song.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_cmd(state: CliState, prompt: str | None, prompt_file: Path | None,
+              lyrics: str | None, lyrics_file: Path | None, json_output: bool, timeout: int,
+              visible: bool, **options: Any) -> None:
+    """Generate a song with Google Flow Music (flowmusic.app's Compose). PROMPT describes the
+    sound. Flow Music shows no quote, so without --max-credits nothing is spent."""
+    state.require_browser()
+    content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
+    if lyrics is not None and lyrics_file is not None:
+        raise click.UsageError("pass --lyrics or --lyrics-file, not both")
+    words = lyrics_file.read_text(encoding="utf-8") if lyrics_file is not None else lyrics
+    window = "visible" if visible else "minimized"
+
+    def notice() -> None:
+        stderr.print(f"Asking Flow Music in a {window} Chrome window…", markup=False)
+    result = asyncio.run(flow_music(
+        state.profile(), content, lyrics=words, overwrite=options.pop("force"),
+        timeout_s=float(timeout), visible=visible,
+        on_start=None if json_output else notice, **options))
+    emit(result, json_output=json_output, render=_render_music)
+    if result["status"] == "timeout":
+        raise SystemExit(2)
+
+
+def _render_music(data: dict[str, Any]) -> None:
+    if data["status"] == "quoted":
+        stdout.print(f"A Flow Music song costs {data['credits']} credits ({data['model']}). "
+                     f"Nothing was spent. Re-run with --max-credits {data['credits']} to "
+                     "generate.", markup=False)
+        return
+    if data["status"] == "done":
+        length = "" if data.get("seconds") is None else f", {data['seconds']:.0f} s"
+        stdout.print(f"Made \"{data['title']}\"{length}: {data['project_url']}", markup=False)
+    _render_files(data)
 
 
 def _render_files(data: dict[str, Any]) -> None:

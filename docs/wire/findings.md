@@ -1125,3 +1125,53 @@ the project list (`Zzl0ze`) and downloads with `media_details`. The 1280×720, 8
   (10 credits). A shot with the face out of frame (hands holding the phone, the line spoken
   off-screen) passed the filter for real or famous people that blocked the face-to-camera
   versions.
+
+### Flow Music (flowmusic.app) discovery (2026-11-07)
+
+Free probes blocked every write inside the page. One user-approved instrumental song was made
+from the Compose panel. The scratch scripts were not kept.
+
+- **Site and account.** Google Flow Music is `https://www.flowmusic.app`, separate from Google
+  Flow, with its own credits (10,620 here: a 10,000 monthly refill plus 30 a day). The aistudio
+  Chrome profile was signed out at first. "Log in" → "Continue with Google" signed straight into
+  the existing account ("PLUS" via Google One), with no consent or terms screen.
+- **API.** JSON under `/__api` (a Next.js app on Supabase auth). Every call carries
+  `Authorization: Bearer <access_token>`, taken from the `sb-sb-auth-token.0/.1` cookies
+  (chunked, `base64-` + base64url JSON with `access_token`, `refresh_token`, `expires_at`; about
+  an hour). Cookies alone get 401. There is no reCAPTCHA, so aistudio makes the calls from the
+  page itself (`Ui.music_api`).
+- **Reads.** `GET /billing/credits` → `{"data": {"tokens_remaining", "credits_remaining"},
+  "add_token_transactions": [...]}`; `GET /models` → Lyria 3.5 (the default) and Lyria 3 Pro
+  ("Legacy"); `GET /clips/auth-user?filter=generations`, `GET /conversations`.
+- **Compose → `POST /producer/tool-call`.** The body is `{"part": {"tool_name":
+  "audio__create_song", "args": {sound_prompt, lyrics_id, title, seed, image_id},
+  "part_kind": "tool-call", "tool_call_id": <uuid4>}, "client_context": {song_queue,
+  selected_model, lyrics_id_map, ghostwriter_version: "standard", client_platform: "web", …}}`.
+  - BPM is appended to the sound prompt (`", 92 bpm"`). Length is a last lyrics line
+    `[End - m:ss]`; an instrumental with a length sends `[Instrumental]\n[End - 3:00]`. An
+    instrumental without one sends `lyrics_id: ""` (the clip's lyrics read `[Instrumental]`).
+  - **`lyrics_id` must be `uuid5(NAMESPACE, text)`** with the namespace
+    `b8f9e3a1-7c2d-4f5e-9a8b-1c3d5e7f9a2b` (the site's `lyricsIdFromLyricsText`). It matched
+    all three ids captured. A random id failed the job.
+  - The chat box instead sends `POST /conversation` (`parts: [{content, part_kind:
+    "user-prompt"}]`, `model_name: "producer:standard"`), where the "Producer" agent decides
+    what to make.
+- **Reply.** `{"job_id"}`, then `GET /messages/<job_id>/stream?last_id=0` (server-sent events):
+  `begin`, `conversation_id` (`{"id"}`: the session, `/session/<id>`), `message` (the
+  tool-call), `: ping`, `message` with a `tool-return` whose `content` is `{"status":
+  "success", "clip_id", "title", "estimated_time": 35.0, …}`, then `final`. The stream ended
+  20 s after Generate.
+- **Clip.** `POST /clips {"clip_ids": [id]}` → `{"clips": {id: {duration: {status:
+  "completed", value: "176.93…"}, lyrics, audio_url, wav_url, image_url, privacy:
+  "unlisted", …}}}`. `audio_url` is
+  `https://storage.googleapis.com/producer-app-public/clips/<id>.m4a` (audio/mp4, 2.6 MB for
+  177 s) and `wav_url` the same `.wav` (34 MB). Both are public: a GET with no cookies works.
+- **Cost.** One instrumental song on Lyria 3.5, default length (177 s): **5 credits**
+  (10,620 → 10,615; tokens 127,440 → 127,380). Flow Music shows no price before Generate.
+- **Failures.** Two runs started from aistudio failed within a second with the stream event
+  `error` `{"type": "tool_call_failure", "message": "Error while streaming parts"}`. Nothing
+  was spent and no clip was made. The first used a random `lyrics_id`. The second had the
+  right id, and its body matched Compose's own except for the player queue, but it was sent
+  3 s after the page load. On load the page sends `POST /auth/google/save` twice (replies at
+  3.4 s and 4.4 s), which hands the Google sign-in to the server. aistudio now waits for that
+  reply first. A paid run from aistudio has not been made since that change.

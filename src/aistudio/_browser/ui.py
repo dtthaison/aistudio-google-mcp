@@ -115,6 +115,9 @@ class Ui(Protocol):
 
     async def batch_rpc(self, rpcid: str, args_json: str) -> tuple[int, str]: ...
 
+    async def music_api(self, method: str, path: str, body: Any = None, *,
+                        timeout_s: float = 60.0) -> tuple[int, str]: ...
+
     async def choose_file(self, role: str, name: Name, path: Any) -> None: ...
 
     async def set_files(self, selector: str, paths: list[str],
@@ -134,6 +137,36 @@ class Ui(Protocol):
 
     async def click_at(self, x: float, y: float) -> None: ...
 
+
+# A Flow Music API call made by the page: the site's API takes the Supabase access token kept in
+# its sb-sb-auth-token cookies (chunked, "base64-" + base64url JSON) as a Bearer header; cookies
+# alone get 401 (findings "Flow Music"). No cookie: 401 without a request.
+_MUSIC_API_JS = """async ([method, path, body, timeoutMs]) => {
+  const jar = {}, name = 'sb-sb-auth-token';
+  for (const c of document.cookie.split('; ')) {
+    jar[c.slice(0, c.indexOf('='))] = decodeURIComponent(c.slice(c.indexOf('=') + 1));
+  }
+  let raw = '';
+  for (let i = 0; jar[name + '.' + i] !== undefined; i++) raw += jar[name + '.' + i];
+  if (!raw && jar[name] !== undefined) raw = jar[name];
+  let token = null;
+  try {
+    const b64 = raw.replace(/^base64-/, '').replace(/-/g, '+').replace(/_/g, '/');
+    token = JSON.parse(raw.startsWith('base64-') ? atob(b64) : raw).access_token;
+  } catch (e) { token = null; }
+  if (!token) return [401, ''];
+  const headers = {Authorization: 'Bearer ' + token};
+  if (body !== null) headers['Content-Type'] = 'application/json';
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  try {
+    const r = await fetch('/__api' + path, {method, headers, credentials: 'include',
+      body: body === null ? undefined : JSON.stringify(body), signal: abort.signal});
+    return [r.status, await r.text()];
+  } catch (e) {
+    return [e.name === 'AbortError' ? 408 : 0, ''];
+  } finally { clearTimeout(timer); }
+}"""
 
 # Elements with a box (x, y, width, height), in page order
 _BOXES_JS = """els => els.map(e => e.getBoundingClientRect())
@@ -417,6 +450,14 @@ class PlaywrightUi:
         reads (as29s carries the links the project list leaves out) and free writes (renames,
         photo characters, stitching). Calls that need reCAPTCHA stay page-driven."""
         return await self._read(lambda: self._page.evaluate(_BATCH_RPC_JS, [rpcid, args_json]))
+
+    async def music_api(self, method: str, path: str, body: Any = None, *,
+                        timeout_s: float = 60.0) -> tuple[int, str]:
+        """A Flow Music (flowmusic.app) API call made by the page with the site's own sign-in;
+        status 408 when it ran past ``timeout_s``, 0 when the request failed."""
+        status, text = await self._read(lambda: self._page.evaluate(
+            _MUSIC_API_JS, [method.upper(), path, body, int(timeout_s * 1000)]))
+        return int(status), str(text)
 
     async def dispatch_click(self, role: str, name: Name, *, exact: bool = False) -> None:
         """A click event on the control itself: some Flow controls ignore keyboard activation."""

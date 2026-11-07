@@ -219,6 +219,12 @@ class FakeUi:
         response = queue.pop(0) if queue else None
         return (response.status, response.text) if response else (404, "")
 
+    async def music_api(self, method, path, body=None, *, timeout_s=60.0):
+        self.ops.append(("music_api", method, path, body))
+        queue = self._responses.get(f"{method} {path}") or []
+        response = queue.pop(0) if queue else None
+        return (response.status, response.text) if response else (404, "")
+
     async def dispatch_click(self, role, name, *, exact=False):
         self.ops.append(("dispatch", role, self._key(name)))
 

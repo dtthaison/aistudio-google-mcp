@@ -81,6 +81,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
 | Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
 | Google Flow | `flow video/image/extend/edit`, `flow character ...` | Flow credits, only with `--max-credits` |
+| Google Flow Music | `flow music` (songs on flowmusic.app), `flow credits --music` | 5 Flow Music credits a song, only with `--max-credits`; the credits read is free |
 | Google Flow | `flow tool list/get/export`, `flow tool use` | free (a tool that calls `Flow.generate` needs `--allow-spend`) |
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
@@ -106,6 +107,8 @@ aistudio transcribe talk.m4a --vocabulary "Yuri Handmade" -o talk.txt   # names;
 aistudio flow credits
 aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8   # quote only
 aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 8 --max-credits 10 -o apple.mp4
+aistudio flow music "upbeat lofi beat with soft piano"                 # price only (5 credits)
+aistudio flow music "warm acoustic pop" --lyrics-file song.txt --length 90 --max-credits 5 -o song.m4a
 aistudio flow media --type video               # media ids in the "aistudio" Flow project
 aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
 aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
@@ -178,7 +181,11 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
   Flow default settings are restored after each run.
 - **Not offered:** chatting with a model and Imagen (they need a Gemini API key or refuse this
   kind of session), video in AI Studio (Veo there needs a paid upgrade, so video goes through
-  Flow), and Flow avatars, Flow Music and Flow Tools.
+  Flow), and Flow avatars.
+- **Flow Music** (flowmusic.app) is its own site with its own credits. `flow music` uses its
+  Compose panel's request: one song per run (about 3 minutes unless `--length`), saved as .m4a
+  (or `--wav`). It signs in with your Google account the first time, and the song also stays in
+  your Flow Music library.
 - **One browser run per profile at a time.** Each profile has one Chrome profile; a second
   command that needs it waits for you to finish the first. Plain reads always work.
 - Each browser run also refreshes the saved session that the plain reads use. If you sign into
