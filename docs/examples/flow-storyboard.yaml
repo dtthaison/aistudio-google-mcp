@@ -1,0 +1,54 @@
+# A Flow scene for `aistudio flow storyboard`. Every id below is made up: use your own
+# (`aistudio flow character list`, `aistudio flow media`).
+#
+#   aistudio flow storyboard flow-storyboard.yaml                  # plan + quotes, spends nothing
+#   aistudio flow storyboard flow-storyboard.yaml --keyframes      # + the free keyframes, to review
+#   aistudio flow storyboard flow-storyboard.yaml --max-credits 40 -o scene.mp4
+
+project: 11111111-2222-4333-8444-555555555555   # optional: the default 'aistudio' project
+
+# Fixed sentences, pasted unchanged after every prompt (the style also after plate prompts).
+style: "Soft morning light, 35 mm lens, muted colours."
+wardrobe: "Mai wears a red hoodie and grey leggings."
+
+# Defaults for every shot (these are the built-in defaults).
+model: veo-3.1-lite
+duration: 8
+aspect: "16:9"
+
+characters:
+  - name: Mai                                   # already in the project (by name)
+  - name: Robo
+    create:                                     # made now: 0 credits, Nano Banana 2.1
+      description: "a small friendly robot with round blue eyes"
+      personality: "calm and curious"
+
+locations:
+  - name: gym
+    prompt: "An empty gym at dawn, no people"   # a free plate image
+  - name: street
+    media: 66666666-7777-4888-8999-000000000000 # or an image already in the project
+
+shots:
+  - id: arrive
+    prompt: "Wide shot: Mai walks into the gym and puts her bag down."
+    say: "Let's get started."
+    characters: [Mai]            # attached to the clip, with its saved voice
+    location: gym                # the plate shapes the keyframe
+  - id: lift
+    join: extend                 # the same moment goes on: 10 credits, no Flow quote
+    prompt: "She picks up a dumbbell and smiles at the camera."
+  - id: hands
+    join: frame                  # a frame saved from the clip before is this clip's first frame
+    frame_at: 3                  # seconds into that clip (default: its last frame)
+    mode: start_frame            # opens exactly on that frame; no character can be attached
+    prompt: "Close on her hands tightening around the dumbbell."
+    trim: [1, 6]                 # keep seconds 1 to 6 when joining (whole seconds)
+  - id: outside
+    join: cut                    # a new keyframe: a hard cut
+    location: street
+    mode: start_frame
+    keyframe:
+      prompt: "Mai and Robo on the street outside the gym."
+      characters: [Mai, Robo]    # in the keyframe image only
+    prompt: "They walk away from the camera."

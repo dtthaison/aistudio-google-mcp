@@ -30,6 +30,7 @@ from aistudio._app.flow import (
     flow_voices,
 )
 from aistudio._app.flow_music import flow_music, flow_music_credits
+from aistudio._app.flow_storyboard import flow_storyboard
 from aistudio._app.flow_tools import (
     flow_tool_create,
     flow_tool_edit,
@@ -897,3 +898,97 @@ def frame_save(state: CliState, media_id: str, at: float | None, project: str | 
         _render_files({k: v for k, v in data.items() if k != "credits_spent"})
 
     emit(result, json_output=json_output, render=render)
+
+
+def _adopt(_ctx: click.Context, _param: click.Parameter, values: tuple[str, ...]
+           ) -> dict[str, str]:
+    adopted: dict[str, str] = {}
+    for value in values:
+        shot, sep, media = value.partition("=")
+        if not sep or not shot.strip() or not media.strip():
+            raise click.BadParameter(f"{value!r} is not SHOT=MEDIA-ID", param_hint="--adopt")
+        adopted[shot.strip()] = media.strip()
+    return adopted
+
+
+@flow.command("storyboard")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--keyframes", is_flag=True,
+              help="Also make the free assets now (new characters, location plates, keyframes "
+                   "on Nano Banana 2.1: 0 credits, but they are generated in your project) so "
+                   "you can review them before paying. Without --keyframes or --max-credits "
+                   "nothing is generated.")
+@click.option("--max-credits", type=click.IntRange(0),
+              help="Make the scene, spending at most this many credits in total; refused "
+                   "before anything is made when the quotes add up to more. Without it "
+                   "only the plan and the quotes are shown.")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Where to save the finished scene (an .mp4); needed with --max-credits.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--state", "state_path", type=click.Path(dir_okay=False, path_type=Path),
+              help="State file (default: FILE with .state.json); it records what is made so a "
+                   "re-run never pays twice.")
+@click.option("--assets", "assets_dir", type=click.Path(file_okay=False, path_type=Path),
+              help="Folder for the keyframes, plates, frames and clips (default: FILE.assets).")
+@click.option("--adopt", multiple=True, callback=_adopt, metavar="SHOT=MEDIA-ID",
+              help="Tell aistudio a shot's clip exists after an error that may have charged "
+                   "(repeatable). Look it up with 'flow media --type video'.")
+@click.option("--timeout", type=click.IntRange(30), default=1200, show_default=True,
+              help="Seconds to wait for each clip after approving it.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def storyboard_cmd(state: CliState, file: Path, keyframes: bool, max_credits: int | None,
+                   out: Path | None, force: bool, state_path: Path | None,
+                   assets_dir: Path | None, adopt: dict[str, str], timeout: int, visible: bool,
+                   json_output: bool) -> None:
+    """Make a whole Flow scene from one YAML FILE: characters, location plates, keyframes and
+    an ordered list of shots, joined into one video.
+
+    The whole file is checked first. Without --max-credits it spends nothing: it shows each
+    shot's plan and one total quote. With --max-credits N it makes the clips in order, stops at
+    the first error, and keeps a state file so a re-run continues instead of paying again.
+    See SKILL.md or the README for the file format."""
+    state.require_browser()
+
+    def progress(message: str) -> None:
+        stderr.print(message, markup=False)
+    result = asyncio.run(flow_storyboard(
+        state.profile(), file, max_credits=max_credits, keyframes=keyframes, out=out,
+        overwrite=force, state_path=state_path, assets_dir=assets_dir, adopt=adopt,
+        timeout_s=float(timeout), visible=visible,
+        on_progress=None if json_output else progress))
+    emit(result, json_output=json_output, render=_render_storyboard)
+    if result["status"] == "timeout":
+        raise SystemExit(2)
+    if result["status"] == "failed":
+        raise SystemExit(1)
+
+
+def _render_storyboard(data: dict[str, Any]) -> None:
+    for shot in data["shots"]:
+        quote = ("" if shot["quote"] is None
+                 else f"  {shot['quote']} credits ({shot['quote_basis']})")
+        length = "" if shot["duration"] is None else f" {shot['duration']} s"
+        stdout.print(f"{shot['id']}  {shot['join']:6}  {shot['status']:8}  "
+                     f"{shot['model']}{length} {shot['aspect']}  "
+                     f"{' + '.join(shot['steps'])}{quote}", markup=False)
+    for file in data.get("files", []):
+        stdout.print(f"Wrote {file['path']}", markup=False)
+    if data["status"] == "quoted":
+        total = data["quote"]["credits"]
+        stdout.print(f"{data['quote']['pending_shots']} shot(s) left, quoted at {total} "
+                     f"credits in total. Nothing was spent. Re-run with --max-credits "
+                     f"{total} -o scene.mp4 to make them; add --keyframes first to review "
+                     f"the free keyframes.", markup=False)
+    else:
+        stdout.print(f"Spent {data['credits_spent']} credits in this run "
+                     f"({data['credits_spent_total']} in all); {_left(data)}", markup=False)
+    error = data.get("error")
+    if error:
+        stderr.print(f"Error: {error['message']}", markup=False)
+        if error.get("hint"):
+            stderr.print(f"Hint: {error['hint']}", markup=False)
+    for warning in data.get("warnings", []):
+        stderr.print(f"Warning: {warning}", markup=False)

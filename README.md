@@ -89,6 +89,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
 | Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
 | Google Flow | `flow video/image/extend/edit`, `flow character ...` | Flow credits, only with `--max-credits` |
+| Google Flow | `flow storyboard FILE.yaml` (a whole scene from one file) | plan and quotes are free; Flow credits only with `--max-credits` |
 | Google Flow Music | `flow music` (songs on flowmusic.app), `flow credits --music` | 5 Flow Music credits a song, only with `--max-credits`; the credits read is free |
 | Google Flow | `flow tool list/get/export`, `flow tool use` | free (a tool that calls `Flow.generate` needs `--allow-spend`) |
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
@@ -133,6 +134,9 @@ aistudio flow character voice <id> --clear
 aistudio flow video "Robo waves at the camera" --character Robo  # quote; add --max-credits to make it
 aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; trims in whole seconds
 aistudio flow scene download <scene-id> -o scene.mp4
+aistudio flow storyboard scene.yaml                            # a whole scene from one file: plan + quotes, spends nothing
+aistudio flow storyboard scene.yaml --keyframes                # + the free keyframes, to review before paying
+aistudio flow storyboard scene.yaml --max-credits 40 -o scene.mp4   # make it; a re-run continues, never pays twice
 aistudio flow frame save <media-id> -o last.jpg                 # free: the last frame, as a new image
 aistudio flow tool list --kind mine            # your Tools; also template, community
 aistudio flow tool get <id-prefix>             # its files, and whether its code can spend credits
@@ -161,6 +165,43 @@ aistudio profile list                      # * marks the active profile
 
 A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one chosen with
 `profile switch`, else `default`.
+
+### A whole scene from one file
+
+`flow storyboard` runs the recipe for a Flow scene (a character and a setting that stay the
+same) from one YAML file: characters (existing, or made from a description), location plates,
+sentences for style and wardrobe pasted unchanged into every prompt, and an ordered list of
+shots. [`docs/examples/flow-storyboard.yaml`](docs/examples/flow-storyboard.yaml) shows every
+field. A shot joins the one before it by `cut` (a new keyframe), `frame` (a frame saved from the
+clip before, `frame_at` seconds in) or `extend`; its `mode` is `start_frame` (the clip opens on
+the frame, no character) or `ingredient` (the frame is a guide, with the character and its
+voice). The whole file is checked before anything runs, and every problem is listed at once:
+Flow cannot combine a start frame with a character, a clip with a character takes at most one
+ingredient, an extend shot carries only a prompt, stitch trims are whole seconds, character
+names are unique.
+
+| Command | What it does | Spends |
+|---|---|---|
+| `flow storyboard scene.yaml` | checks the file, asks Flow for one quote per model, length and aspect, prices extensions from aistudio's measured table (10 credits), prints the plan and one total | nothing, makes nothing |
+| `... --keyframes` | the same, and makes the free assets: new characters, location plates and keyframes on Nano Banana 2.1 (0 credits, but they are generated in your Flow project), saved in `scene.assets/` | nothing |
+| `... --max-credits N -o scene.mp4` | refuses if the clips still to make are quoted above N; otherwise makes the missing assets, then the clips in order (each capped at its own quote), then joins them into `scene.mp4` | up to N |
+
+Progress is written to `scene.state.json` (or `--state`) next to the file: the project, every
+asset, each shot's clip id and credits. Run it again after an error and it continues from the
+first unfinished shot; a finished shot is never paid for twice, and editing one is refused
+(change a keyframe prompt instead to redo that keyframe, which is free). It stops at the first
+error and never retries a paid step. When an error may have charged (a timeout, a browser
+crash), the shot is blocked until you look in Flow and run again with
+`--adopt SHOT=<clip media id>` (find the id with `flow media --type video`). `--json` prints
+`status`, `credits_spent`, `quote`, `shots[]` and `warnings`.
+
+Limits: the quote is Flow's for the model, length and aspect without the attachments (a clip
+with or without frames and characters was 10 credits on Veo 3.1 Lite when measured); a clip's
+real quote is checked again when it is made and a higher one is refused. An extension adds
+7-8 seconds, always on Veo 3.1 Lite, and takes no frames or characters. A start-frame clip
+takes no extra ingredients (not measured). New characters have no voice: set one first with
+`flow character voice`. Local images are never uploaded from a storyboard (that needs
+`--i-have-rights`, which only you can give): use media ids.
 
 ## Spending: you decide
 
