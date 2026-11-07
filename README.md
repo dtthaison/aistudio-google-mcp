@@ -84,7 +84,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Area | Commands | Cost |
 |---|---|---|
 | Models and account | `models list/get/star/unstar`, `count-tokens`, `prompt list`, `voices list`, `status` | free |
-| Build apps | `app list/get/recent/export`, `gallery list/get` | free |
+| Build apps | `app list/get/recent/export/diff`, `gallery list/get` | free |
 | Build apps | `app create`, `app prompt` | your Build quota |
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
 | Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
@@ -104,6 +104,9 @@ aistudio app get <id-prefix>                   # one app and its builder runs
 aistudio app create "a pomodoro timer with dark mode"     # ~5-7 min in a minimized Chrome
 aistudio app prompt <id-prefix> "make the start button green"
 aistudio app export <id-prefix> ./my-app       # download an app's code (each file checked)
+aistudio app diff <id-prefix>                  # what the last builder turn changed (unified diff)
+aistudio app diff <id-prefix> --turn 3         # what turn 3 changed (turn 1 shows every file)
+aistudio app diff <id-prefix> --against ./my-app   # current code vs an earlier export
 aistudio gallery list --tag google-maps
 aistudio status                                # AI Studio / Gemini API incidents
 aistudio generate image "a red apple on a white table" -o apple.jpg

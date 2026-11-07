@@ -18,10 +18,12 @@ from aistudio._rpc.registry import RpcSpec, Transport
 from aistudio._rpc.rows.apps import (
     decode_apps_checked,
     decode_gallery,
+    decode_history_next,
     decode_recent,
     decode_runs,
     decode_snapshot_files,
     decode_snapshot_stamp,
+    decode_turn_snapshots,
 )
 from aistudio._rpc.rows.generate import decode_token_count
 from aistudio._rpc.rows.models import decode_models
@@ -29,13 +31,16 @@ from aistudio._rpc.rows.preferences import decode_starred
 from aistudio._rpc.rows.prompts import decode_prompt_list
 from aistudio._rpc.rows.status import decode_incidents
 from aistudio._transport.http import HttpTransport
-from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem
+from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem, TurnSnapshot
 from aistudio._types.chat import TokenCount
 from aistudio._types.models import Model
 from aistudio._types.prompts import PromptSummary
 from aistudio._types.status import Incident
-from aistudio.exceptions import ValidationError
+from aistudio.exceptions import ServerError, ValidationError
 from aistudio.paths import Profile
+
+_HISTORY_PAGE = 100
+_MAX_HISTORY_PAGES = 500
 
 
 class AIStudioClient:
@@ -146,6 +151,27 @@ class _Apps:
         raw = await self._client.call(registry.GET_SNAPSHOT,
                                       apps_params.get_snapshot(app_id, stamp))
         return decode_snapshot_files(raw)
+
+    async def turn_snapshots(self, app_id: str) -> builtins.list[TurnSnapshot]:
+        """The app's files at the end of each builder turn, oldest first.
+
+        The history comes newest page first; each page names the offset of the next, older one.
+        """
+        turns: builtins.list[TurnSnapshot] = []
+        offset: str | None = None
+        seen: set[str] = set()
+        for _ in range(_MAX_HISTORY_PAGES):
+            raw = await self._client.call(registry.LOAD_HISTORY,
+                                          apps_params.load_history(app_id, _HISTORY_PAGE, offset))
+            turns = decode_turn_snapshots(raw) + turns
+            offset = decode_history_next(raw)
+            if offset is None:
+                return turns
+            if offset in seen:
+                break
+            seen.add(offset)
+        raise ServerError(f"the history of app {app_id} did not end", retriable=False,
+                          hint="nothing was changed; try again later")
 
     async def download_file(self, app_id: str, sha256: str) -> bytes:
         return await self._client.download(
