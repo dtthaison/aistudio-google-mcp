@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-07
+
 ### Added
 - `aistudio spend [--since 7d|2026-11-01] [--command flow] [--json]`: a local log of every run
   that spent or may have spent (Flow video, image, extend, edit, music, characters, Tools run

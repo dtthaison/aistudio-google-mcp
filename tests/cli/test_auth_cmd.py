@@ -2,6 +2,7 @@ import json
 
 from click.testing import CliRunner
 
+from aistudio import __version__
 from aistudio.cli.main import cli
 from aistudio.paths import get_profile
 
@@ -13,7 +14,7 @@ def run(*args):
 def test_version():
     result = run("--version")
     assert result.exit_code == 0
-    assert "0.1.0" in result.stdout
+    assert f"version {__version__}" in result.stdout
 
 
 def test_check_ok(logged_in_profile):
