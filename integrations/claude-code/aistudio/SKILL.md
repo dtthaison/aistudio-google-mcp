@@ -65,6 +65,7 @@ quotes and write each `'` as `'\''`.
 | Song with Google Flow Music (flowmusic.app; **5 Flow Music credits, no quote from Flow Music**; writes .m4a, or .wav with `--wav`) | `aistudio flow music --prompt-file <file> [--lyrics-file <file>] [--length SECONDS] [--bpm N] [--seed N] [--title T] [-m 'Lyria 3.5'\|'Lyria 3 Pro'] --max-credits 5 -o song.m4a --json`; without `--max-credits` it only reports the price. No lyrics means an instrumental |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
+| Many Flow images from a file of prompts (**the free model makes every one at once**) | `aistudio flow image --prompts-file <prompts.jsonl> -o <existing folder> [-m MODEL] [--aspect A] [--count N] [--character X] [--ingredient <media id>] [--max-credits <total of the quotes>] [--start-at N] --json`; see "Flow image batches" below |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
@@ -108,6 +109,27 @@ quotes and write each `'` as `'\''`.
   found in the project instead (its model and attachments were not checked: look at it). Video
   models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
+- **Flow image batches (`flow image --prompts-file`).** The file is JSON Lines: one prompt per
+  line, as a JSON string or `{"prompt": "..."}`; write a prompt's own line breaks as `\n` (a
+  plain multi-line text file is not a batch file). `-o` must be an existing folder; files are
+  `<number>-<words of the prompt>-<n>.jpg`, the number being the prompt's place in the file.
+  **With the free Nano Banana 2.1 the whole batch generates at once, with no quote and no
+  question: before running it, tell the user how many prompts it holds (each makes `--count`
+  images) and get their OK.** A big batch can also hit Flow's "unusual activity" limit
+  (`RATE_LIMITED`): do not loop, wait several minutes. Paid image models are currently refused
+  (see above); if one is ever allowed, the batch first quotes every prompt (nothing spent without
+  `--max-credits`), `"status": "quoted"` with `quote_credits` as the total, and `--max-credits`
+  is then the budget for the whole batch (over it: `OVER_BUDGET`, nothing approved). Ask the
+  user, then re-run with `--max-credits <quote_credits>`. `--ingredient` must be media ids
+  (a local file would be uploaded once per prompt). The prompts run one at a time and the first
+  error stops the batch; nothing is retried. The result has `results[]`, one per prompt, with
+  `index`, `status` (`done`, `quoted`, `failed`, `timeout`, `not_run`), `media_ids`, `files`,
+  `credits_spent` and, for the failure, `error`, plus `resume_at`. Report to the user which
+  prompts finished; check the Flow project (`flow media`) before continuing, because the
+  prompt that failed may have been made; then, with the user's OK, re-run the same command
+  plus `--start-at <resume_at>`. Never re-run the whole file with `--force`: finished prompts
+  would be generated again (without `--force` the run is refused up front, because the files of
+  the finished prompts exist).
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
      request is declined (nothing waits in Flow). If `"declined": false`, Flow's request is still

@@ -119,6 +119,8 @@ aistudio flow video "a red apple rolling on a table" -m veo-3.1-lite --duration 
 aistudio flow music "upbeat lofi beat with soft piano"                 # price only (5 credits)
 aistudio flow music "warm acoustic pop" --lyrics-file song.txt --length 90 --max-credits 5 -o song.m4a
 aistudio flow media --type video               # media ids in the "aistudio" Flow project
+aistudio flow image --prompts-file prompts.jsonl -o shots/   # one prompt per line; the free model makes ALL of them at once
+aistudio flow image --prompts-file prompts.jsonl -o shots/ --start-at 3   # resume a stopped batch at prompt 3
 aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
 aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
 aistudio flow edit <media-id> "make it black and white" --max-credits 20 -o bw.mp4
@@ -147,6 +149,36 @@ aistudio flow tool use <id-prefix> "Upload photo=shoe.png" "Write the brief" "@G
 ```
 
 `aistudio <command> --help` lists every option; `--json` prints machine-readable output.
+
+### Many images at once: `flow image --prompts-file`
+
+`prompts.jsonl` holds one prompt per line, as a JSON string or `{"prompt": "..."}` (JSON Lines).
+A prompt of several lines, even with blank lines, stays one entry because its line breaks are
+written `\n`; blank lines between entries are ignored.
+
+```
+"A red apple on a white table"
+{"prompt": "A lighthouse at sunset.\n\nWide shot, warm light."}
+```
+
+```sh
+aistudio flow image --prompts-file prompts.jsonl -o shots/ -m nano-banana-2.1 --aspect 16:9
+```
+
+- The prompts run one at a time in one browser session. `-o` is an existing folder; files are
+  `<number>-<words of the prompt>-<n>.jpg`, numbered by the prompt's place in the file, and an
+  existing file is never overwritten without `--force`.
+- `-m`, `--aspect`, `--count`, `--character` and `--ingredient` apply to every prompt.
+  `--ingredient` takes Flow media ids, not local files.
+- **The free Nano Banana 2.1 generates every prompt at once, with no quote and no question.**
+  Count the lines before you run it.
+- A paid model is quoted for every prompt first, and nothing is spent without `--max-credits`.
+  That budget is for the whole batch: if the quotes add up to more, the batch is refused before
+  anything is approved.
+- The first error stops the batch and nothing is retried. The output lists each prompt's status,
+  media ids, files and credits spent, then `--start-at N`: run the same command with it to
+  continue from prompt N (check the Flow project first; the prompt it stopped at may have been
+  made). The exit code is 1, or 2 for a timeout.
 
 ### Several Google accounts
 
