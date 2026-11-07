@@ -98,6 +98,10 @@ class Ui(Protocol):
                   ) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
         ...
 
+    def refuse_requests(self, methods: tuple[str, ...], allow: Callable[[str], bool]
+                        ) -> contextlib.AbstractAsyncContextManager[list[str]]:
+        ...
+
     async def type_text(self, selector: str, text: str) -> None: ...
 
     async def text_of(self, selector: str) -> str: ...
@@ -625,6 +629,37 @@ class PlaywrightUi:
                     await self._page.unroute(matches, fetch)
             for task in pending:
                 task.cancel()
+
+
+    @contextlib.asynccontextmanager
+    async def refuse_requests(self, methods: tuple[str, ...],
+                              allow: Callable[[str], bool]) -> AsyncIterator[list[str]]:
+        """Hold the page's requests for these RPCs: one ``allow`` rejects (by its request body)
+        never leaves Chrome; the page gets HTTP 409 and its body is added to the list."""
+        refused: list[str] = []
+
+        def matches(url: str) -> bool:
+            return any(method in methods for method in _methods(url))
+
+        async def check(route: Any) -> None:
+            body = route.request.post_data or ""
+            try:
+                allowed = allow(body)
+            except Exception:  # noqa: BLE001 - a check that fails refuses
+                allowed = False
+            with contextlib.suppress(Exception):  # the page may have gone
+                if allowed:
+                    await route.fallback()
+                else:
+                    refused.append(body)
+                    await route.fulfill(status=409, body="")
+
+        await self._page.route(matches, check)
+        try:
+            yield refused
+        finally:
+            with contextlib.suppress(Exception):  # the page may be closed
+                await self._page.unroute(matches, check)
 
 
 async def _minimize(context: Any, page: Any) -> None:

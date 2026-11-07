@@ -87,3 +87,41 @@ def test_unnamed_characters_are_listed():
     (character,) = contents(s5=[["p1", "c9", None, [1, "", []], None, None, [1, 0], [1, 0]]]
                             ).characters
     assert (character.id, character.name) == ("c9", "")
+
+
+def test_a_character_lists_its_portrait_and_body_workflows():
+    # Live 2026-11-07: [3][2][0] holds one [workflow] per slot (portrait, then body).
+    luna = [PID, "c5", None, [1, "Luna", [[["wp"], ["wb"]], None, "notes"]], "i5", [1, 1],
+            [300, 0], [301, 0]]
+    chars = {c.id: c for c in contents(s5=[*CHARS, luna]).characters}
+    assert (chars["c5"].portrait_workflow, chars["c5"].body_workflow) == ("wp", "wb")
+    assert (chars["c1"].portrait_workflow, chars["c1"].body_workflow) == ("w9", None)
+    assert (chars["c2"].portrait_workflow, chars["c2"].body_workflow) == (None, None)
+
+
+def _req(method, args):
+    return urlencode({"f.req": json.dumps([[[method, json.dumps(args), None, "generic"]]])})
+
+
+def test_a_body_request_must_write_the_body_slot_and_spare_the_portrait():
+    from aistudio._flow.rows import body_request_target, is_image_request
+
+    to_slot = _req("ogiZ0b", [None, [[None, [None, 22, None, None, None, PID]]], 1,
+                              ["u1", None, ["c5", [1]]]])
+    to_portrait = _req("ogiZ0b", [None, [[None, [None, 22, None, None, "wp", PID]]], 1, ["u1"]])
+    to_body_wf = _req("ogiZ0b", [None, [[None, [None, 22, None, None, "wb", PID]]], 1, ["u1"]])
+    to_portrait_slot = _req("ogiZ0b", [None, [[None]], 1, ["u1", None, ["c5", [0]]]])
+    assert body_request_target(to_slot, "c5", None, "wp")
+    assert not body_request_target(to_portrait, "c5", None, "wp")
+    assert not body_request_target(to_portrait_slot, "c5", None, "wp")
+    assert not body_request_target(to_slot, "c9", None, "wp")  # another character
+    assert body_request_target(to_body_wf, "c5", "wb", "wp")  # a body that has a workflow
+    assert not body_request_target(to_slot, "c5", "wb", "wp")
+    rename = _req("mYWVGd", [["w-new", None, None, ["Luna body"], PID],
+                             [["metadata.display_name"]]])
+    primary = _req("mYWVGd", [["wp", None, None, [None, None, None, None, "b1"], PID],
+                              [["metadata.primary_media_id"]]])
+    assert body_request_target(rename, "c5", None, "wp")  # the page naming the new image
+    assert not body_request_target(primary, "c5", None, "wp")  # the portrait's version moving
+    assert not body_request_target("f.req=not json", "c5", None, "wp")
+    assert is_image_request(to_slot) and not is_image_request(rename)

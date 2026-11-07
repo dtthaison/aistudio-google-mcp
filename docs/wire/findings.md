@@ -1237,6 +1237,41 @@ holds one song, so paging, other statuses and the model field are not seen live.
   `generate`, so existing calls keep working, and a prompt that is exactly `list`, `get` or
   `download` needs `flow music generate`.
 
+### Flow character body slots: why a body never showed (2026-11-07, free probes)
+
+- **Report.** `flow character body` on "Luna Starham" (`5e870776`) said `done` and saved image
+  `68d6ad35` (0 credits), but Flow's character page showed no body.
+- **Slots.** A character record's `[3][2][0]` holds one `[workflow_id]` per image slot: index 0
+  is the portrait, index 1 the body (Flow's JS: `h1("portrait") = 0`, `h1("body") = 1`). Each
+  slot's workflow keeps that slot's versions, and its `metadata.primary_media_id` is the one
+  shown. Luna had only `[["0cde650e"]]`, and `68d6ad35` sat in `0cde650e`, the portrait's
+  workflow. So the image became a new **portrait** version, not a body.
+- **Where the slot goes on the wire.** The page builds the `ogiZ0b` destination from the active
+  slot. For a slot that has a workflow it names that workflow (args `[1][0][5][4]`). For an empty
+  slot it ends the args with `[<client UUID>, null, [character_id, [slot]]]`. Two blocked Starts
+  (the request was stopped inside the page, so nothing was generated) showed both: one ended in
+  `["…", null, ["5e870776…", [1]]]` (the body), and the other named `0cde650e` (the portrait).
+- **Why the slot was wrong.** The old `open_body` waited for an "Ingredient" button. Once the
+  portrait has an image, that button shows in both slots, so it does not prove body mode, and
+  the page can be back on the portrait slot when Start is pressed. The active slot is the chip
+  `flow-slot-chip-button button.chip-button-active` ("Portrait" or "Create body").
+- **Fix.** `open_body` waits for the active "Create body" chip, and `start_body` checks it again
+  after typing. During Start, aistudio holds back (Playwright route, HTTP 409 to the page) any
+  `ogiZ0b` that does not write to the body slot, and any `ogiZ0b` or `mYWVGd` that names the
+  portrait's workflow. After the image, aistudio re-reads the character (up to 3 reads, 3 s
+  apart). The run is `done` only when slot 1 has a workflow, that workflow is not the
+  portrait's, and it holds the new image.
+- **Existing image as the body.** "Add from project" in body mode is `Sc7aEb` with
+  `[None, None, [character_id, [1]]]` (the portrait uses `[0]`). It copies the image into a new
+  workflow in that slot, for free. `flow character body <id> --media <media_id>` sends it.
+- **Portrait version moved.** After the first blocked Start, Luna's portrait workflow
+  `0cde650e` had `metadata.primary_media_id` = `68d6ad35` (updated at epoch 1794065575), and
+  the character's image field followed. The page itself sent that write; which call it was, the
+  probe did not record. Setting it back is `mYWVGd`
+  `[[workflow_id, None, None, [None, None, None, None, media_id], project_id],
+  [["metadata.primary_media_id"]]]` (Flow's `set_primary_media_id`). This is why a body run now
+  also holds back `mYWVGd` calls that name the portrait's workflow.
+
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 
 Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard

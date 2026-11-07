@@ -73,6 +73,10 @@ class FlowCharacter:
     media_id: str | None  # the character's image; None until it has one
     created: int | None
     voice: str | None = None  # a preset's lower-case name or a custom voice's media id
+    # The workflows behind the page's image slots ([3][2][0], live 2026-11-07): slot 0 is the
+    # portrait, slot 1 the body; each workflow keeps that slot's versions.
+    portrait_workflow: str | None = None
+    body_workflow: str | None = None
 
 
 @dataclass(frozen=True)
@@ -192,8 +196,56 @@ def _characters(rows: Any) -> list[FlowCharacter]:
         cid, name = _str(opt_index(row, 1)), opt_index(row, 3, 1)
         if cid and isinstance(name, str):  # "" stays: an unnamed character can be renamed
             out.append(FlowCharacter(cid, name, _str(opt_index(row, 4)),
-                                     _int(opt_index(row, 6, 0)), _voice_ref(row)))
+                                     _int(opt_index(row, 6, 0)), _voice_ref(row),
+                                     _slot(row, PORTRAIT_SLOT), _slot(row, BODY_SLOT)))
     return out
+
+
+PORTRAIT_SLOT, BODY_SLOT = 0, 1  # the character page's slots ("Portrait", "Create body")
+
+
+def _slot(row: Any, slot: int) -> str | None:
+    """A character record's slot workflow: ``[3][2][0]`` is ``[[portrait_wf], [body_wf]]``."""
+    return _str(opt_index(row, 3, 2, 0, slot, 0))
+
+
+def body_request_target(body: str, character_id: str, body_workflow: str | None,
+                        portrait_workflow: str | None) -> bool:
+    """Whether a page request (``f.req``) keeps a body run off the portrait (live, 2026-11-07).
+    No call may name the portrait's workflow. An image (``ogiZ0b``) must also write to the body
+    slot: for an empty slot it names ``[character_id, [1]]``, for a slot that has a workflow it
+    names that workflow. The page sometimes falls back to the portrait slot, and its request
+    then names the portrait's workflow instead, which adds the image to the portrait."""
+    calls = _calls(body)
+    if not calls:
+        return False
+    for method, args in calls:
+        if portrait_workflow and _has(args, portrait_workflow):
+            return False
+        if method == "ogiZ0b" and not (_has(args, body_workflow) if body_workflow
+                                       else _has(args, [character_id, [BODY_SLOT]])):
+            return False
+    return True
+
+
+def is_image_request(body: str) -> bool:
+    return any(method == "ogiZ0b" for method, _ in _calls(body))
+
+
+def _calls(body: str) -> list[tuple[str, Any]]:
+    """The ``(rpc id, args)`` pairs of a batchexecute request body."""
+    raw = parse_qs(body).get("f.req", [body])[0]
+    try:
+        return [(c[0], json.loads(c[1])) for c in json.loads(raw)[0]
+                if isinstance(c, list) and len(c) > 1 and isinstance(c[1], str)]
+    except (ValueError, TypeError, IndexError, KeyError):
+        return []
+
+
+def _has(value: Any, wanted: Any) -> bool:
+    if value == wanted:
+        return True
+    return isinstance(value, list) and any(_has(v, wanted) for v in value)
 
 
 def _voice_ref(row: Any) -> str | None:

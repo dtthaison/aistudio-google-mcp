@@ -251,6 +251,15 @@ class FakeUi:
         self.fetch_bodies = fetch_bodies
         yield self
 
+    @contextlib.asynccontextmanager
+    async def refuse_requests(self, methods, allow):
+        """Scripted: ``self.sent_bodies`` (per method) are the requests the page sends; the
+        refused ones are listed, as the real check does."""
+        refused = [body for method in methods
+                   for body in getattr(self, "sent_bodies", {}).get(method, []) if not allow(body)]
+        self.ops.append(("refuse_requests", tuple(methods)))
+        yield refused
+
     async def next(self, method, *, timeout_s):
         self.waits.append((method, timeout_s))
         queue = self._responses.get(method) or []

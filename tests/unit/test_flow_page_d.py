@@ -6,6 +6,7 @@ import pytest
 
 from aistudio._browser.ui import CapturedResponse
 from aistudio._flow.page import AGENT_MESSAGE, CHARACTERS_TAB, INGREDIENTS, PROMPT_EDITOR, FlowPage
+from aistudio._flow.rows import FlowCharacter
 from aistudio.exceptions import BrowserError, ServerError, WaitTimeoutError
 from tests.unit.test_flow_page import PID, Clock
 from tests.unit.test_flow_rows import batch, permission, stream
@@ -178,21 +179,72 @@ async def test_stitch_give_up_names_an_unreadable_reply(fake_ui):
 
 
 
-async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
-    from aistudio._flow.page import CHARACTER_MODEL, EDITOR_LAST
+LUNA = FlowCharacter("c1", "Luna", "i0", 1, portrait_workflow="wp")
+
+
+def image_request(*tail, method="ogiZ0b"):
+    """An ``f.req`` as the page sends it: the destination rides at the end of the args."""
+    args = [None, [[None, None, [["i0", None, None, None, 1]], 7, 3, "BELUGA", None,
+                    [None, 22, None, None, None, PID]]], 1, *tail]
+    return "f.req=" + json.dumps([[[method, json.dumps(args), None, "generic"]]])
+
+
+def body_page(fake_ui, *, chips=(1,), sent=()):
+    from aistudio._flow.page import BODY_CHIP, CHARACTER_MODEL, EDITOR_LAST
     from tests.unit.test_flow_page_b import IMAGE_ROW
 
     picker = "\U0001f34c Nano Banana 2.1 arrow_drop_down"
     ui = fake_ui({"ogiZ0b": [rpc("ogiZ0b", [[IMAGE_ROW]])]},
                  inner={("button", CHARACTER_MODEL): [picker]},
                  texts={EDITOR_LAST: ["full body on a dock"]},
-                 visible={("button", "Ingredient"): [True]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
+    ui.counts = {BODY_CHIP: list(chips)}
+    ui.sent_bodies = {"ogiZ0b": list(sent)}
+    return ui
+
+
+async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
+    ui = body_page(fake_ui, chips=[0, 0, 1], sent=[image_request(["u1", None, ["c1", [1]]])])
     page = FlowPage(ui, now=Clock())
     assert await page.open_body(PID, "c1") == "Nano Banana 2.1"
-    assert ("dispatch", "button", "Create body") in ui.ops
-    media = await page.start_body("full body on a dock")
+    assert [op for op in ui.ops if op[0] == "dispatch"] == [("dispatch", "button",
+                                                              "Create body")] * 2
+    media = await page.start_body("full body on a dock", LUNA)
+    assert ("refuse_requests", ("ogiZ0b", "mYWVGd")) in ui.ops
     assert [m.media_id for m in media] == ["i1"] and page.started and page.paid_media == ["i1"]
+
+
+async def test_a_body_aimed_at_the_portrait_is_held_back(fake_ui):
+    # Live 2026-11-07: the page fell back to the portrait slot and its request named the
+    # portrait's workflow; the image became a portrait version and no body showed.
+    ui = body_page(fake_ui)
+    ui.sent_bodies = {"ogiZ0b": [image_request(["u1"], ["wp"])]}
+    page = FlowPage(ui, now=Clock())
+    with pytest.raises(BrowserError) as info:
+        await page.start_body("full body on a dock", LUNA)
+    assert "nothing was sent" in info.value.message
+    assert not page.started and page.paid_media == []
+
+
+async def test_body_start_waits_for_the_body_chip_again(fake_ui):
+    # Typing must not have moved the page back to the portrait; when the chip never returns,
+    # nothing is sent.
+    ui = body_page(fake_ui, chips=[0])
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).start_body("full body on a dock", LUNA)
+    assert "nothing was spent" in info.value.message
+    assert not any(op[0] == "click" for op in ui.ops)
+
+
+async def test_a_project_image_becomes_the_body_through_slot_one(fake_ui):
+    ui = fake_ui({"Sc7aEb": [rpc("Sc7aEb", [["k1", PID, "wb"], ["wb"]])]})
+    assert await FlowPage(ui).link_body(PID, "c1", "m3") == "k1"
+    sent = json.loads(next(op[2] for op in ui.ops if op[:2] == ("batch_rpc", "Sc7aEb")))
+    assert sent[0] == "m3" and sent[7] == [None, None, ["c1", [1]]]
+    ui = fake_ui({"Sc7aEb": [rpc("Sc7aEb", [], status=500)]})
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).link_body(PID, "c1", "m3")
+    assert "c1" in info.value.message and "500" in info.value.message
 
 
 async def test_body_needs_the_characters_own_page(fake_ui):
@@ -204,10 +256,12 @@ async def test_body_needs_the_characters_own_page(fake_ui):
 
 
 async def test_body_mode_must_take_effect_before_anything_is_priced(fake_ui):
-    # Plan G review Important 1: otherwise Start runs the page's other, unmeasured action.
+    # Plan G review Important 1: otherwise Start runs the page's other, unmeasured action. The
+    # "Ingredient" button alone is not body mode: it shows in the portrait slot too (live).
     from aistudio._flow.page import CHARACTER_MODEL
 
     ui = fake_ui(inner={("button", CHARACTER_MODEL): ["Nano Banana 2.1 arrow_drop_down"]},
+                 visible={("button", "Ingredient"): [True]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
     with pytest.raises(BrowserError) as info:
         await FlowPage(ui, now=Clock()).open_body(PID, "c1")

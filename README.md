@@ -139,6 +139,7 @@ aistudio flow character create Apple --photo <image-media-id>   # free: the phot
 aistudio flow character list
 aistudio flow character personality <id> "calm and curious"     # free
 aistudio flow character body <id> "full body, standing"         # 0 credits on Nano Banana 2.1
+aistudio flow character body <id> --media <image-media-id>      # free: a project image becomes the body
 aistudio flow character voices --search upbeat                  # Flow's 30 presets + your custom voices
 aistudio flow character voice <id> Laomedeia                    # free: a preset voice
 aistudio flow character voice <id> Laomedeia --style "upbeat fitness coach"   # free: a new custom voice

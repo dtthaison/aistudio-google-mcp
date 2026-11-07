@@ -22,6 +22,7 @@ from aistudio.exceptions import (
     NotFoundError,
     OverBudgetError,
     PlanMismatchError,
+    ServerError,
     ValidationError,
 )
 from tests.unit.test_app_flow_b import CONTENTS, IMG, NOW, VID, listed, media, store
@@ -50,13 +51,14 @@ class FakePage(PlanBPage):
     def __init__(self, ui, *, contents=FULL, turn_characters=("c1",), rename_error=None,
                  after=None, link_error=None, details_error=None, stored_name=None,
                  outcome_id="c1", personality_error=None, edit_model="Omni 1.1 Flash",
-                 edit_error=None, edit_timeout=False, body_error=None, **kw):
+                 edit_error=None, edit_timeout=False, body_error=None, body_slot="wb", **kw):
         super().__init__(ui, contents=contents, **kw)
         self.turn_characters, self.rename_error, self.after = turn_characters, rename_error, after
         self.link_error, self.details_error = link_error, details_error
         self.stored_name, self.outcome_id = stored_name, outcome_id
         self.personality_error, self.edit_model = personality_error, edit_model
         self.edit_error, self.edit_timeout, self.body_error = edit_error, edit_timeout, body_error
+        self.body_slot = body_slot  # the body workflow Flow lists after a body run (None: none)
 
     async def start_character(self, description):
         self.calls.append(("character", description))
@@ -68,6 +70,12 @@ class FakePage(PlanBPage):
         return await super().media_details(media_id)
 
     async def contents(self, pid):
+        if any(c[0] in ("body", "link_body") for c in self.calls):
+            self.calls.append(("contents_after_body",))
+            listed = await super().contents(pid)
+            chars = [dataclasses.replace(c, portrait_workflow="wp", body_workflow=self.body_slot)
+                     if c.id == "c1" else c for c in listed.characters]
+            return dataclasses.replace(listed, characters=chars)
         if self.after is not None and any(c[0] == "extend" for c in self.calls):
             if isinstance(self.after, Exception):
                 raise self.after
@@ -97,12 +105,16 @@ class FakePage(PlanBPage):
         self.calls.append(("open_body", cid))
         return self.character_model_label
 
-    async def start_body(self, prompt):
-        self.calls.append(("body", prompt))
+    async def start_body(self, prompt, character):
+        self.calls.append(("body", prompt, character.id))
         self.started, self.paid_media = True, ["b1"]
         if self.body_error:
             raise self.body_error
-        return [media("b1", video=False)]
+        return [dataclasses.replace(media("b1", video=False), workflow_id="wb")]
+
+    async def link_body(self, pid, cid, media_id):
+        self.calls.append(("link_body", cid, media_id))
+        return "k1"
 
     async def choose_character_model(self, label):
         self.calls.append(("choose", label))
@@ -507,7 +519,9 @@ async def test_character_body_is_priced_and_downloaded(logged_in_profile, tmp_pa
     kw, pages, _ = harness(credits=(1010, 1010))
     result = await flow_character_body(profile, "c1", "  full body,  on a dock ",
                                        out=tmp_path / "b.png", **kw)
-    assert ("body", "full body, on a dock") in pages[0].calls
+    assert ("body", "full body, on a dock", "c1") in pages[0].calls
+    assert ("contents_after_body",) in pages[0].calls  # done only once the body is listed
+    assert result["status"] == "done" and result["body_workflow"] == "wb"
     assert result["credits_spent"] == 0 and (tmp_path / "b.png").exists()
     assert result["character_id"] == "c1" and result["model"] == "nano-banana-2.1"
     kw, pages, _ = harness(character_model="Nano Banana Pro")  # body on Pro: not measured
@@ -518,6 +532,52 @@ async def test_character_body_is_priced_and_downloaded(logged_in_profile, tmp_pa
     with pytest.raises(NotFoundError):
         await flow_character_body(profile, "c9", "x", out=tmp_path / "d.png", **kw)
 
+
+
+async def no_sleep(seconds):
+    pass
+
+
+async def test_a_body_flow_did_not_attach_is_an_error_not_done(logged_in_profile, tmp_path):
+    # Live 2026-11-07: Flow made the image but the character page showed no body.
+    profile = profile_with_project(logged_in_profile)
+    for slot in (None, "wp", "w-other"):  # no body slot, the portrait's, another workflow
+        kw, pages, _ = harness(body_slot=slot)
+        kw["sleep"] = no_sleep
+        with pytest.raises(ServerError) as info:
+            await flow_character_body(profile, "c1", "full body", out=tmp_path / f"{slot}.png",
+                                      **kw)
+        assert "b1" in info.value.message and "--media b1" in info.value.hint
+        assert not (tmp_path / f"{slot}.png").exists()
+
+
+async def test_a_body_from_a_project_image_is_free_and_checked(logged_in_profile):
+    profile = profile_with_project(logged_in_profile)
+    kw, pages, _ = harness()
+    result = await flow_character_body(profile, "c1", media_id=IMG, **kw)
+    assert ("link_body", "c1", IMG) in pages[0].calls
+    assert not any(c[0] in ("body", "open_body") for c in pages[0].calls)
+    assert result == {"status": "done", "character_id": "c1", "media_id": "k1",
+                      "source_media_id": IMG, "body_workflow": "wb", "credits_spent": 0,
+                      "project": PROJECT}
+    kw, pages, _ = harness(body_slot=None)
+    with pytest.raises(ServerError):
+        await flow_character_body(profile, "c1", media_id=IMG, sleep=no_sleep, **kw)
+    assert [c for c in pages[0].calls if c[0] == "contents_after_body"] == [
+        ("contents_after_body",)] * 3  # re-read before giving up
+    kw, pages, _ = harness()
+    with pytest.raises(NotFoundError):
+        await flow_character_body(profile, "c1", media_id="m-not-here", **kw)
+    assert not any(c[0] == "link_body" for c in pages[0].calls)
+
+
+async def test_a_body_needs_exactly_one_of_prompt_and_media(logged_in_profile):
+    profile = profile_with_project(logged_in_profile)
+    for prompt, media_id in (("full body", IMG), ("  ", None), (None, None)):
+        kw, pages, _ = harness()
+        with pytest.raises(ValidationError):
+            await flow_character_body(profile, "c1", prompt, media_id=media_id, **kw)
+        assert pages == []  # refused before the browser opened
 
 
 SIX = "9a0b1c2d-1111-4222-8333-944455556666"

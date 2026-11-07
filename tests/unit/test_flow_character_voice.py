@@ -56,7 +56,7 @@ def mila(voice):
 def test_the_project_listing_carries_voices_and_each_characters_voice():
     contents = decode_contents([None, [VOICE_WORKFLOW], [VOICE_ROW], [], [], [CHARACTER_ROW]])
     assert contents.characters == [FlowCharacter(CID, "Mila Vance", "9a3cbf54", 1793601289,
-                                                 VOICE_ID)]
+                                                 VOICE_ID, portrait_workflow="4ac73614")]
     assert contents.voices == [FlowVoice(VOICE_ID, "Mila voice", "Laomedeia", STYLE,
                                          1793602860)]
 
@@ -127,11 +127,11 @@ def test_presets_are_the_thirty_dialog_voices():
 
 async def test_body_mode_is_clicked_again_until_it_shows(fake_ui):
     # Live: Flow ignores "Create body" until the character has loaded.
-    from aistudio._flow.page import CHARACTER_MODEL
+    from aistudio._flow.page import BODY_CHIP, CHARACTER_MODEL
 
     ui = fake_ui(inner={("button", CHARACTER_MODEL): ["Nano Banana 2.1 arrow_drop_down"]},
-                 visible={("button", "Ingredient"): [False, False, True]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
+    ui.counts = {BODY_CHIP: [0, 0, 0, 1]}  # the body chip turns active after the third click
     assert await FlowPage(ui, now=Clock()).open_body(PID, "c1") == "Nano Banana 2.1"
     assert ui.ops.count(("dispatch", "button", "Create body")) == 3
 
