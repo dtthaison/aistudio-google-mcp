@@ -44,7 +44,7 @@ def test_the_paid_commands_have_a_budget_option():
              if any(BUDGET_OPTIONS & set(p.opts) for p in command.params
                     if isinstance(p, click.Option))}
     assert {"aistudio flow video", "aistudio flow image", "aistudio flow extend",
-            "aistudio flow edit"} <= names
+            "aistudio flow edit", "aistudio flow storyboard"} <= names
 
 
 def test_a_planted_default_is_caught():

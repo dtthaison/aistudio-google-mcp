@@ -85,6 +85,7 @@ quotes and write each `'` as `'\''`.
 | Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Save a frame of a Flow clip as an image (free; for shot-to-shot chaining) | `aistudio flow frame save <clip media id> [--at SECONDS] [-o frame.jpg] --json`: the last frame by default, or the nearest frame to `--at`; pass the returned `media_id` to `--start-frame`, `--end-frame` or `--ingredient` (no upload, no `--i-have-rights`) |
+| A whole Flow scene from one YAML file (see "Making a Flow scene"): plan and quotes are free, `--keyframes` also makes the free keyframes, `--max-credits` makes the clips | `aistudio flow storyboard scene.yaml --json` (plan + one total quote, nothing generated), then `--keyframes` (review the images in `scene.assets/`), then `aistudio flow storyboard scene.yaml --max-credits <total quote> -o scene.mp4 --json` |
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
 | Character voices: list, set, remove (free) | `aistudio flow character voices [--search TEXT] --json` (Flow's 30 presets and the project's custom voices), `aistudio flow character voice <id> <preset or custom voice name or media id> --json`, `aistudio flow character voice <id> --clear --json`; `flow character list` shows each character's `voice` |
 | New custom voice for a character (0 credits measured) | `aistudio flow character voice <id> <preset> --style '<performance style>' [--voice-name '<Name>'] --json`: Flow saves a sample of the preset spoken in that style as a project voice, then gives it to the character |
@@ -272,6 +273,42 @@ quotes and write each `'` as `'\''`.
   without the user's OK.
 
 ## Making a Flow scene (story, character and setting that stay the same)
+
+**Shortcut: `aistudio flow storyboard <file.yaml>`** runs the whole recipe below from one file
+(write the file with your file tool; `docs/examples/flow-storyboard.yaml` in the repo shows every
+field). Keys: `project`, `style`, `wardrobe` (pasted unchanged after every prompt), `model`,
+`duration`, `aspect`, `characters` (`name` only for an existing one, `id` to be exact, or
+`create: {description | photo: <media id>, personality}`), `locations` (`prompt` for a free plate,
+or `media`), and `shots` (`id`, `prompt`, `say`, `speaker`, `join: cut|frame|extend`, `mode:
+start_frame|ingredient`, `characters`, `location`, `keyframe` (text, or `{prompt, characters,
+location, ingredients, media}`), `frame_at`, `ingredients`, `model`, `duration`, `aspect`,
+`trim: [start, end]`). The whole file is checked first and every problem is listed (a start frame
+with a character, two ingredients with a character, an extend shot with anything but a prompt,
+fractional trims, duplicate character names); relay them and fix the file, nothing ran.
+
+1. Run it with no flags: spends nothing, makes nothing. The result has `status: "quoted"`,
+   `shots[]` (steps, `quote`, `quote_basis`) and `quote.credits`, the total for the clips still to
+   make. One Flow quote is asked per model, length and aspect (without attachments); extensions
+   use the measured 10 credits (`quote_basis: "table"`).
+2. Optional: `--keyframes` also creates the characters, plates and keyframes (Nano Banana 2.1, 0
+   credits, but they do generate in the project and count toward Flow's rate limit). Look at the
+   images in `<file>.assets/`; to redo one, change its keyframe prompt and run `--keyframes`
+   again (finished and unchanged assets are reused).
+3. Show the user the total and ask. Then `--max-credits <total> -o scene.mp4`. It is refused
+   before anything is made when the quotes exceed the budget; each clip is capped at its own
+   quote; the run stops at the first error and never retries a paid step.
+4. A failed run returns `status: "failed"` (or `"timeout"`, exit 2) with `error` and `shots[]`
+   saying which shots finished. State is kept in `<file>.state.json`: running the same command
+   again continues after the finished shots and never pays for them twice. Editing a finished
+   shot is refused. A shot whose status is `unknown` or `timeout` may have been charged: it is
+   blocked until the user has looked in Flow; then pass `--adopt <shot>=<clip media id>` (from
+   `flow media --type video`). Ask the user before every re-run that can spend.
+
+Limits: no local image is uploaded from a storyboard (use media ids; `--i-have-rights` is never
+passed); new characters get no voice (`flow character voice` first); a start-frame clip takes no
+extra ingredients (not measured); an extension adds 7-8 s, is always Veo 3.1 Lite and takes no
+frames or characters; a clip's quote is checked again when it is made and a higher one is refused.
+The manual steps below are what it does.
 
 A **clip** is one generation (4–10 s, 8 s on Veo 3.1 Lite). A **scene** is Flow's timeline of
 clips: `flow extend` adds a clip to the same scene, and `flow scene stitch` joins clips into a new

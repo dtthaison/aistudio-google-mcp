@@ -27,6 +27,12 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
   and a free download of a song you already have. None of them spends credits, and `download`
   never overwrites a file without `--force`. `flow music PROMPT` works as before (also as
   `flow music generate PROMPT`).
+- `aistudio flow storyboard FILE.yaml`: a whole Flow scene from one file (characters, location
+  plates, fixed style and wardrobe sentences, and ordered shots that join by `cut`, `frame` or
+  `extend`). It checks the file first, then shows the plan and one total quote and spends
+  nothing; `--keyframes` also makes the free keyframes; `--max-credits N -o scene.mp4` makes the
+  clips in order and joins them. A state file makes a re-run continue instead of paying again.
+  Adds the `pyyaml` dependency.
 
 ### Security
 - `certifi` 2026.10.23 and, on Python 3.11 or later, `filelock` 4.2.9, which fix known
