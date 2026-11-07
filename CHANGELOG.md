@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
 
 ## Unreleased
 
+### Added
+- `aistudio flow image --prompts-file prompts.jsonl -o <folder>` makes images for many prompts
+  in one run: one JSON string (or `{"prompt": "..."}`) per line, run one at a time in one
+  browser session, saved as `<number>-<words of the prompt>-<n>.jpg`. The model, aspect, count,
+  characters and ingredients apply to every prompt. A paid model is quoted for every prompt
+  first and `--max-credits` is the budget for the whole batch; the first error stops the batch,
+  lists what finished and gives `--start-at N` to resume. Nothing is retried.
+
 ### Security
 - `certifi` 2026.10.23 and, on Python 3.11 or later, `filelock` 4.2.9, which fix known
   vulnerabilities. Python 3.10 keeps `filelock` 4.1.0, the last release for it; the accepted

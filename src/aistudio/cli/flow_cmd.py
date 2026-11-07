@@ -20,6 +20,7 @@ from aistudio._app.flow import (
     flow_extend,
     flow_frame,
     flow_generate,
+    flow_image_batch,
     flow_media,
     flow_projects,
     flow_rename_character,
@@ -42,9 +43,10 @@ from aistudio._flow.models import ASPECTS, MODELS
 from aistudio._flow.music import MAX_LENGTH_S, SONG_PRICE
 from aistudio._flow.music import MODELS as MUSIC_MODELS
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.inputs import read_text
+from aistudio.cli.inputs import read_prompts, read_text
 from aistudio.cli.output import emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
+from aistudio.exceptions import ValidationError, WaitTimeoutError
 
 
 @click.group()
@@ -103,6 +105,83 @@ def _render(data: dict[str, Any]) -> None:
         stderr.print(f"Warning: {warning}", markup=False)
 
 
+def _batch(state: CliState, prompts_file: Path, start_at: int | None, prompt: str | None,
+          prompt_file: Path | None, json_output: bool, timeout: int,
+          options: dict[str, Any]) -> None:
+    """``flow image --prompts-file``: everything is checked here before Chrome opens."""
+    if prompt is not None or prompt_file is not None:
+        raise ValidationError("give --prompts-file or a PROMPT, not both",
+                              hint="a batch takes its prompts from the file only")
+    if options["i_have_rights"]:
+        raise ValidationError("--i-have-rights does not go with --prompts-file",
+                              hint="pass the media id of an image already in Flow to "
+                                   "--ingredient")
+    out = options["out"]
+    if out is None:
+        raise ValidationError("--prompts-file needs -o FOLDER", hint="the images go there")
+    prompts = read_prompts(prompts_file)
+    window = "visible" if options["visible"] else "minimized"
+
+    def notice() -> None:
+        stderr.print(f"Asking Flow in a {window} Chrome window, one prompt at a time…",
+                     markup=False)
+    result = asyncio.run(flow_image_batch(
+        state.profile(), prompts, out=out, overwrite=options["force"], start_at=start_at or 1,
+        model=options["model"], aspect=options["aspect"], count=options["count"],
+        max_credits=options["max_credits"], project=options["project"],
+        timeout_s=float(timeout), visible=options["visible"],
+        ingredients=list(options["ingredient"]), characters=list(options["characters"]),
+        on_start=None if json_output else notice))
+    emit(result, json_output=json_output, render=_render_batch)
+    if result["status"] == "stopped":
+        timed_out = result.get("error", {}).get("code") == WaitTimeoutError.code or any(
+            r["status"] == "timeout" for r in result["results"])
+        raise SystemExit(2 if timed_out else 1)
+
+
+def _preview(prompt: str) -> str:
+    flat = " ".join(prompt.split())
+    return flat if len(flat) <= 50 else flat[:49] + "…"
+
+
+def _render_batch(data: dict[str, Any]) -> None:
+    for r in data["results"]:
+        head = f"#{r['index']} {_preview(r['prompt'])}: "
+        if r["status"] == "done":
+            stdout.print(head + f"done, {r['credits_spent']} credits", markup=False)
+            for file in r["files"]:
+                stdout.print(f"  Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
+        elif r["status"] == "quoted":
+            stdout.print(head + f"Flow quotes {r['quote_credits']} credits", markup=False)
+        elif r["status"] == "timeout":
+            stdout.print(head + f"still running in Flow ({r['credits_spent']} credits spent); "
+                                f"media {', '.join(r['media_ids']) or 'unknown'}", markup=False)
+        elif r["status"] == "failed":
+            stdout.print(head + f"failed: {r['error']['message']}", markup=False)
+        else:
+            stdout.print(head + "not run", markup=False)
+        for warning in r.get("warnings", []):
+            stderr.print(f"Warning (#{r['index']}): {warning}", markup=False)
+    done = sum(r["status"] == "done" for r in data["results"])
+    if data["status"] == "quoted":
+        stdout.print(f"Flow quotes {data['quote_credits']} credits for "
+                     f"{len(data['results'])} prompts. Nothing was spent. Re-run with "
+                     f"--max-credits {data['quote_credits']} to generate them all.",
+                     markup=False)
+        return
+    stdout.print(f"{done} of {len(data['results'])} prompts done; "
+                 f"{data['credits_spent']} credits spent", markup=False)
+    if data["status"] == "stopped":
+        error = data.get("error")
+        if error:
+            stderr.print(f"Error: {error['message']}", markup=False)
+            if error.get("hint"):
+                stderr.print(f"Hint: {error['hint']}", markup=False)
+        stdout.print(f"Stopped; nothing was retried. Check the Flow project first (the prompt "
+                     f"it stopped at may have been made), then continue with the same command "
+                     f"plus --start-at {data['resume_at']}.", markup=False)
+
+
 def _command(kind: str) -> click.Command:
     ids = [m.id for m in MODELS if m.kind == kind]
 
@@ -138,6 +217,14 @@ def _command(kind: str) -> click.Command:
     def command(state: CliState, prompt: str | None, prompt_file: Path | None, json_output: bool,
                 timeout: int, **options: Any) -> None:
         state.require_browser()
+        prompts_file = options.pop("prompts_file", None)
+        start_at = options.pop("start_at", None)
+        if prompts_file is not None:
+            _batch(state, prompts_file, start_at, prompt, prompt_file, json_output, timeout,
+                   options)
+            return
+        if start_at is not None:
+            raise ValidationError("--start-at goes with --prompts-file")
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
         window = "visible" if options["visible"] else "minimized"
 
@@ -161,6 +248,19 @@ def _command(kind: str) -> click.Command:
                                help="Start frame: an image file or a Flow media id.")(command)
         command = click.option("--duration", type=int, help="Seconds (per the model: Veo "
                                "3.1 Lite/Fast 4/6/8, Quality 8, Omni 4/6/8/10).")(command)
+    if kind == "image":  # a batch of prompts is for images only
+        command = click.option(
+            "--start-at", type=click.IntRange(1),
+            help="With --prompts-file: begin at this prompt number (1 is the first), to resume "
+                 "a stopped batch.")(command)
+        command = click.option(
+            "--prompts-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="Generate for every prompt in this JSON Lines file (one JSON string, or "
+                 '{"prompt": "..."}, per line; a prompt\'s own line breaks are written \\n), one '
+                 "after another in one browser session. Needs -o FOLDER; files are "
+                 "<number>-<words of the prompt>-<n>. The other options apply to every prompt; "
+                 "--max-credits is the budget for the whole batch. The free Nano Banana 2.1 "
+                 "makes every image at once. The first error stops the batch.")(command)
     help_text = (f"Generate {kind}s with Google Flow. Without --max-credits a paid model only "
                  "shows Flow's quote and spends nothing"
                  + ("; the free Nano Banana 2.1 generates at once (0 credits)." if kind == "image"
