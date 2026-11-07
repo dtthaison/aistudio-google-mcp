@@ -26,7 +26,13 @@ def cells(*values: str) -> list[Text]:
     return [Text(value) for value in values]
 
 
+RESULT_KEY = "aistudio.result"  # click context meta: what the command printed
+
+
 def emit(data: Any, *, json_output: bool, render: Callable[[Any], object]) -> None:
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None:  # the spend log (cli/error_handler.py) reads the result from here
+        ctx.meta[RESULT_KEY] = data
     if json_output:
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
     else:

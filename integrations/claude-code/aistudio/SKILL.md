@@ -30,6 +30,7 @@ apps.
 | Models, categories, prices, release dates | `aistudio models list --json [--category featured\|gemini\|gemma\|images\|video\|audio\|music\|live\|agents] [--search TEXT]` |
 | One model's card | `aistudio models get <id-or-unique-prefix> --json` |
 | Saved prompts/chats | `aistudio prompt list --json [--type chat\|video]` |
+| One saved prompt/chat in full (title, model, system instructions, settings, every turn untruncated; attachments as types only) | `aistudio prompt get <id-or-unique-prefix> --json [--thoughts] [-o file.md [--force]]` |
 | Token count | `aistudio count-tokens "text" -m <model> --json` (or `--prompt-file F`) |
 | Build apps | `aistudio app list --json` |
 | One app + its prompt + builder runs | `aistudio app get <id-or-unique-prefix> --json` |
@@ -42,6 +43,10 @@ JSON notes:
   holds free-text pricing.
 - `command` says which CLI command runs the model.
 - `models list` is cached for 1 hour; add `--refresh` for fresh data.
+- `prompt get --json` gives `{id, title, type, model, system_instruction, settings, turns, modified}`.
+  A turn is `{role, text, thoughts, attachments, at}`; `attachments` hold `{source, id, mime}`, never
+  bytes. `thoughts` is the model's saved thinking summary (kept out of `text`). The listing's 1000
+  newest prompts resolve prefixes; a full id older than that also works.
 
 ## Commands that change things (only when the user asks)
 
@@ -54,16 +59,23 @@ quotes and write each `'` as `'\''`.
 |---|---|
 | Star / unstar a model (saved to the account) | `aistudio models star <id> --json`, `aistudio models unstar <id> --json` |
 | Download an app's code into a folder | `aistudio app export <app-id-or-prefix> <dir> --json` |
+| What the last builder turn changed in an app (free; unified diff per file) | `aistudio app diff <app-id-or-prefix> [--turn N] --json` |
+| How an app's current code differs from a folder (e.g. an earlier export) | `aistudio app diff <app-id-or-prefix> --against <dir> --json` |
 | TTS voices (opens a hidden Chrome; no quota) | `aistudio voices list --json [--search T]` |
 | Text to speech (uses quota; minimized Chrome; writes a .wav) | `aistudio generate speech --text-file <file> [--voice V] [--style S] -o out.wav --json` |
 | Image (uses quota, about $0.034; minimized Chrome) | `aistudio generate image --prompt-file <file> [-m <images model>] -o out.jpg --json` |
 | Edit or combine images (same price) | the same command plus `--image <file>` (repeatable) |
 | Speech to text (uses quota, a fraction of a cent per short clip) | `aistudio transcribe <audio file> [--timestamps] [--diarize] [--vocabulary '<names>'] -o out.txt --json` |
 | Music (uses quota, $0.04 a clip / $0.08 a song; minimized Chrome; writes .mp3) | `aistudio generate music --prompt-file <file> [-m lyria-3.5] -o out.mp3 --json` |
+| What paid commands spent (free; local file, no browser) | `aistudio spend [--since 1h\|7d\|2026-11-01] [--command flow] --json`: `entries` (time, command, model, `status` done/timeout/failed, `credits_spent`, `max_credits`, media ids, output paths, job or project link) and `totals` per unit (`flow_credits`, `flow_music_credits`, `usd_estimate`) |
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` (`--music` for Flow Music's own credits) |
 | Song with Google Flow Music (flowmusic.app; **5 Flow Music credits, no quote from Flow Music**; writes .m4a, or .wav with `--wav`) | `aistudio flow music --prompt-file <file> [--lyrics-file <file>] [--length SECONDS] [--bpm N] [--seed N] [--title T] [-m 'Lyria 3.5'\|'Lyria 3 Pro'] --max-credits 5 -o song.m4a --json`; without `--max-credits` it only reports the price. No lyrics means an instrumental |
+| Flow Music library (free; minimized Chrome): your songs with id, title, created, seconds, status (`done`, `in_progress`, `failed`) and `has_lyrics` | `aistudio flow music list [--search T] --json` |
+| One Flow Music song's prompt and lyrics (free) | `aistudio flow music get <song-id> --json` |
+| Download a Flow Music song that already exists (free; never overwrites without `--force`; .m4a, or .wav with `--wav`) | `aistudio flow music download <song-id> [-o song.m4a] [--wav] [--force] --json` |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
+| Many Flow images from a file of prompts (**the free model makes every one at once**) | `aistudio flow image --prompts-file <prompts.jsonl> -o <existing folder> [-m MODEL] [--aspect A] [--count N] [--character X] [--ingredient <media id>] [--max-credits <total of the quotes>] [--start-at N] --json`; see "Flow image batches" below |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
@@ -73,6 +85,7 @@ quotes and write each `'` as `'\''`.
 | Feature characters in a Flow video / image | `--character '<Name or id>'` (repeatable) on `flow video\|image`; the quote rules below still apply |
 | Flow scenes: list, join clips, download a scene (free) | `aistudio flow scene list --json`, `aistudio flow scene stitch <id> <id>@START-END -o out.mp4 --json`, `aistudio flow scene download <scene-id> -o out.mp4 --json` |
 | Save a frame of a Flow clip as an image (free; for shot-to-shot chaining) | `aistudio flow frame save <clip media id> [--at SECONDS] [-o frame.jpg] --json`: the last frame by default, or the nearest frame to `--at`; pass the returned `media_id` to `--start-frame`, `--end-frame` or `--ingredient` (no upload, no `--i-have-rights`) |
+| A whole Flow scene from one YAML file (see "Making a Flow scene"): plan and quotes are free, `--keyframes` also makes the free keyframes, `--max-credits` makes the clips | `aistudio flow storyboard scene.yaml --json` (plan + one total quote, nothing generated), then `--keyframes` (review the images in `scene.assets/`), then `aistudio flow storyboard scene.yaml --max-credits <total quote> -o scene.mp4 --json` |
 | Character portrait model / full body (0 credits measured) | `aistudio flow character create '<Name>' '<description>' -m nano-banana-pro\|nano-banana-2-lite --json`, `aistudio flow character body <id> '<prompt>' -o body.png --json` |
 | Character voices: list, set, remove (free) | `aistudio flow character voices [--search TEXT] --json` (Flow's 30 presets and the project's custom voices), `aistudio flow character voice <id> <preset or custom voice name or media id> --json`, `aistudio flow character voice <id> --clear --json`; `flow character list` shows each character's `voice` |
 | New custom voice for a character (0 credits measured) | `aistudio flow character voice <id> <preset> --style '<performance style>' [--voice-name '<Name>'] --json`: Flow saves a sample of the preset spoken in that style as a project voice, then gives it to the character |
@@ -107,6 +120,27 @@ quotes and write each `'` as `'\''`.
   found in the project instead (its model and attachments were not checked: look at it). Video
   models quote first (verified). Other image models are
   refused until measured (`VALIDATION_ERROR` naming the model): use `-m nano-banana-2.1`.
+- **Flow image batches (`flow image --prompts-file`).** The file is JSON Lines: one prompt per
+  line, as a JSON string or `{"prompt": "..."}`; write a prompt's own line breaks as `\n` (a
+  plain multi-line text file is not a batch file). `-o` must be an existing folder; files are
+  `<number>-<words of the prompt>-<n>.jpg`, the number being the prompt's place in the file.
+  **With the free Nano Banana 2.1 the whole batch generates at once, with no quote and no
+  question: before running it, tell the user how many prompts it holds (each makes `--count`
+  images) and get their OK.** A big batch can also hit Flow's "unusual activity" limit
+  (`RATE_LIMITED`): do not loop, wait several minutes. Paid image models are currently refused
+  (see above); if one is ever allowed, the batch first quotes every prompt (nothing spent without
+  `--max-credits`), `"status": "quoted"` with `quote_credits` as the total, and `--max-credits`
+  is then the budget for the whole batch (over it: `OVER_BUDGET`, nothing approved). Ask the
+  user, then re-run with `--max-credits <quote_credits>`. `--ingredient` must be media ids
+  (a local file would be uploaded once per prompt). The prompts run one at a time and the first
+  error stops the batch; nothing is retried. The result has `results[]`, one per prompt, with
+  `index`, `status` (`done`, `quoted`, `failed`, `timeout`, `not_run`), `media_ids`, `files`,
+  `credits_spent` and, for the failure, `error`, plus `resume_at`. Report to the user which
+  prompts finished; check the Flow project (`flow media`) before continuing, because the
+  prompt that failed may have been made; then, with the user's OK, re-run the same command
+  plus `--start-at <resume_at>`. Never re-run the whole file with `--force`: finished prompts
+  would be generated again (without `--force` the run is refused up front, because the files of
+  the finished prompts exist).
 - **Flow: never pass `--max-credits` unless the user gave a budget for this request.**
   1. Run without it first. The result has `"status": "quoted"`, `credits` and `plan`, and Flow's
      request is declined (nothing waits in Flow). If `"declined": false`, Flow's request is still
@@ -115,8 +149,11 @@ quotes and write each `'` as `'\''`.
   3. Re-run with `--max-credits <credits>`.
 
   `flow music` works the same way, but its price (5 credits) is aistudio's measured one: Flow
-  Music shows no quote. A `GENERATION_FAILED` or `TIMEOUT` names the job; look in the user's
-  Flow Music Songs before any re-run.
+  Music shows no quote. A `GENERATION_FAILED` or `TIMEOUT` names the job; run
+  `aistudio flow music list --json` (free) before any re-run: a song that did finish shows
+  `done`, and `flow music download <song-id>` saves it. `flow music list`, `get` and `download`
+  never spend and need no `--max-credits`. A prompt that is exactly `list`, `get` or
+  `download` needs `flow music generate` in front.
 
   For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
   and nothing was spent. For `flow extend`, `flow edit`, `flow character create` and
@@ -140,6 +177,15 @@ quotes and write each `'` as `'\''`.
   names the media): never re-run it without the user's OK.
   A `VALIDATION_ERROR` saying Flow generates without asking means Flow's "Confirm before
   generating" is set to Never. Tell the user; aistudio will not change it.
+- **After any error from a paid command, check the spend log before a re-run.** Run
+  `aistudio spend --since 1h --json` (add `--command flow` to narrow it). Every run that spent or
+  may have spent is logged there, including failures and timeouts: a `"failed"` entry has
+  `credits_spent: null` (unknown) and `max_credits`, the most it could have cost; a `"timeout"`
+  entry names the job (`media_ids`, `job_id`, `url`). If the log shows an entry for the run, treat
+  the run as possibly paid: look at the named media or job in Flow first and ask the user before
+  spending again. No entry means nothing was sent (a refusal such as `OVER_BUDGET`, or a quote),
+  so a re-run is safe. The log holds no prompt text or error messages: those are in the error
+  output. If `aistudio spend` cannot read the log, treat the run as possibly paid.
 - **Never pass `--i-have-rights`** unless the user confirmed they have the rights to that exact
   file. It answers Flow's "Rights to use this image" question for them.
 - Flow character names are unique per project (Flow attaches characters by name). If
@@ -164,6 +210,7 @@ quotes and write each `'` as `'\''`.
   measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
   warning that Flow charged a different amount. "no measured price" is final: do not retry with a
   higher `--max-credits`.
+- `flow music list` has no `model` yet (`null`: Flow Music's song records do not name it).
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
@@ -216,10 +263,52 @@ quotes and write each `'` as `'\''`.
   Chrome
   profile: run them one at a time. A "profile is in use" error means another one is running;
   wait for it rather than retrying in a loop.
+- `app diff --json`: `files[]` has `path`, `status` (`added`, `removed`, `changed`), `binary`,
+  `added`/`removed` line counts and the unified `diff` text; `summary` totals them. A turn is one
+  builder prompt (turn 1 is the first, and shows every file as added); `prompt` is only the start of
+  what was asked. With `--against` the folder is the "before" and `turn` is null. It reads only: the
+  app and the folder are never changed. `--turn` and `--against` do not combine. The files of older
+  Drive apps cannot be diffed.
 - `app export` refuses a non-empty folder. Never retry with `--force` (which overwrites files)
   without the user's OK.
 
 ## Making a Flow scene (story, character and setting that stay the same)
+
+**Shortcut: `aistudio flow storyboard <file.yaml>`** runs the whole recipe below from one file
+(write the file with your file tool; `docs/examples/flow-storyboard.yaml` in the repo shows every
+field). Keys: `project`, `style`, `wardrobe` (pasted unchanged after every prompt), `model`,
+`duration`, `aspect`, `characters` (`name` only for an existing one, `id` to be exact, or
+`create: {description | photo: <media id>, personality}`), `locations` (`prompt` for a free plate,
+or `media`), and `shots` (`id`, `prompt`, `say`, `speaker`, `join: cut|frame|extend`, `mode:
+start_frame|ingredient`, `characters`, `location`, `keyframe` (text, or `{prompt, characters,
+location, ingredients, media}`), `frame_at`, `ingredients`, `model`, `duration`, `aspect`,
+`trim: [start, end]`). The whole file is checked first and every problem is listed (a start frame
+with a character, two ingredients with a character, an extend shot with anything but a prompt,
+fractional trims, duplicate character names); relay them and fix the file, nothing ran.
+
+1. Run it with no flags: spends nothing, makes nothing. The result has `status: "quoted"`,
+   `shots[]` (steps, `quote`, `quote_basis`) and `quote.credits`, the total for the clips still to
+   make. One Flow quote is asked per model, length and aspect (without attachments); extensions
+   use the measured 10 credits (`quote_basis: "table"`).
+2. Optional: `--keyframes` also creates the characters, plates and keyframes (Nano Banana 2.1, 0
+   credits, but they do generate in the project and count toward Flow's rate limit). Look at the
+   images in `<file>.assets/`; to redo one, change its keyframe prompt and run `--keyframes`
+   again (finished and unchanged assets are reused).
+3. Show the user the total and ask. Then `--max-credits <total> -o scene.mp4`. It is refused
+   before anything is made when the quotes exceed the budget; each clip is capped at its own
+   quote; the run stops at the first error and never retries a paid step.
+4. A failed run returns `status: "failed"` (or `"timeout"`, exit 2) with `error` and `shots[]`
+   saying which shots finished. State is kept in `<file>.state.json`: running the same command
+   again continues after the finished shots and never pays for them twice. Editing a finished
+   shot is refused. A shot whose status is `unknown` or `timeout` may have been charged: it is
+   blocked until the user has looked in Flow; then pass `--adopt <shot>=<clip media id>` (from
+   `flow media --type video`). Ask the user before every re-run that can spend.
+
+Limits: no local image is uploaded from a storyboard (use media ids; `--i-have-rights` is never
+passed); new characters get no voice (`flow character voice` first); a start-frame clip takes no
+extra ingredients (not measured); an extension adds 7-8 s, is always Veo 3.1 Lite and takes no
+frames or characters; a clip's quote is checked again when it is made and a higher one is refused.
+The manual steps below are what it does.
 
 A **clip** is one generation (4–10 s, 8 s on Veo 3.1 Lite). A **scene** is Flow's timeline of
 clips: `flow extend` adds a clip to the same scene, and `flow scene stitch` joins clips into a new

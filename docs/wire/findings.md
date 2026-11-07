@@ -47,6 +47,7 @@ The session did **not** exercise:
 | ListModels | yes | http-ok | http | ListModels/1–2 |
 | ListPrompts | yes | http-ok | http | ListPrompts/1–4 |
 | CountTokens | yes | http-ok | http | CountTokens/1–4 |
+| GetPrompt | yes | http-ok (live probe 2026-11, no fixture: the reply is the user's private text) | http | none; synthetic builder in `tests/conftest.py` |
 | GetUserPreferences | yes | http-ok | http | GetUserPreferences/1–2 |
 | GetAiStudioBenefitTier, GetGdpProfileAndBenefits, GetLoggingContext, GetWorkspaceAppConfig, GetAppletGalleryConfig, GetPendingArenaInteraction | yes | http-ok | http | respective `/1` |
 | ListApplets, ListRecentApplets, ListBundledApplets, ListAppletSecrets, ListUnsetAppletSecrets, ListAppletTrajectories | yes | http-ok | http (Phase 3 Build) | respective |
@@ -330,6 +331,29 @@ was made: one image ($0.034) and one clip ($0.04).
   - Each file is a plain `GET https://aistudio.google.com/_/upload/<app_id>/file/<sha256>` with
     session cookies only. The body is the raw file, and its SHA-256 equals the listed hash.
   - Both RPCs replayed `http-ok`.
+- **Build keeps a code snapshot per builder turn** (2026-11-07, free read-only probes on five of
+  the user's own apps; `app diff`).
+  - `ListAppletTrajectories` gives one run per app (its id is the app id), so `app get` shows no
+    per-turn data. `GetApplet` / `GetCodeAssistantSnapshot` give only the latest snapshot.
+  - **`LoadCodeAssistantInteractionHistory`** (plain HTTP) has all turns. Request
+    `[app_id, page_size, null, null, offset, app_id]`; response `[_, [step, ...], next_offset?]`.
+    Steps are the agent's tool calls and thoughts. The step that ends a turn also has `[8]`, a
+    snapshot in the same shape `GetCodeAssistantSnapshot` returns:
+    `["model", "Snapshot from <start of the prompt>", _, [s, ns], [[path, sha256], ...]]`. Other
+    steps have `[8]` null. `[16]` is an id shared by the steps of one turn.
+  - **Pages run newest first**; inside a page the steps are oldest first. `[4]` of the request is
+    the offset of the page to read; `[2]` of the response is the offset of the next, older page,
+    absent on the last. `page_size` does not count steps: size 100 returned 73 of an app's 84
+    steps and size 30 returned 16, 24, 24 and 20 steps. Following the offsets until none is left
+    always gave every step once (no overlap). A turn's snapshot is the one `[8]` per turn.
+  - Counts seen: 2, 2, 18, 1 and 2 turn snapshots. The last equals the app's current files in the
+    two apps checked (`GetApplet` stamp, `app export`). The label is the start of the prompt,
+    cut off; an app made while the builder ran two options (arena) had a timestamp as its label.
+  - **Old files stay downloadable**: `GET /_/upload/<app>/file/<sha256>` for a file that a later
+    turn replaced returned the old bytes, and their SHA-256 matched. So a turn diff needs no
+    stored copies: list two snapshots, download the files whose hashes differ.
+  - Not mapped: how a manual edit in the Build code editor shows up in the history, and whether
+    "Restore code from this checkpoint" rewrites it. `app diff` reads whatever snapshots exist.
 - **Playground chat is gated by an API key.** On a new chat (default model, with Code execution,
   Search and URL context switches all on by default), pressing Run calls `BatchGetProjectUsageLimits`
   and opens **"Link an API key"** ("Your project does not have an API key yet"; choose a project,
@@ -1175,3 +1199,79 @@ from the Compose panel. The scratch scripts were not kept.
   3 s after the page load. On load the page sends `POST /auth/google/save` twice (replies at
   3.4 s and 4.4 s), which hands the Google sign-in to the server. aistudio now waits for that
   reply first. A paid run from aistudio has not been made since that change.
+
+### Flow Music library: list, get, download (2026-11-07)
+
+Free, read-only runs only (page loads and GETs/lookups the Songs page makes itself). The account
+holds one song, so paging, other statuses and the model field are not seen live.
+
+- **Songs page** (`/library/my-songs`) loads, among other calls, `GET /__api/clips/auth-user?
+  limit=20&offset=0&filter=generations&include_disliked=false` →
+  `{"clips": [<record>, ...]}` (no total or next-page field). `offset=20` on a one-song account
+  gave `{"clips": []}`; aistudio pages by offset until a page adds no new id. Other calls it
+  makes: `/conversations?limit=30&offset=0` (sessions), `/projects`, `/spaces/get`,
+  `/music-videos/get`, playlists, `POST /clips`.
+- **Song record** (the same shape in the list and in `POST /clips {"clip_ids": [id]}` →
+  `{"clips": {id: <record>}}`): `id`, `title`, `created_at`, `deleted_at` (null), `duration`
+  (`{"status": "completed", "value": "176.93…"}`), `lyrics` (`{"status": "completed", "value":
+  {"id", "text"}}`; an instrumental's text is `[Instrumental]`), `operation` (`op_type`
+  `audio__create_song`, `conversation_id`, `sound_prompt`, `title`, `seed`, `lyrics_id`),
+  `audio_url` / `wav_url` / `image_url`, `privacy`, `is_favorite`, `play_count`, `has_vocals`
+  and more. So the list already carries the prompt and the lyrics: `flow music get` needs no
+  other call.
+- **Not seen:** a model name anywhere in the record (aistudio reads `operation.model` if it ever
+  appears and otherwise reports `null`), and the `status` values of a song that is running or
+  failed. aistudio calls a song `done` when `duration.status` is `completed` and `audio_url` is
+  set, `failed` when `duration` or `lyrics` has a status naming a failure or error, and
+  `in_progress` otherwise: a guess to confirm the first time a run is caught mid-way.
+- **Lookup by id.** `POST /clips` with an unknown valid UUID answers 200
+  `{"clips": {id: null}}`; a string that is not a UUID answers 422. It is a lookup (the page
+  sends it on load), not a write, and it works for any song id the server returns, so `download`
+  does not depend on the paged list. Whether it also returns another user's public song was not
+  tried.
+- **Download** is the existing free path: `audio_url` (`.m4a`, 2.65 MB for 177 s) and `wav_url`
+  (`.wav`, 34.0 MB, RIFF PCM 16-bit stereo 48 kHz) from the public bucket, no cookies. Both were
+  fetched and identified by their headers.
+- **Command shape.** `flow music` became a click group so `list`, `get` and `download` sit
+  beside the old `flow music PROMPT`; any first word that is not a subcommand goes to
+  `generate`, so existing calls keep working, and a prompt that is exactly `list`, `get` or
+  `download` needs `flow music generate`.
+
+## Reading one saved prompt: `GetPrompt` (2026-11)
+
+Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard
+token. Six chats and one Veo prompt were read. No fixture is committed (the replies hold the
+account's own prompt text and, for chats with images, megabytes of base64). The unit tests use
+made-up bodies of the same shape (`prompt_wire` in `tests/conftest.py`).
+
+- **Request:** `["prompts/<id>"]`. An unknown id answers a gRPC `NOT_FOUND` ("Requested entity
+  was not found.").
+- **Response:** one prompt row, the same row `ListPrompts` returns, now with its body:
+
+  | index | field |
+  |---|---|
+  | 0 | `"prompts/<id>"` |
+  | 3 | run settings: `[2]` model, `[3]` temperature, `[4]` top-p, `[5]` top-k, `[6]` max output tokens, `[7]` safety `[[, , category, threshold], ...]`, `[15]` response modalities |
+  | 4 | metadata as in `ListPrompts` (`[0]` title, `[4][0]` modified `[seconds, nanos]`) |
+  | 12 | system instruction message `[text]`; `[]` when none |
+  | 13 | chat body `[chunks, pending inputs]` |
+  | 16 | Veo body `[prompt text, , [mime, base64 image], , ...]` |
+
+  The indexes follow the page's own protobuf classes (field number = index + 1: model 4 = run
+  settings, 13 = system instruction, 14 = chunked prompt), checked against the live replies.
+- **Chunks** (one message part each): `[0]` text, `[1]` `[drive file id]` for an uploaded file,
+  `[8]` role (`user` or `model`), `[12]` `[mime, base64]` for inline data, `[18]` token count,
+  `[19]` = 1 for a thinking summary, `[29]` the text again split into parts (each `[, text, ...,
+  [12] = 1]` for thinking), `[32]` `[seconds, nanos]`. A model turn is several chunks: thinking
+  text, generated images, then the answer. `aistudio` merges consecutive chunks of one role.
+- **Run settings notes.** In all seven prompts `[3]` was empty; AI Studio's default
+  temperature is then used. Its position (before top-p) is inferred from the order of the
+  fields, not from a non-default value. Safety categories 7-11 and thresholds 1-5 are named
+  with the public API's enums (all four categories with threshold 5 showed on one chat: "off");
+  that naming is inferred. A Veo prompt keeps `[21]` the aspect ratio (`"9:16"`) and `[23]`
+  `["<seconds>"]`.
+- **Not seen:** a system instruction with text (none of the six chats had one, so `[12][0]` as
+  the text is from the page's class, not from a live value); a creation time (only the
+  modified time, so `prompt get` shows no "created"); attachment names (Drive files carry only
+  an id, and their mime type is not in the reply); audio/video/PDF inline attachments.
+- **Pending inputs** (`[13][1]`) held one empty user chunk in every chat: the unsent draft box.

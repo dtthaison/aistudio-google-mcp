@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import re
 import shlex
-from collections.abc import Callable
+import unicodedata
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -111,7 +113,9 @@ async def flow_generate(
     i_have_rights: bool = False,
     characters: list[str] | None = None,
     on_start: Callable[[], None] | None = None,
+    stem: str | None = None,
 ) -> dict[str, Any]:
+    """``stem`` (batch runs): ``out`` is a folder and every file is ``<stem>-<n><ext>``."""
     prompt = prompt.strip()
     if not prompt:
         raise ValidationError(f"nothing to generate: the {kind} prompt is empty")
@@ -121,7 +125,7 @@ async def flow_generate(
     project_id = _project_id(project) if project else None
     flow_model = find_model(model, kind) if model else None
     check_options(kind, flow_model, aspect, count, duration)
-    _check_output(out, count or 1, overwrite)
+    _check_output(out, count or 1, overwrite, into_folder=stem is not None)
     warnings: list[str] = []
     if on_start:
         on_start()
@@ -148,7 +152,8 @@ async def flow_generate(
                      "any prompt can spend credits. Nothing was sent")
         wanted = Defaults(flow_model.label if flow_model else previous.model,
                           aspect or previous.aspect, count or previous.count)
-        _check_output(out, wanted.count, overwrite)  # the count may come from Flow's defaults
+        # the count may come from Flow's defaults
+        _check_output(out, wanted.count, overwrite, into_folder=stem is not None)
         if kind == "image" and wanted.model not in FREE_WITHOUT_ASKING:
             raise ValidationError(
                 f"aistudio has not measured whether Flow asks before generating with "
@@ -337,7 +342,7 @@ async def flow_generate(
         try:
             files, saved_notes = await _save_all(kind, media, out=out, overwrite=overwrite,
                                                  downloader=downloader, stamp=now(),
-                                                 project_url=project_url)
+                                                 project_url=project_url, stem=stem)
         except AIStudioError as exc:  # the run's notes must not be lost with the download
             exc.hint = _with_note(exc.hint, "; ".join(warnings))
             raise
@@ -378,7 +383,7 @@ async def flow_generate(
                      for n in sorted(lengths) if n != duration]
     files, saved_notes = await _save_all(kind, outcome.media, out=out, overwrite=overwrite,
                                          downloader=downloader, stamp=now(),
-                                         project_url=project_url)
+                                         project_url=project_url, stem=stem)
     warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": turn.quote.credits,
             "credits_left": outcome.credits_left,
@@ -1502,10 +1507,12 @@ def _project_id(value: str) -> str:
     return match.group(1)
 
 
-def _check_output(out: Path | None, count: int, overwrite: bool) -> None:
-    if count > 1:
+def _check_output(out: Path | None, count: int, overwrite: bool, *,
+                  into_folder: bool = False) -> None:
+    if count > 1 or into_folder:
         if out is not None and not out.is_dir():
-            raise ValidationError(f"{count} outputs need -o to be an existing folder",
+            what = "a batch needs" if into_folder else f"{count} outputs need"
+            raise ValidationError(f"{what} -o to be an existing folder",
                                   hint="leave out -o to save them in the current folder")
         check_folder(out or Path("."))
         return
@@ -1535,7 +1542,8 @@ async def _open(page: Any, profile: Profile, project_id: str | None) -> str:
 
 async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite: bool,
                     downloader: Callable[[str], Any], stamp: datetime,
-                    project_url: str) -> tuple[list[dict[str, Any]], list[str]]:
+                    project_url: str, stem: str | None = None
+                    ) -> tuple[list[dict[str, Any]], list[str]]:
     ids = ", ".join(m.media_id for m in media)
     folder = out if out is not None and out.is_dir() else Path(".")
     files: list[dict[str, Any]] = []
@@ -1547,7 +1555,9 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
                 raise SchemaDriftError("as29s", (), f"a {kind} link")
             data = await downloader(url)
             mime, ext = _type_of(kind, data)
-            if out is not None and not out.is_dir() and len(media) == 1:
+            if stem is not None:
+                path = folder / f"{stem}-{i + 1}{ext}"
+            elif out is not None and not out.is_dir() and len(media) == 1:
                 path = out
                 if _normal_suffix(out.suffix) != ext:
                     warnings.append(f"{out} holds {mime} data; its extension says otherwise")
@@ -1560,7 +1570,8 @@ async def _save_all(kind: str, media: list[Any], *, out: Path | None, overwrite:
             if kind == "video" and not mime.startswith("video/"):
                 warnings.append(f"Flow's file for {item.media_id} is {mime}, not a video; it was "
                                 f"saved as {path.name}")
-            saved = write_file(path, data, overwrite=overwrite and path == out)
+            saved = write_file(path, data,
+                               overwrite=overwrite and (stem is not None or path == out))
             files.append({"path": str(saved), "mime_type": mime, "bytes": len(data),
                           "media_id": item.media_id})
     except Exception as exc:  # a paid result: name it whatever went wrong
@@ -1598,3 +1609,165 @@ def _type_of(kind: str, data: bytes) -> tuple[str, str]:
 def _normal_suffix(suffix: str) -> str:
     lowered = suffix.lower()
     return ".jpg" if lowered == ".jpeg" else lowered
+
+
+# ---- flow image --prompts-file: many prompts, one browser session, one at a time ----
+
+_SLUG_LENGTH = 40
+
+
+def prompt_slug(prompt: str) -> str:
+    """A short ASCII file-name part from a prompt: ``A red apple!`` -> ``a-red-apple``."""
+    plain = unicodedata.normalize("NFKD", prompt.replace("đ", "d").replace("Đ", "D"))
+    words = re.sub(r"[^a-z0-9]+", "-", plain.encode("ascii", "ignore").decode().lower())
+    return words.strip("-")[:_SLUG_LENGTH].strip("-") or "prompt"
+
+
+def _batch_record(index: int, prompt: str, status: str, **fields: Any) -> dict[str, Any]:
+    return {"index": index, "prompt": prompt, "status": status, **fields}
+
+
+def _from_result(index: int, prompt: str, result: dict[str, Any]) -> dict[str, Any]:
+    warnings = {"warnings": result["warnings"]} if result.get("warnings") else {}
+    if result["status"] == "quoted":
+        return _batch_record(index, prompt, "quoted", quote_credits=result["credits"],
+                             credits_spent=0, media_ids=[], files=[],
+                             declined=result.get("declined", True), **warnings)
+    files = result.get("files", [])
+    media_ids = result.get("media_ids") or [f["media_id"] for f in files]
+    return _batch_record(index, prompt, result["status"],
+                         credits_spent=result.get("credits_spent"), media_ids=media_ids,
+                         files=files, **warnings)
+
+
+def _error_dict(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, AIStudioError):
+        return {k: v for k, v in exc.to_dict().items() if k != "error"}
+    return {"code": "UNEXPECTED_ERROR", "message": f"{type(exc).__name__}: {exc}"}
+
+
+def _check_batch_files(out: Path, stems: list[str]) -> None:
+    names = sorted(p.name for p in out.iterdir())
+    for stem in stems:
+        taken = re.compile(re.escape(stem) + r"-\d+\.[A-Za-z0-9]+")
+        clash = next((name for name in names if taken.fullmatch(name)), None)
+        if clash:
+            raise ValidationError(f"{out / clash} already exists",
+                                  hint="pass --force to overwrite, or use another folder; "
+                                       "nothing was generated")
+
+
+async def flow_image_batch(
+    profile: Profile,
+    prompts: list[str],
+    *,
+    out: Path,
+    overwrite: bool = False,
+    start_at: int = 1,
+    model: str | None = None,
+    aspect: str | None = None,
+    count: int | None = None,
+    max_credits: int | None = None,
+    project: str | None = None,
+    timeout_s: float = 600.0,
+    visible: bool = False,
+    ingredients: list[str] | None = None,
+    characters: list[str] | None = None,
+    on_start: Callable[[], None] | None = None,
+    browser: Callable[..., Any] = open_browser,
+    generate: Callable[..., Any] = flow_generate,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Images for many prompts, one prompt at a time, in one browser session.
+
+    Files are ``<index>-<slug>-<n>`` in ``out``; the index is the prompt's place in the whole
+    list, so ``start_at`` (1-based) resumes with the same names. A paid model is quoted for
+    every prompt first; ``max_credits`` is the budget for the whole batch and is refused up
+    front when the quotes add up to more. The first error stops the batch: nothing is retried.
+    """
+    prompts = [p.strip() for p in prompts]
+    if not prompts or not all(prompts):
+        raise ValidationError("every prompt in the batch needs text" if prompts
+                              else "the batch has no prompts")
+    if not 1 <= start_at <= len(prompts):
+        raise ValidationError(f"--start-at must be 1 to {len(prompts)}, not {start_at}")
+    if max_credits is not None and max_credits < 0:
+        raise ValidationError("--max-credits must be 0 or more")
+    if not out.is_dir():
+        raise ValidationError(f"a batch needs -o to be an existing folder: {out}",
+                              hint="create the folder first; nothing was generated")
+    check_folder(out)
+    for value in ingredients or []:
+        if not _MEDIA_ID.match(value.strip()):
+            raise ValidationError(
+                f"a batch takes Flow media ids as ingredients, not {value!r}",
+                hint="upload the file once with a single `flow image ... --i-have-rights`, then "
+                     "pass its media id (see `flow media`); nothing was generated")
+    check_options("image", find_model(model, "image") if model else None, aspect, count, None)
+    width = max(2, len(str(len(prompts))))
+    stems = {i: f"{i:0{width}d}-{prompt_slug(prompts[i - 1])}"
+             for i in range(start_at, len(prompts) + 1)}
+    if not overwrite:
+        _check_batch_files(out, list(stems.values()))
+    if on_start:
+        on_start()
+
+    records = [_batch_record(i, prompts[i - 1], "not_run") for i in stems]
+    error: dict[str, Any] | None = None
+
+    async def settle(ui: Any, position: int, budget: int | None) -> bool:
+        """Run one prompt; False (after recording why) when the batch must stop."""
+        nonlocal error
+        item = records[position]
+
+        @contextlib.asynccontextmanager
+        async def lend(_profile: Profile, *, window: str) -> AsyncIterator[Any]:
+            yield ui  # the batch's own session: flow_generate must not close it
+
+        try:
+            result = await generate(
+                profile, "image", item["prompt"], model=model, aspect=aspect, count=count,
+                max_credits=budget, project=project, out=out, overwrite=overwrite,
+                timeout_s=timeout_s, visible=visible, browser=lend,
+                ingredients=list(ingredients or []), characters=list(characters or []),
+                stem=stems[item["index"]], **extra)
+        except Exception as exc:  # noqa: BLE001 (any failure stops the batch and is reported)
+            error = _error_dict(exc)
+            records[position] = _batch_record(item["index"], item["prompt"], "failed",
+                                              credits_spent=None, media_ids=[], files=[],
+                                              error=error)
+            return False
+        records[position] = _from_result(item["index"], item["prompt"], result)
+        return result["status"] != "timeout"
+
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        # Phase 1, no budget: a paid model only quotes, a free one generates at once
+        for position in range(len(records)):
+            if not await settle(ui, position, None):
+                break
+        quoted = [p for p, r in enumerate(records) if r["status"] == "quoted"]
+        total = sum(records[p]["quote_credits"] for p in quoted)
+        if error is None and quoted and max_credits is not None:
+            if total > max_credits:
+                each = ", ".join(f"#{records[p]['index']}: {records[p]['quote_credits']}"
+                                 for p in quoted)
+                raise OverBudgetError(
+                    f"Flow quotes {total} credits for {len(quoted)} prompts, over "
+                    f"--max-credits {max_credits}",
+                    hint=f"nothing was spent ({each}); re-run with --max-credits {total} to "
+                         f"accept, or use --start-at to do fewer")
+            remaining = max_credits  # Phase 2: one budget shared by the whole batch
+            for position in quoted:
+                if not await settle(ui, position, min(records[position]["quote_credits"],
+                                                      remaining)):
+                    break
+                remaining -= records[position].get("credits_spent") or 0
+    stopped = error is not None or any(r["status"] == "timeout" for r in records)
+    resume_at = next((r["index"] for r in records if r["status"] != "done"), None)
+    spent = sum(r.get("credits_spent") or 0 for r in records)
+    quotes = [r["quote_credits"] for r in records if r["status"] == "quoted"]
+    return {"status": "stopped" if stopped else "quoted" if quotes else "done",
+            "total": len(prompts), "start_at": start_at, "results": records,
+            "credits_spent": spent, **({"quote_credits": sum(quotes)} if quotes else {}),
+            **({"error": error} if error else {}),
+            **({"resume_at": resume_at} if stopped and resume_at else {})}

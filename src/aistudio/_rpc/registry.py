@@ -23,6 +23,7 @@ class RpcSpec:
 
 LIST_MODELS = RpcSpec("ListModels", Transport.HTTP, idempotent=True)
 LIST_PROMPTS = RpcSpec("ListPrompts", Transport.HTTP, idempotent=True)
+GET_PROMPT = RpcSpec("GetPrompt", Transport.HTTP, idempotent=True)
 COUNT_TOKENS = RpcSpec("CountTokens", Transport.HTTP, idempotent=True)
 LIST_APPLETS = RpcSpec("ListApplets", Transport.HTTP, idempotent=True)
 LIST_RECENT_APPLETS = RpcSpec("ListRecentApplets", Transport.HTTP, idempotent=True)
@@ -33,3 +34,4 @@ GET_PREFERENCES = RpcSpec("GetUserPreferences", Transport.HTTP, idempotent=True)
 UPDATE_PREFERENCES = RpcSpec("UpdateUserPreferences", Transport.HTTP, idempotent=False)
 GET_APPLET = RpcSpec("GetApplet", Transport.HTTP, idempotent=True)
 GET_SNAPSHOT = RpcSpec("GetCodeAssistantSnapshot", Transport.HTTP, idempotent=True)
+LOAD_HISTORY = RpcSpec("LoadCodeAssistantInteractionHistory", Transport.HTTP, idempotent=True)

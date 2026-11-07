@@ -89,6 +89,10 @@ class Profile:
         return self.root / "jobs.json"
 
     @property
+    def spend_log(self) -> Path:
+        return self.root / "spend.jsonl"
+
+    @property
     def models(self) -> Path:
         return self.root / "models.json"
 

@@ -32,6 +32,18 @@ class AppRun:
 
 
 @dataclass(frozen=True)
+class TurnSnapshot:
+    """The app's files as they stood when one builder turn finished."""
+
+    prompt: str | None  # the start of the prompt that turn answered
+    saved: str | None  # ISO-8601 UTC
+    files: tuple[tuple[str, str], ...]  # (path, sha256)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"prompt": self.prompt, "saved": self.saved, "files": len(self.files)}
+
+
+@dataclass(frozen=True)
 class RecentItem:
     kind: str  # "app" | "gallery" | "prompt" | "unknown"
     id: str | None

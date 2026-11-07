@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, TypeVar
 
+from aistudio._app.diff import diff_files, summarize
 from aistudio.client import AIStudioClient
 from aistudio.exceptions import NotFoundError, ServerError, ValidationError
 
@@ -132,6 +134,16 @@ def _preflight(targets: list[tuple[PurePosixPath, str]], dest: Path) -> None:
                                   hint=f"use an empty folder; {_NOTHING_WRITTEN}")
 
 
+async def _download_verified(client: AIStudioClient, app_id: str, rel: PurePosixPath | str,
+                             digest: str, limit: asyncio.Semaphore, *, hint: str) -> bytes:
+    async with limit:
+        data = await client.apps.download_file(app_id, digest)
+    if hashlib.sha256(data).hexdigest() != digest:
+        raise ServerError(f"{rel}: downloaded content does not match its SHA-256",
+                          retriable=True, hint=hint)
+    return data
+
+
 async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
                      force: bool = False,
                      progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
@@ -159,11 +171,8 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
     done: list[PurePosixPath] = []
 
     async def fetch(rel: PurePosixPath, digest: str) -> bytes:
-        async with limit:
-            data = await client.apps.download_file(app.id, digest)
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise ServerError(f"{rel}: downloaded content does not match its SHA-256",
-                              retriable=True, hint="re-run the export; nothing was written")
+        data = await _download_verified(client, app.id, rel, digest, limit,
+                                        hint="re-run the export; nothing was written")
         done.append(rel)
         if progress is not None:
             progress(len(done), len(targets))
@@ -189,3 +198,100 @@ async def export_app(client: AIStudioClient, app_ref: str, dest: Path, *,
         "files": [{"path": str(rel), "bytes": len(data)}
                   for (rel, _), data in zip(targets, contents, strict=True)],
     }
+
+
+_SKIPPED_FOLDERS = frozenset({".git", "node_modules"})
+
+
+def _read_folder(root: Path) -> dict[str, bytes]:
+    """Every regular file under ``root`` (``path -> content``), ignoring links, ``.git`` and
+    ``node_modules``."""
+    files: dict[str, bytes] = {}
+    for current, folders, names in os.walk(root, followlinks=False):
+        folders[:] = sorted(f for f in folders if f not in _SKIPPED_FOLDERS
+                            and not Path(current, f).is_symlink())
+        for name in sorted(names):
+            path = Path(current, name)
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                files[path.relative_to(root).as_posix()] = path.read_bytes()
+            except OSError as exc:
+                raise ValidationError(f"could not read {path}: {exc.strerror or exc}",
+                                      hint="check the folder's permissions") from exc
+    return files
+
+
+async def diff_app(client: AIStudioClient, app_ref: str, *, turn: int | None = None,
+                   against: Path | None = None) -> dict[str, Any]:
+    """What a builder turn changed in an app's files, or how its code differs from a folder.
+
+    Build keeps the files as they stood at the end of every turn (findings), so by default turn
+    ``turn`` (the last one when None) is compared with the turn before it; turn 1 with nothing.
+    With ``against`` the app's current code is compared with that local folder (for example an
+    earlier ``app export``): the folder is the "before".
+    """
+    if turn is not None and against is not None:
+        raise ValidationError("--turn and --against cannot be combined",
+                              hint="--turn compares Build's own turns; --against a folder")
+    if against is not None and not against.is_dir():
+        raise ValidationError(f"{against} is not a folder", hint="give a folder, e.g. an export")
+    app = pick(await client.apps.list(), lambda a: a.id, app_ref, noun="app",
+               hint='see "aistudio app list"')
+    if app.storage != "applet":
+        raise ValidationError(f"{app.title or app.id!r} is stored in Google Drive (an older Build "
+                              "app); aistudio can only diff Build-store apps",
+                              hint="open it at https://aistudio.google.com/apps")
+    known: dict[str, bytes] = {}  # digest -> content we already hold (the local folder)
+    meta: dict[str, Any]
+    if against is None:
+        turns = await client.apps.turn_snapshots(app.id)
+        if not turns:
+            raise NotFoundError(f"app {app.id} has no saved turns to compare",
+                                hint="compare with a folder instead: --against <dir>")
+        number = len(turns) if turn is None else turn
+        if not 1 <= number <= len(turns):
+            noun = "turn" if len(turns) == 1 else "turns"
+            raise ValidationError(f"{app.title or app.id!r} has {len(turns)} {noun}; "
+                                  f"{number} is out of range",
+                                  hint=f"use --turn 1..{len(turns)}")
+        new_files = dict(turns[number - 1].files)
+        old_files = dict(turns[number - 2].files) if number > 1 else {}
+        meta = {"mode": "turn", "turn": number, "turns": len(turns),
+                "prompt": turns[number - 1].prompt, "saved": turns[number - 1].saved,
+                "against": None}
+    else:
+        files = await client.apps.snapshot_files(app.id)
+        if not files:
+            raise NotFoundError(f"app {app.id} has no saved code yet",
+                                hint=f'build it first: aistudio app prompt {app.id[:8]} "…"')
+        new_files = dict(files)
+        local = _read_folder(against)
+        old_files = {}
+        for path, data in local.items():
+            digest = hashlib.sha256(data).hexdigest()
+            old_files[path] = digest
+            known[digest] = data
+        meta = {"mode": "folder", "turn": None, "turns": None, "prompt": None, "saved": None,
+                "against": str(against)}
+    for path in new_files if against is not None else {*old_files, *new_files}:
+        _safe_relative(path)  # paths of the app only ever label output, but keep them tame
+    changed = sorted(p for p in old_files.keys() | new_files.keys()
+                     if old_files.get(p) != new_files.get(p))
+    names: dict[str, str] = {}  # digest -> a path it belongs to, for error messages
+    for path in changed:
+        for side in (old_files, new_files):
+            wanted = side.get(path)
+            if wanted is not None and wanted not in known:
+                names.setdefault(wanted, path)
+    limit = asyncio.Semaphore(_PARALLEL_DOWNLOADS)
+    digests = sorted(names)
+    blobs = await asyncio.gather(*(
+        _download_verified(client, app.id, names[digest], digest, limit,
+                           hint="run the command again") for digest in digests))
+    content = {**known, **dict(zip(digests, blobs, strict=True))}
+    changes = diff_files(
+        {p: content[old_files[p]] for p in changed if p in old_files},
+        {p: content[new_files[p]] for p in changed if p in new_files})
+    return {"app_id": app.id, "title": app.title, **meta,
+            "summary": summarize(changes), "files": [c.to_dict() for c in changes]}

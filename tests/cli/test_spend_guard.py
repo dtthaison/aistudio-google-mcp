@@ -5,6 +5,7 @@ means "quote only". A default would make a plain run spend, so this test walks t
 """
 
 import click
+from click.testing import CliRunner
 
 from aistudio.cli.main import cli
 
@@ -43,7 +44,7 @@ def test_the_paid_commands_have_a_budget_option():
              if any(BUDGET_OPTIONS & set(p.opts) for p in command.params
                     if isinstance(p, click.Option))}
     assert {"aistudio flow video", "aistudio flow image", "aistudio flow extend",
-            "aistudio flow edit"} <= names
+            "aistudio flow edit", "aistudio flow storyboard"} <= names
 
 
 def test_a_planted_default_is_caught():
@@ -57,3 +58,29 @@ def test_a_planted_default_is_caught():
         pass
 
     assert budget_problems(fake) == ["aistudio spend: --max-credits defaults to 10"]
+
+
+def test_the_batch_option_comes_with_the_budget_option_and_no_default():
+    image = next(c for path, c in commands(cli) if path == "aistudio flow image")
+    names = {opt for p in image.params if isinstance(p, click.Option) for opt in p.opts}
+    assert {"--prompts-file", "--max-credits"} <= names
+
+
+def test_a_batch_without_max_credits_never_gets_a_budget(logged_in_profile, monkeypatch, tmp_path):
+    # --prompts-file must not turn a quote-only run into a spending one
+    logged_in_profile()
+    seen = []
+
+    async def batch(profile, prompts, **kwargs):
+        seen.append(kwargs["max_credits"])
+        return {"status": "done", "total": 1, "start_at": 1, "results": [], "credits_spent": 0}
+
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_image_batch", batch)
+    prompts = tmp_path / "p.jsonl"
+    prompts.write_text('"an apple"\n')
+    out = tmp_path / "out"
+    out.mkdir()
+    result = CliRunner().invoke(cli, ["flow", "image", "--prompts-file", str(prompts), "-o",
+                                      str(out), "--json"])
+    assert result.exit_code == 0, result.output
+    assert seen == [None]

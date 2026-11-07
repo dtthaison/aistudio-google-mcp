@@ -20,6 +20,7 @@ from aistudio._app.flow import (
     flow_extend,
     flow_frame,
     flow_generate,
+    flow_image_batch,
     flow_media,
     flow_projects,
     flow_rename_character,
@@ -29,7 +30,14 @@ from aistudio._app.flow import (
     flow_stitch,
     flow_voices,
 )
-from aistudio._app.flow_music import flow_music, flow_music_credits
+from aistudio._app.flow_music import (
+    flow_music,
+    flow_music_credits,
+    flow_music_download,
+    flow_music_get,
+    flow_music_list,
+)
+from aistudio._app.flow_storyboard import flow_storyboard
 from aistudio._app.flow_tools import (
     flow_tool_create,
     flow_tool_edit,
@@ -42,9 +50,10 @@ from aistudio._flow.models import ASPECTS, MODELS
 from aistudio._flow.music import MAX_LENGTH_S, SONG_PRICE
 from aistudio._flow.music import MODELS as MUSIC_MODELS
 from aistudio.cli.error_handler import handle_errors
-from aistudio.cli.inputs import read_text
+from aistudio.cli.inputs import read_prompts, read_text
 from aistudio.cli.output import emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
+from aistudio.exceptions import ValidationError, WaitTimeoutError
 
 
 @click.group()
@@ -103,6 +112,83 @@ def _render(data: dict[str, Any]) -> None:
         stderr.print(f"Warning: {warning}", markup=False)
 
 
+def _batch(state: CliState, prompts_file: Path, start_at: int | None, prompt: str | None,
+          prompt_file: Path | None, json_output: bool, timeout: int,
+          options: dict[str, Any]) -> None:
+    """``flow image --prompts-file``: everything is checked here before Chrome opens."""
+    if prompt is not None or prompt_file is not None:
+        raise ValidationError("give --prompts-file or a PROMPT, not both",
+                              hint="a batch takes its prompts from the file only")
+    if options["i_have_rights"]:
+        raise ValidationError("--i-have-rights does not go with --prompts-file",
+                              hint="pass the media id of an image already in Flow to "
+                                   "--ingredient")
+    out = options["out"]
+    if out is None:
+        raise ValidationError("--prompts-file needs -o FOLDER", hint="the images go there")
+    prompts = read_prompts(prompts_file)
+    window = "visible" if options["visible"] else "minimized"
+
+    def notice() -> None:
+        stderr.print(f"Asking Flow in a {window} Chrome window, one prompt at a time…",
+                     markup=False)
+    result = asyncio.run(flow_image_batch(
+        state.profile(), prompts, out=out, overwrite=options["force"], start_at=start_at or 1,
+        model=options["model"], aspect=options["aspect"], count=options["count"],
+        max_credits=options["max_credits"], project=options["project"],
+        timeout_s=float(timeout), visible=options["visible"],
+        ingredients=list(options["ingredient"]), characters=list(options["characters"]),
+        on_start=None if json_output else notice))
+    emit(result, json_output=json_output, render=_render_batch)
+    if result["status"] == "stopped":
+        timed_out = result.get("error", {}).get("code") == WaitTimeoutError.code or any(
+            r["status"] == "timeout" for r in result["results"])
+        raise SystemExit(2 if timed_out else 1)
+
+
+def _preview(prompt: str) -> str:
+    flat = " ".join(prompt.split())
+    return flat if len(flat) <= 50 else flat[:49] + "…"
+
+
+def _render_batch(data: dict[str, Any]) -> None:
+    for r in data["results"]:
+        head = f"#{r['index']} {_preview(r['prompt'])}: "
+        if r["status"] == "done":
+            stdout.print(head + f"done, {r['credits_spent']} credits", markup=False)
+            for file in r["files"]:
+                stdout.print(f"  Wrote {file['path']} ({file['bytes']} bytes)", markup=False)
+        elif r["status"] == "quoted":
+            stdout.print(head + f"Flow quotes {r['quote_credits']} credits", markup=False)
+        elif r["status"] == "timeout":
+            stdout.print(head + f"still running in Flow ({r['credits_spent']} credits spent); "
+                                f"media {', '.join(r['media_ids']) or 'unknown'}", markup=False)
+        elif r["status"] == "failed":
+            stdout.print(head + f"failed: {r['error']['message']}", markup=False)
+        else:
+            stdout.print(head + "not run", markup=False)
+        for warning in r.get("warnings", []):
+            stderr.print(f"Warning (#{r['index']}): {warning}", markup=False)
+    done = sum(r["status"] == "done" for r in data["results"])
+    if data["status"] == "quoted":
+        stdout.print(f"Flow quotes {data['quote_credits']} credits for "
+                     f"{len(data['results'])} prompts. Nothing was spent. Re-run with "
+                     f"--max-credits {data['quote_credits']} to generate them all.",
+                     markup=False)
+        return
+    stdout.print(f"{done} of {len(data['results'])} prompts done; "
+                 f"{data['credits_spent']} credits spent", markup=False)
+    if data["status"] == "stopped":
+        error = data.get("error")
+        if error:
+            stderr.print(f"Error: {error['message']}", markup=False)
+            if error.get("hint"):
+                stderr.print(f"Hint: {error['hint']}", markup=False)
+        stdout.print(f"Stopped; nothing was retried. Check the Flow project first (the prompt "
+                     f"it stopped at may have been made), then continue with the same command "
+                     f"plus --start-at {data['resume_at']}.", markup=False)
+
+
 def _command(kind: str) -> click.Command:
     ids = [m.id for m in MODELS if m.kind == kind]
 
@@ -138,6 +224,14 @@ def _command(kind: str) -> click.Command:
     def command(state: CliState, prompt: str | None, prompt_file: Path | None, json_output: bool,
                 timeout: int, **options: Any) -> None:
         state.require_browser()
+        prompts_file = options.pop("prompts_file", None)
+        start_at = options.pop("start_at", None)
+        if prompts_file is not None:
+            _batch(state, prompts_file, start_at, prompt, prompt_file, json_output, timeout,
+                   options)
+            return
+        if start_at is not None:
+            raise ValidationError("--start-at goes with --prompts-file")
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
         window = "visible" if options["visible"] else "minimized"
 
@@ -161,6 +255,19 @@ def _command(kind: str) -> click.Command:
                                help="Start frame: an image file or a Flow media id.")(command)
         command = click.option("--duration", type=int, help="Seconds (per the model: Veo "
                                "3.1 Lite/Fast 4/6/8, Quality 8, Omni 4/6/8/10).")(command)
+    if kind == "image":  # a batch of prompts is for images only
+        command = click.option(
+            "--start-at", type=click.IntRange(1),
+            help="With --prompts-file: begin at this prompt number (1 is the first), to resume "
+                 "a stopped batch.")(command)
+        command = click.option(
+            "--prompts-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            help="Generate for every prompt in this JSON Lines file (one JSON string, or "
+                 '{"prompt": "..."}, per line; a prompt\'s own line breaks are written \\n), one '
+                 "after another in one browser session. Needs -o FOLDER; files are "
+                 "<number>-<words of the prompt>-<n>. The other options apply to every prompt; "
+                 "--max-credits is the budget for the whole batch. The free Nano Banana 2.1 "
+                 "makes every image at once. The first error stops the batch.")(command)
     help_text = (f"Generate {kind}s with Google Flow. Without --max-credits a paid model only "
                  "shows Flow's quote and spends nothing"
                  + ("; the free Nano Banana 2.1 generates at once (0 credits)." if kind == "image"
@@ -172,7 +279,30 @@ video = _command("video")
 image = _command("image")
 
 
-@flow.command("music")
+class _MusicGroup(click.Group):
+    """``flow music PROMPT`` keeps generating a song: anything that is not a subcommand name
+    goes to ``generate``. A prompt that is exactly ``list``, ``get`` or ``download`` needs the
+    ``generate`` word."""
+
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> Any:
+        if args and args[0] in self.commands:
+            return super().resolve_command(ctx, args)
+        return "generate", self.commands["generate"], args
+
+
+@flow.group("music", cls=_MusicGroup, context_settings={"ignore_unknown_options": True})
+def music() -> None:
+    """Songs on Google Flow Music (flowmusic.app).
+
+    \b
+    flow music PROMPT              make a song (same as: flow music generate PROMPT); 5 credits
+    flow music list                your songs, with ids (free)
+    flow music get ID              one song's prompt and lyrics (free)
+    flow music download ID         save a song you already have (free)
+    """
+
+
+@music.command("generate")
 @click.argument("prompt", required=False)
 @click.option("--prompt-file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help="Read the sound prompt from a file instead.")
@@ -222,6 +352,74 @@ def music_cmd(state: CliState, prompt: str | None, prompt_file: Path | None,
     emit(result, json_output=json_output, render=_render_music)
     if result["status"] == "timeout":
         raise SystemExit(2)
+
+
+def _clock(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes}:{rest:02d}"
+
+
+@music.command("list")
+@click.option("--search", help="Only songs whose title, prompt or lyrics contain TEXT.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_list(state: CliState, search: str | None, visible: bool, json_output: bool) -> None:
+    """Your Flow Music songs, newest first, with failed and unfinished ones (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_list(state.profile(), search=search, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        if not data["songs"]:
+            stdout.print("No songs.", markup=False)
+        _print_lines(f"{s['clip_id']}  {s['status']:11}  {_clock(s['seconds']):>5}  {s['title']}"
+                     for s in data["songs"])
+    emit(result, json_output=json_output, render=render)
+
+
+@music.command("get")
+@click.argument("song_id")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_get(state: CliState, song_id: str, visible: bool, json_output: bool) -> None:
+    """One Flow Music song with its prompt and lyrics (free)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_get(state.profile(), song_id, visible=visible))
+
+    def render(data: dict[str, Any]) -> None:
+        stdout.print(f"{data['title']}  ({data['clip_id']})", markup=False)
+        stdout.print(f"{data['status']}, {_clock(data['seconds'])}, created "
+                     f"{data['created'] or '?'}, model {data['model'] or '?'}", markup=False)
+        stdout.print(f"Prompt: {data['prompt'] or '-'}", markup=False)
+        stdout.print(f"Lyrics: {data['lyrics'] or '-'}", markup=False)
+        stdout.print(f"Session: {data['project_url']}", markup=False)
+    emit(result, json_output=json_output, render=render)
+
+
+@music.command("download")
+@click.argument("song_id")
+@click.option("--wav", is_flag=True,
+              help="Save the WAV file (about 34 MB for 3 minutes) instead of the .m4a.")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Output file (default: flow-music-<song id>.m4a).")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def music_download(state: CliState, song_id: str, wav: bool, out: Path | None, force: bool,
+                   visible: bool, json_output: bool) -> None:
+    """Download a Flow Music song you already have, by id (free; never overwrites without
+    --force)."""
+    state.require_browser()
+    result = asyncio.run(flow_music_download(state.profile(), song_id, wav=wav, out=out,
+                                             overwrite=force, visible=visible))
+    emit(result, json_output=json_output, render=_render_files)
 
 
 def _render_music(data: dict[str, Any]) -> None:
@@ -897,3 +1095,97 @@ def frame_save(state: CliState, media_id: str, at: float | None, project: str | 
         _render_files({k: v for k, v in data.items() if k != "credits_spent"})
 
     emit(result, json_output=json_output, render=render)
+
+
+def _adopt(_ctx: click.Context, _param: click.Parameter, values: tuple[str, ...]
+           ) -> dict[str, str]:
+    adopted: dict[str, str] = {}
+    for value in values:
+        shot, sep, media = value.partition("=")
+        if not sep or not shot.strip() or not media.strip():
+            raise click.BadParameter(f"{value!r} is not SHOT=MEDIA-ID", param_hint="--adopt")
+        adopted[shot.strip()] = media.strip()
+    return adopted
+
+
+@flow.command("storyboard")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--keyframes", is_flag=True,
+              help="Also make the free assets now (new characters, location plates, keyframes "
+                   "on Nano Banana 2.1: 0 credits, but they are generated in your project) so "
+                   "you can review them before paying. Without --keyframes or --max-credits "
+                   "nothing is generated.")
+@click.option("--max-credits", type=click.IntRange(0),
+              help="Make the scene, spending at most this many credits in total; refused "
+                   "before anything is made when the quotes add up to more. Without it "
+                   "only the plan and the quotes are shown.")
+@click.option("-o", "--out", type=click.Path(path_type=Path),
+              help="Where to save the finished scene (an .mp4); needed with --max-credits.")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--state", "state_path", type=click.Path(dir_okay=False, path_type=Path),
+              help="State file (default: FILE with .state.json); it records what is made so a "
+                   "re-run never pays twice.")
+@click.option("--assets", "assets_dir", type=click.Path(file_okay=False, path_type=Path),
+              help="Folder for the keyframes, plates, frames and clips (default: FILE.assets).")
+@click.option("--adopt", multiple=True, callback=_adopt, metavar="SHOT=MEDIA-ID",
+              help="Tell aistudio a shot's clip exists after an error that may have charged "
+                   "(repeatable). Look it up with 'flow media --type video'.")
+@click.option("--timeout", type=click.IntRange(30), default=1200, show_default=True,
+              help="Seconds to wait for each clip after approving it.")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def storyboard_cmd(state: CliState, file: Path, keyframes: bool, max_credits: int | None,
+                   out: Path | None, force: bool, state_path: Path | None,
+                   assets_dir: Path | None, adopt: dict[str, str], timeout: int, visible: bool,
+                   json_output: bool) -> None:
+    """Make a whole Flow scene from one YAML FILE: characters, location plates, keyframes and
+    an ordered list of shots, joined into one video.
+
+    The whole file is checked first. Without --max-credits it spends nothing: it shows each
+    shot's plan and one total quote. With --max-credits N it makes the clips in order, stops at
+    the first error, and keeps a state file so a re-run continues instead of paying again.
+    See SKILL.md or the README for the file format."""
+    state.require_browser()
+
+    def progress(message: str) -> None:
+        stderr.print(message, markup=False)
+    result = asyncio.run(flow_storyboard(
+        state.profile(), file, max_credits=max_credits, keyframes=keyframes, out=out,
+        overwrite=force, state_path=state_path, assets_dir=assets_dir, adopt=adopt,
+        timeout_s=float(timeout), visible=visible,
+        on_progress=None if json_output else progress))
+    emit(result, json_output=json_output, render=_render_storyboard)
+    if result["status"] == "timeout":
+        raise SystemExit(2)
+    if result["status"] == "failed":
+        raise SystemExit(1)
+
+
+def _render_storyboard(data: dict[str, Any]) -> None:
+    for shot in data["shots"]:
+        quote = ("" if shot["quote"] is None
+                 else f"  {shot['quote']} credits ({shot['quote_basis']})")
+        length = "" if shot["duration"] is None else f" {shot['duration']} s"
+        stdout.print(f"{shot['id']}  {shot['join']:6}  {shot['status']:8}  "
+                     f"{shot['model']}{length} {shot['aspect']}  "
+                     f"{' + '.join(shot['steps'])}{quote}", markup=False)
+    for file in data.get("files", []):
+        stdout.print(f"Wrote {file['path']}", markup=False)
+    if data["status"] == "quoted":
+        total = data["quote"]["credits"]
+        stdout.print(f"{data['quote']['pending_shots']} shot(s) left, quoted at {total} "
+                     f"credits in total. Nothing was spent. Re-run with --max-credits "
+                     f"{total} -o scene.mp4 to make them; add --keyframes first to review "
+                     f"the free keyframes.", markup=False)
+    else:
+        stdout.print(f"Spent {data['credits_spent']} credits in this run "
+                     f"({data['credits_spent_total']} in all); {_left(data)}", markup=False)
+    error = data.get("error")
+    if error:
+        stderr.print(f"Error: {error['message']}", markup=False)
+        if error.get("hint"):
+            stderr.print(f"Hint: {error['hint']}", markup=False)
+    for warning in data.get("warnings", []):
+        stderr.print(f"Warning: {warning}", markup=False)

@@ -10,8 +10,10 @@ from typing import Any
 
 import click
 from rich.table import Table
+from rich.text import Text
 
 from aistudio._app.apps import (
+    diff_app,
     export_app,
     gallery_get,
     gallery_list,
@@ -24,6 +26,7 @@ from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import cells, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 from aistudio.client import AIStudioClient
+from aistudio.exceptions import ValidationError
 
 _now = time.monotonic
 PROGRESS_EVERY_S = 5.0  # export progress also prints at least this often
@@ -244,3 +247,62 @@ def app_export(state: CliState, app_id: str, dest: Path, force: bool, json_outpu
     emit(data, json_output=json_output, render=lambda d: stdout.print(
         f"Exported {d['count']} files ({d['bytes']} bytes) of {d['title'] or d['app_id']} "
         f"to {d['dir']}", markup=False))
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _render_diff(d: dict[str, Any]) -> None:
+    stdout.print(f"{d['title'] or '(untitled)'}  [{d['app_id']}]", markup=False)
+    if d["mode"] == "turn":
+        saved = f" ({d['saved']})" if d["saved"] else ""
+        stdout.print(f"Turn {d['turn']} of {d['turns']}{saved}: {d['prompt'] or '(no prompt)'}",
+                     markup=False)
+        empty = f"No file changed in turn {d['turn']}."
+    else:
+        stdout.print(f"Current code compared with {d['against']} (the folder is the before)",
+                     markup=False)
+        empty = "No file differs from the folder."
+    files, summary = d["files"], d["summary"]
+    if not files:
+        stdout.print(empty, markup=False)
+        return
+    stdout.print(f"{_plural(len(files), 'file')} changed: {summary['added']} added, "
+                 f"{summary['removed']} removed, {summary['changed']} changed; "
+                 f"+{summary['lines_added']} -{summary['lines_removed']} lines", markup=False)
+    for f in files:
+        stdout.print()
+        if f["binary"]:
+            stdout.print(f"{f['path']} ({f['status']}): binary file, no line diff", markup=False)
+            continue
+        stdout.print(f"{f['path']} ({f['status']}, +{f['added']} -{f['removed']})", markup=False)
+        for line in f["diff"].splitlines():
+            colour = ("bold" if line.startswith(("--- ", "+++ ")) else "cyan"
+                      if line.startswith("@@") else "green" if line.startswith("+")
+                      else "red" if line.startswith("-") else None)
+            stdout.print(Text(line, style=colour or ""), markup=False, highlight=False)
+
+
+@app.command("diff")
+@click.argument("app_id")
+@click.option("--turn", type=click.IntRange(min=1),
+              help="Builder turn to show (1 is the first prompt); default: the last.")
+@click.option("--against", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Compare the current code with this folder (e.g. an earlier export).")
+@json_option
+@click.pass_obj
+@handle_errors
+def app_diff(state: CliState, app_id: str, turn: int | None, against: Path | None,
+             json_output: bool) -> None:
+    """Show what the last builder turn changed in an app (id or unique prefix).
+
+    Prints a summary and a unified diff per file, from the files Build saved after each turn.
+    --turn N shows turn N instead. --against DIR compares the current code with a folder, such
+    as an earlier "app export". Free; downloads only the files that differ.
+    """
+    if turn is not None and against is not None:
+        raise ValidationError("--turn and --against cannot be combined",
+                              hint="--turn compares Build's own turns; --against a folder")
+    data = _run(state, lambda c: diff_app(c, app_id, turn=turn, against=against))
+    emit(data, json_output=json_output, render=_render_diff)

@@ -15,6 +15,10 @@ ListBundledApplets ``[[[group, [app, ...]], ...]]``; app
 ``[slug, title, description, apis, _, _, tags, video_url, image_url]``.
 
 ListAppletTrajectories ``[[[id, started, updated, prompt], ...]]``. Timestamps ``[seconds, nanos]``.
+
+LoadCodeAssistantInteractionHistory ``[_, [step, ...], next_offset?]``; a step's ``[8]`` is set
+only on the step that ends a builder turn: ``["model", "Snapshot from <prompt>", _, saved,
+[[path, sha256], ...]]``, the shape GetCodeAssistantSnapshot returns.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from typing import Any
 
 from aistudio._rpc.rows import as_str, as_strs, as_timestamp
 from aistudio._rpc.wire import opt_index, safe_index
-from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem
+from aistudio._types.apps import App, AppRun, GalleryApp, RecentItem, TurnSnapshot
 from aistudio.exceptions import SchemaDriftError
 
 
@@ -167,3 +171,32 @@ def decode_snapshot_files(response: Any) -> list[tuple[str, str]]:
             raise SchemaDriftError("GetCodeAssistantSnapshot", (0, 4, i), "a [path, sha256] pair")
         files.append((path, digest))
     return files
+
+
+_SNAPSHOT_PREFIX = "Snapshot from "
+
+
+def decode_turn_snapshots(response: Any) -> list[TurnSnapshot]:
+    """One page of LoadCodeAssistantInteractionHistory: the snapshot step of each builder turn
+    on it, oldest first."""
+    steps = opt_index(response, 1)
+    turns: list[TurnSnapshot] = []
+    for step in steps if isinstance(steps, list) else []:
+        snapshot = opt_index(step, 8)
+        if not isinstance(snapshot, list):
+            continue
+        label = as_str(opt_index(snapshot, 1))
+        if label and label.startswith(_SNAPSHOT_PREFIX):
+            label = label[len(_SNAPSHOT_PREFIX):]
+        turns.append(TurnSnapshot(
+            prompt=label,
+            saved=as_timestamp(opt_index(snapshot, 3)),
+            files=tuple(decode_snapshot_files([snapshot])),
+        ))
+    return turns
+
+
+def decode_history_next(response: Any) -> str | None:
+    """The offset of the next (older) page, or None on the last page."""
+    token = opt_index(response, 2)
+    return token if isinstance(token, str) and token else None
