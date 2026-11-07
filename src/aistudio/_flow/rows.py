@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import parse_qs
 
 from aistudio._rpc.wire import opt_index
@@ -352,6 +352,10 @@ def credits_left(payload: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _is_count(value: Any) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def parse_permission(payload: Any) -> Quote | None:
     """Flow's ``ask_for_permission`` call in a StreamChat payload (findings): only counts and cost.
 
@@ -364,8 +368,7 @@ def parse_permission(payload: Any) -> Quote | None:
                       and isinstance(pair[1], list) and len(pair[1]) == 2}
             videos, images = params.get("num_videos"), params.get("num_images")
             cost = params.get("total_cost")
-            if not all(isinstance(v, int) and not isinstance(v, bool)
-                       for v in (videos, images, cost)):
+            if not (_is_count(videos) and _is_count(images) and _is_count(cost)):
                 return None
             kind = ("video" if videos and not images else "image" if images and not videos
                     else "mixed")

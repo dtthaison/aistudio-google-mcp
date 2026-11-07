@@ -124,8 +124,9 @@ async def list_models(
         search=search,
     )
     if starred_only:  # the filter's answer depends on the stars: report failures, never "none"
-        starred: set[str] | None = {m for m, _ in await client.models.starred()}
-        models = [m for m in models if m.id in starred]
+        starred_ids = {m for m, _ in await client.models.starred()}
+        models = [m for m in models if m.id in starred_ids]
+        starred: set[str] | None = starred_ids
     else:
         starred = await _starred_ids(client)
     return {"models": [_with_star(m, starred) for m in models], "count": len(models)}

@@ -37,7 +37,8 @@ def decode_started_run(response: Any) -> tuple[str, str]:
 def decode_build_stream(response: Any) -> BuildProgress:
     items = opt_index(response, 0)
     run_id = app_id = summary = None
-    steps, done, files = 0, False, ()
+    steps, done = 0, False
+    files: tuple[str, ...] = ()
     for item in items if isinstance(items, list) else []:
         app_id = as_str(opt_index(item, 3)) or app_id
         # One step per snapshot, or (an option's stream, live 2026-10-29) every step so far

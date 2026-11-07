@@ -26,6 +26,8 @@ dev = [
   "pytest-asyncio>=0.24",
   "respx>=0.21",
   "ruff>=0.6",
+  "mypy>=1.13",
+  "pre-commit>=4",
 ]
 
 [project.scripts]
@@ -52,4 +54,15 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+# S: bandit's security rules. An exception carries "# noqa: S... (reason)" on its own line.
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest asserts; fake credentials and a plain `git ls-files` are the point of some tests
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true

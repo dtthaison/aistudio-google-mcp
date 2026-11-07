@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from datetime import tzinfo
 from typing import Any
 
@@ -81,14 +82,14 @@ class _Models:
         return decode_models(await self.fetch_raw(), tz=tz)
 
     async def starred(self, *, attempts: int | None = None
-                      ) -> list[tuple[str, tuple[int, int]]]:
+                      ) -> builtins.list[tuple[str, tuple[int, int]]]:
         raw = await self._client.call(registry.GET_PREFERENCES,
                                       preferences_params.get_preferences(), attempts=attempts)
         return decode_starred(raw)
 
     async def set_starred(
-        self, starred: list[tuple[str, tuple[int, int]]]
-    ) -> list[tuple[str, tuple[int, int]]]:
+        self, starred: builtins.list[tuple[str, tuple[int, int]]]
+    ) -> builtins.list[tuple[str, tuple[int, int]]]:
         raw = await self._client.call(registry.UPDATE_PREFERENCES,
                                       preferences_params.set_starred(starred))
         return decode_starred(raw)
@@ -121,22 +122,22 @@ class _Apps:
     async def list(self, page_size: int = 1000) -> list[App]:
         return (await self.list_checked(page_size))[0]
 
-    async def list_checked(self, page_size: int = 1000) -> tuple[list[App], int]:
+    async def list_checked(self, page_size: int = 1000) -> tuple[builtins.list[App], int]:
         """The apps plus the number of entries skipped for an unknown shape."""
         raw = await self._client.call(registry.LIST_APPLETS, apps_params.list_apps(page_size))
         return decode_apps_checked(raw)
 
-    async def recent(self) -> list[RecentItem]:
+    async def recent(self) -> builtins.list[RecentItem]:
         raw = await self._client.call(registry.LIST_RECENT_APPLETS,
                                       apps_params.list_recent_apps())
         return decode_recent(raw)
 
-    async def runs(self, app_id: str) -> list[AppRun]:
+    async def runs(self, app_id: str) -> builtins.list[AppRun]:
         raw = await self._client.call(registry.LIST_APPLET_TRAJECTORIES,
                                       apps_params.list_app_runs(app_id))
         return decode_runs(raw)
 
-    async def snapshot_files(self, app_id: str) -> list[tuple[str, str]] | None:
+    async def snapshot_files(self, app_id: str) -> builtins.list[tuple[str, str]] | None:
         stamp = decode_snapshot_stamp(
             await self._client.call(registry.GET_APPLET, apps_params.get_app(app_id))
         )

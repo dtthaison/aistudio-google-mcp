@@ -633,7 +633,7 @@ async def _minimize(context: Any, page: Any) -> None:
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds",
                        {"windowId": window["windowId"], "bounds": {"windowState": "minimized"}})
-    except Exception:
+    except Exception:  # noqa: S110 (cosmetic: the window works unminimized)
         pass  # cosmetic: a visible window works the same
 
 
@@ -643,7 +643,7 @@ async def _maximize(context: Any, page: Any) -> None:
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds",
                        {"windowId": window["windowId"], "bounds": {"windowState": "maximized"}})
-    except Exception:
+    except Exception:  # noqa: S110 (cosmetic: the window works unmaximized)
         pass  # cosmetic
 
 
@@ -701,5 +701,5 @@ async def open_browser(
             await _save_session(profile, context)
             try:
                 await context.close()
-            except Exception:  # the user may have closed the window already
+            except Exception:  # noqa: S110 (the user may have closed the window already)
                 pass

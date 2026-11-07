@@ -26,7 +26,7 @@ def cells(*values: str) -> list[Text]:
     return [Text(value) for value in values]
 
 
-def emit(data: Any, *, json_output: bool, render: Callable[[Any], None]) -> None:
+def emit(data: Any, *, json_output: bool, render: Callable[[Any], object]) -> None:
     if json_output:
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
     else:

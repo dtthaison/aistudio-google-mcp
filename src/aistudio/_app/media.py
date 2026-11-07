@@ -444,7 +444,7 @@ def _short(value: Any) -> str:
     return text if len(text) <= 80 else text[:77] + "…"
 
 
-def _mismatches(sent: Any, *, model_id: str, text: str, voice: str | None,
+def _mismatches(sent: Any, *, model_id: str, text: str | None, voice: str | None,
                 files: int | None = None) -> list[str]:
     parts = wire.opt_index(sent, 1, 0, 0)
     parts = parts if isinstance(parts, list) else []
