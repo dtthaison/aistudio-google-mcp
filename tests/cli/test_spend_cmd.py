@@ -29,6 +29,20 @@ def test_a_paid_flow_run_is_logged(logged_in_profile, monkeypatch):
     assert "apple" not in json.dumps(got)
 
 
+@pytest.mark.parametrize("args", [["flow", "music", "lofi"],
+                                  ["flow", "music", "generate", "lofi"]])
+def test_a_paid_song_is_logged_whichever_way_it_is_called(logged_in_profile, monkeypatch, args):
+    # `flow music PROMPT` is routed to the `generate` subcommand: both spellings must be logged.
+    logged_in_profile()
+    song = {"status": "done", "clip_id": "c1", "credits_spent": 5, "files": []}
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_music", fake(song, []))
+    res = CliRunner().invoke(cli, [*args, "--max-credits", "5", "--json"])
+    assert res.exit_code == 0, res.output
+    (got,) = log()
+    assert (got["command"], got["unit"], got["credits_spent"]) == (
+        "flow music generate", "flow_music_credits", 5)
+
+
 def test_a_quote_is_not_logged(logged_in_profile, monkeypatch):
     logged_in_profile()
     monkeypatch.setattr("aistudio.cli.flow_cmd.flow_generate", fake(QUOTED, []))
@@ -177,7 +191,8 @@ def test_every_spending_command_is_a_real_command(path):
 
 
 def test_the_list_covers_the_paid_commands():
-    assert {"flow video", "flow image", "flow extend", "flow edit", "flow music",
-            "flow character create", "flow character body", "flow character voice",
+    assert {"flow video", "flow image", "flow extend", "flow edit", "flow music generate",
+            "flow storyboard", "flow character create", "flow character body",
+            "flow character voice",
             "flow tool use", "generate speech", "generate image", "generate music",
             "transcribe", "app create", "app prompt"} == set(spend.SPENDING_COMMANDS)

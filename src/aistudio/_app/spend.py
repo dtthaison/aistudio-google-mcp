@@ -30,7 +30,7 @@ USD = "usd_estimate"
 SPENDING_COMMANDS: dict[str, str] = {
     "flow video": FLOW, "flow image": FLOW, "flow extend": FLOW, "flow edit": FLOW,
     "flow character create": FLOW, "flow character body": FLOW, "flow character voice": FLOW,
-    "flow tool use": FLOW, "flow music": FLOW_MUSIC,
+    "flow tool use": FLOW, "flow storyboard": FLOW, "flow music generate": FLOW_MUSIC,
     "generate speech": USD, "generate image": USD, "generate music": USD, "transcribe": USD,
     "app create": USD, "app prompt": USD,
 }
@@ -48,7 +48,7 @@ USD_PRICES: dict[str, float] = {
 NOTHING_SPENT = frozenset({"VALIDATION_ERROR", "OVER_BUDGET", "PLAN_MISMATCH", "AUTH_ERROR",
                            "NOT_FOUND", "RATE_LIMITED"})
 # Commands whose run without --max-credits only quotes: no spend, so nothing to log.
-QUOTE_FIRST = frozenset({"flow video", "flow music"})
+QUOTE_FIRST = frozenset({"flow video", "flow storyboard", "flow music generate"})
 
 _TS = "%Y-%m-%dT%H:%M:%SZ"
 _SPAN = re.compile(r"^([1-9]\d*)([mhdw])$")

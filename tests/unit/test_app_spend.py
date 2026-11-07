@@ -44,7 +44,8 @@ def test_a_failed_paid_run_is_logged_with_unknown_spend_and_the_budget_at_risk()
 
 def test_a_quote_only_run_is_not_logged():
     assert entry(params={}, result={"status": "quoted", "credits": 10}) is None
-    assert entry(path="flow music", params={}, result={"status": "quoted", "credits": 5}) is None
+    assert entry(path="flow music generate", params={},
+                 result={"status": "quoted", "credits": 5}) is None
 
 
 @pytest.mark.parametrize("code", ["VALIDATION_ERROR", "OVER_BUDGET", "PLAN_MISMATCH",
@@ -123,12 +124,12 @@ def test_build_runs_keep_the_app_and_url():
 
 
 def test_flow_music_is_counted_in_its_own_unit():
-    got = entry(path="flow music", params={"max_credits": 5}, result={
+    got = entry(path="flow music generate", params={"max_credits": 5}, result={
         "status": "done", "clip_id": "c1", "title": "Morning", "model": "Lyria 3.5",
         "credits_spent": 5, "project_url": "https://www.flowmusic.app/session/s",
         "files": [{"path": "s.m4a", "media_id": "c1"}]})
     assert got["unit"] == "flow_music_credits" and got["media_ids"] == ["c1"]
-    timeout = entry(path="flow music", params={"max_credits": 5}, result={
+    timeout = entry(path="flow music generate", params={"max_credits": 5}, result={
         "status": "timeout", "job_id": "j9", "credits_spent": None, "files": [],
         "project_url": "https://www.flowmusic.app/session"})
     assert timeout["job_id"] == "j9" and timeout["credits_spent"] is None
