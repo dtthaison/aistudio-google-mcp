@@ -78,12 +78,16 @@ def test_no_committed_file_holds_a_credential_or_a_real_email():
           "FAKE in tests/unit/test_no_secrets.py, or its line ends with `gitleaks:allow (why)`.")
 
 
+# Each planted value is put together at run time, so this file itself never holds one (the scan
+# above and gitleaks read it too).
 @pytest.mark.parametrize("planted, kind", [
-    ("token = 'ya29.a0AehfTOmIgRpOkGIGlh4Gxpk7YThSG3tlLC4oRQCBbbcba'", "Google OAuth access token"),
-    ("key=AIzaSyA1234567890abcdefghijklmnopqrstuv", "Google API key"),
-    ('{"name": "SAPISID", "value": "AbCdEfGhIjKlMnOpQrStUvWxYz012/34"}', "Google session cookie"),
-    ("sb-sb-auth-token.0=base64-eyJhY2Nlc3NfdG9rZW4iOiJleUpoYkdj", "Supabase session cookie"),
-    ("signed in as real.person@gmail.com", "email address"),
+    ("token = 'ya29" + ".a0AehfTOmIgRpOkGIGlh4Gxpk7YThSG3tlLC4oRQCBbbcba'",
+     "Google OAuth access token"),
+    ("key=AIza" + "SyA1234567890abcdefghijklmnopqrstuv", "Google API key"),
+    ('{"name": "SAPISID", "value": "' + "AbCdEfGhIjKlMnOpQrStUvWxYz012/34" + '"}',
+     "Google session cookie"),
+    ("sb-sb-auth-token.0=base64-" + "eyJhY2Nlc3NfdG9rZW4iOiJleUpoYkdj", "Supabase session cookie"),
+    ("signed in as real.person" + "@" + "gmail.com", "email address"),
 ])
 def test_each_pattern_catches_a_planted_value(tmp_path, planted, kind):
     leak = tmp_path / "capture.json"
