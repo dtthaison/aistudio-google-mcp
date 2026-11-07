@@ -21,6 +21,12 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
   system instructions, generation settings and every turn, untruncated. Attachments show as types
   only. `--json` for scripts, `--thoughts` for saved thinking summaries, `-o file.md` to save it as
   markdown (`--force` to overwrite).
+- `aistudio flow music list [--search TEXT]`, `flow music get ID` and
+  `flow music download ID [-o FILE] [--wav] [--force]`: your Flow Music songs (id, title, length,
+  status including failed and unfinished, whether it has lyrics), a song's prompt and lyrics,
+  and a free download of a song you already have. None of them spends credits, and `download`
+  never overwrites a file without `--force`. `flow music PROMPT` works as before (also as
+  `flow music generate PROMPT`).
 
 ### Security
 - `certifi` 2026.10.23 and, on Python 3.11 or later, `filelock` 4.2.9, which fix known

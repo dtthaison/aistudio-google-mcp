@@ -1200,6 +1200,43 @@ from the Compose panel. The scratch scripts were not kept.
   3.4 s and 4.4 s), which hands the Google sign-in to the server. aistudio now waits for that
   reply first. A paid run from aistudio has not been made since that change.
 
+### Flow Music library: list, get, download (2026-11-07)
+
+Free, read-only runs only (page loads and GETs/lookups the Songs page makes itself). The account
+holds one song, so paging, other statuses and the model field are not seen live.
+
+- **Songs page** (`/library/my-songs`) loads, among other calls, `GET /__api/clips/auth-user?
+  limit=20&offset=0&filter=generations&include_disliked=false` →
+  `{"clips": [<record>, ...]}` (no total or next-page field). `offset=20` on a one-song account
+  gave `{"clips": []}`; aistudio pages by offset until a page adds no new id. Other calls it
+  makes: `/conversations?limit=30&offset=0` (sessions), `/projects`, `/spaces/get`,
+  `/music-videos/get`, playlists, `POST /clips`.
+- **Song record** (the same shape in the list and in `POST /clips {"clip_ids": [id]}` →
+  `{"clips": {id: <record>}}`): `id`, `title`, `created_at`, `deleted_at` (null), `duration`
+  (`{"status": "completed", "value": "176.93…"}`), `lyrics` (`{"status": "completed", "value":
+  {"id", "text"}}`; an instrumental's text is `[Instrumental]`), `operation` (`op_type`
+  `audio__create_song`, `conversation_id`, `sound_prompt`, `title`, `seed`, `lyrics_id`),
+  `audio_url` / `wav_url` / `image_url`, `privacy`, `is_favorite`, `play_count`, `has_vocals`
+  and more. So the list already carries the prompt and the lyrics: `flow music get` needs no
+  other call.
+- **Not seen:** a model name anywhere in the record (aistudio reads `operation.model` if it ever
+  appears and otherwise reports `null`), and the `status` values of a song that is running or
+  failed. aistudio calls a song `done` when `duration.status` is `completed` and `audio_url` is
+  set, `failed` when `duration` or `lyrics` has a status naming a failure or error, and
+  `in_progress` otherwise: a guess to confirm the first time a run is caught mid-way.
+- **Lookup by id.** `POST /clips` with an unknown valid UUID answers 200
+  `{"clips": {id: null}}`; a string that is not a UUID answers 422. It is a lookup (the page
+  sends it on load), not a write, and it works for any song id the server returns, so `download`
+  does not depend on the paged list. Whether it also returns another user's public song was not
+  tried.
+- **Download** is the existing free path: `audio_url` (`.m4a`, 2.65 MB for 177 s) and `wav_url`
+  (`.wav`, 34.0 MB, RIFF PCM 16-bit stereo 48 kHz) from the public bucket, no cookies. Both were
+  fetched and identified by their headers.
+- **Command shape.** `flow music` became a click group so `list`, `get` and `download` sit
+  beside the old `flow music PROMPT`; any first word that is not a subcommand goes to
+  `generate`, so existing calls keep working, and a prompt that is exactly `list`, `get` or
+  `download` needs `flow music generate`.
+
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 
 Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard

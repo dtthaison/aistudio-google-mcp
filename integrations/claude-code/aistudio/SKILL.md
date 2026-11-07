@@ -70,6 +70,9 @@ quotes and write each `'` as `'\''`.
 | What paid commands spent (free; local file, no browser) | `aistudio spend [--since 1h\|7d\|2026-11-01] [--command flow] --json`: `entries` (time, command, model, `status` done/timeout/failed, `credits_spent`, `max_credits`, media ids, output paths, job or project link) and `totals` per unit (`flow_credits`, `flow_music_credits`, `usd_estimate`) |
 | Flow credits left (free; minimized Chrome) | `aistudio flow credits --json` (`--music` for Flow Music's own credits) |
 | Song with Google Flow Music (flowmusic.app; **5 Flow Music credits, no quote from Flow Music**; writes .m4a, or .wav with `--wav`) | `aistudio flow music --prompt-file <file> [--lyrics-file <file>] [--length SECONDS] [--bpm N] [--seed N] [--title T] [-m 'Lyria 3.5'\|'Lyria 3 Pro'] --max-credits 5 -o song.m4a --json`; without `--max-credits` it only reports the price. No lyrics means an instrumental |
+| Flow Music library (free; minimized Chrome): your songs with id, title, created, seconds, status (`done`, `in_progress`, `failed`) and `has_lyrics` | `aistudio flow music list [--search T] --json` |
+| One Flow Music song's prompt and lyrics (free) | `aistudio flow music get <song-id> --json` |
+| Download a Flow Music song that already exists (free; never overwrites without `--force`; .m4a, or .wav with `--wav`) | `aistudio flow music download <song-id> [-o song.m4a] [--wav] [--force] --json` |
 | Flow video quote, or a free Nano Banana 2.1 image (spends nothing) | `aistudio flow video\|image --prompt-file <file> [-m MODEL] [--aspect A] [--count N] [--duration S] --json` |
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 | Many Flow images from a file of prompts (**the free model makes every one at once**) | `aistudio flow image --prompts-file <prompts.jsonl> -o <existing folder> [-m MODEL] [--aspect A] [--count N] [--character X] [--ingredient <media id>] [--max-credits <total of the quotes>] [--start-at N] --json`; see "Flow image batches" below |
@@ -145,8 +148,11 @@ quotes and write each `'` as `'\''`.
   3. Re-run with `--max-credits <credits>`.
 
   `flow music` works the same way, but its price (5 credits) is aistudio's measured one: Flow
-  Music shows no quote. A `GENERATION_FAILED` or `TIMEOUT` names the job; look in the user's
-  Flow Music Songs before any re-run.
+  Music shows no quote. A `GENERATION_FAILED` or `TIMEOUT` names the job; run
+  `aistudio flow music list --json` (free) before any re-run: a song that did finish shows
+  `done`, and `flow music download <song-id>` saves it. `flow music list`, `get` and `download`
+  never spend and need no `--max-credits`. A prompt that is exactly `list`, `get` or
+  `download` needs `flow music generate` in front.
 
   For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
   and nothing was spent. For `flow extend`, `flow edit`, `flow character create` and
@@ -203,6 +209,7 @@ quotes and write each `'` as `'\''`.
   measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
   warning that Flow charged a different amount. "no measured price" is final: do not retry with a
   higher `--max-credits`.
+- `flow music list` has no `model` yet (`null`: Flow Music's song records do not name it).
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
   type).
