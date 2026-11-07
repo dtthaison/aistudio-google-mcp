@@ -98,10 +98,12 @@ START = "Start generation"
 ADD_CLIP = "Add clip"
 EXTEND = re.compile(r"^Extend")
 CHARACTER_MODEL = "Select model family"
-CREATE_BODY = "Create body"  # a character page's body mode (findings, plan G)
+# A character page's body slot chip (findings, plan G): "Create body" while the slot is empty,
+# "Body" once it has an image (live 2026-11-07). Its accessible name may start with its icon.
+CREATE_BODY = re.compile(r"(?:^|\s)(?:Create body|Body)$")
 # The slot chip that is active (live 2026-11-07). "Ingredient" shows in both slots once the
 # portrait has an image, so only the chip tells the body slot from the portrait slot.
-BODY_CHIP = 'flow-slot-chip-button button.chip-button-active:has-text("Create body")'
+BODY_CHIP = 'flow-slot-chip-button button.chip-button-active:has-text("Body")'  # either label
 # Flow ignores "Create body" until the character has loaded, and its editor shows before that
 # (live, 2026-11-02: a click at once did nothing, one 3 s later worked): click again until the
 # body mode shows. The click itself sends nothing.

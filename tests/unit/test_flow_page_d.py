@@ -5,7 +5,14 @@ import re
 import pytest
 
 from aistudio._browser.ui import CapturedResponse
-from aistudio._flow.page import AGENT_MESSAGE, CHARACTERS_TAB, INGREDIENTS, PROMPT_EDITOR, FlowPage
+from aistudio._flow.page import (
+    AGENT_MESSAGE,
+    CHARACTERS_TAB,
+    CREATE_BODY,
+    INGREDIENTS,
+    PROMPT_EDITOR,
+    FlowPage,
+)
 from aistudio._flow.rows import FlowCharacter
 from aistudio.exceptions import BrowserError, ServerError, WaitTimeoutError
 from tests.unit.test_flow_page import PID, Clock
@@ -208,7 +215,7 @@ async def test_body_types_into_the_body_prompt_and_reads_the_image(fake_ui):
     page = FlowPage(ui, now=Clock())
     assert await page.open_body(PID, "c1") == "Nano Banana 2.1"
     assert [op for op in ui.ops if op[0] == "dispatch"] == [("dispatch", "button",
-                                                              "Create body")] * 2
+                                                              CREATE_BODY.pattern)] * 2
     media = await page.start_body("full body on a dock", LUNA)
     assert ("refuse_requests", ("ogiZ0b", "mYWVGd")) in ui.ops
     assert [m.media_id for m in media] == ["i1"] and page.started and page.paid_media == ["i1"]
@@ -251,7 +258,7 @@ async def test_body_needs_the_characters_own_page(fake_ui):
     ui = fake_ui(url=f"https://flow.google.com/project/{PID}")
     with pytest.raises(BrowserError):
         await FlowPage(ui, now=Clock()).open_body(PID, "c1")
-    assert ("dispatch", "button", "Create body") not in ui.ops
+    assert ("dispatch", "button", CREATE_BODY.pattern) not in ui.ops
 
 
 
@@ -313,3 +320,12 @@ async def test_a_closed_window_ends_a_stitch_at_once(fake_ui):
     ui.batch_rpc = closed
     with pytest.raises(WindowClosedError):
         await FlowPage(ui, now=Clock()).stitch([["m1", None, [], [8]]], timeout_s=60)
+
+
+def test_the_body_chip_is_found_by_either_label():
+    # Live 2026-11-07: "Create body" while the slot is empty, "Body" once it has an image.
+    from aistudio._flow.page import BODY_CHIP
+
+    for name in ("accessibility_new Create body", "Create body", "Body"):
+        assert CREATE_BODY.search(name)
+    assert not CREATE_BODY.search("Portrait") and 'has-text("Body")' in BODY_CHIP

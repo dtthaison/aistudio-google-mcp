@@ -1254,7 +1254,9 @@ holds one song, so paging, other statuses and the model field are not seen live.
 - **Why the slot was wrong.** The old `open_body` waited for an "Ingredient" button. Once the
   portrait has an image, that button shows in both slots, so it does not prove body mode, and
   the page can be back on the portrait slot when Start is pressed. The active slot is the chip
-  `flow-slot-chip-button button.chip-button-active` ("Portrait" or "Create body").
+  `flow-slot-chip-button button.chip-button-active`. The chips read "Portrait" and "Create
+  body" while the body slot is empty, and "Portrait" and "Body" once it has an image, so
+  aistudio matches either body label.
 - **Fix.** `open_body` waits for the active "Create body" chip, and `start_body` checks it again
   after typing. During Start, aistudio holds back (Playwright route, HTTP 409 to the page) any
   `ogiZ0b` that does not write to the body slot, and any `ogiZ0b` or `mYWVGd` that names the
@@ -1271,6 +1273,12 @@ holds one song, so paging, other statuses and the model field are not seen live.
   `[[workflow_id, None, None, [None, None, None, None, media_id], project_id],
   [["metadata.primary_media_id"]]]` (Flow's `set_primary_media_id`). This is why a body run now
   also holds back `mYWVGd` calls that name the portrait's workflow.
+- **Luna repaired (user-approved, free).** The portrait was set back to `2b0d0fb0` with that
+  `mYWVGd`. Then `flow character body 5e870776 --media 68d6ad35` sent `Sc7aEb` with slot 1,
+  which made copy `f1753591` in new workflow `d122ba05`. The record now reads
+  `[[["0cde650e"], ["d122ba05"]], …]`, and the page shows the head portrait under "Portrait"
+  and the full body under "Body". The fixed generate path (`ogiZ0b` into the body slot) has not
+  run live yet.
 
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 

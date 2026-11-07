@@ -127,13 +127,13 @@ def test_presets_are_the_thirty_dialog_voices():
 
 async def test_body_mode_is_clicked_again_until_it_shows(fake_ui):
     # Live: Flow ignores "Create body" until the character has loaded.
-    from aistudio._flow.page import BODY_CHIP, CHARACTER_MODEL
+    from aistudio._flow.page import BODY_CHIP, CHARACTER_MODEL, CREATE_BODY
 
     ui = fake_ui(inner={("button", CHARACTER_MODEL): ["Nano Banana 2.1 arrow_drop_down"]},
                  url=f"https://flow.google.com/project/{PID}/character/c1")
     ui.counts = {BODY_CHIP: [0, 0, 0, 1]}  # the body chip turns active after the third click
     assert await FlowPage(ui, now=Clock()).open_body(PID, "c1") == "Nano Banana 2.1"
-    assert ui.ops.count(("dispatch", "button", "Create body")) == 3
+    assert ui.ops.count(("dispatch", "button", CREATE_BODY.pattern)) == 3
 
 
 @pytest.mark.parametrize("ref, info", [("laomedeia", [None, [[None, "laomedeia"]]]),
