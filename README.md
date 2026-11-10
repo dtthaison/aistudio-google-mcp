@@ -256,6 +256,9 @@ takes no extra ingredients (not measured). New characters have no voice: set one
   quote, and a quote above the budget is refused. Veo 3.1 Lite is about 10 credits, Fast 20 and
   Quality 100. Free models (Nano Banana 2.1 images) generate at once and cost 0. aistudio reads
   your credits before and after, and warns if Flow charged something other than its quote.
+  Normally the quote is Flow's structured request. If Flow keeps its reply open while its card
+  waits, aistudio reads the price from the card's own question instead (`"quote_source": "page"`
+  in the JSON, and a warning); every check and the `--max-credits` limit apply the same way.
 - **`--i-have-rights`** answers Flow's "Rights to use this image: I agree" for a start frame or
   photo you upload. aistudio never answers it for you. Pass it only when it's true.
 - A run that times out may still finish, and be charged, on Google's side. Check AI Studio or

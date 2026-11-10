@@ -260,6 +260,10 @@ class FakeUi:
         self.ops.append(("refuse_requests", tuple(methods)))
         yield refused
 
+    def requests(self, method):
+        """The bodies the page sent for ``method`` (``sent_bodies``, per method)."""
+        return list(getattr(self, "sent_bodies", {}).get(method, []))
+
     async def next(self, method, *, timeout_s):
         self.waits.append((method, timeout_s))
         queue = self._responses.get(method) or []

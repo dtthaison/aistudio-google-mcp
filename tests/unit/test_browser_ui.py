@@ -79,7 +79,22 @@ async def test_responses_are_logged_per_method_until_the_block_ends():
         assert (got.method, got.status, got.text, got.request_body) == (
             "CreateApplet", 200, '["app"]', "[1]")
         assert await log.next("CodeAssistantOffline", timeout_s=0.05) is None
-    assert page.handlers == {"response": [], "close": []}
+    assert page.handlers == {"request": [], "response": [], "close": []}
+
+
+async def test_requests_are_logged_when_they_leave_not_when_the_reply_ends():
+    # Flow can keep a StreamChat reply open while its permission card waits (live, 2026-11-11):
+    # the request body is known at once, the response never completes
+    page = Page()
+    base = "https://flow.google.com/x/FlowCreationAgentService/"
+    async with PlaywrightUi(page).responses(marker="StreamChat") as log:
+        for handler in page.handlers["request"]:
+            handler(type("Req", (), {"url": base + "StreamChat", "post_data": "f.req=[1]"})())
+            handler(type("Req", (), {"url": base + "Other", "post_data": "no"})())
+            handler(type("Req", (), {"url": base + "StreamChat", "post_data": None})())
+        assert log.requests("StreamChat") == ["f.req=[1]", ""]
+        assert log.requests("Other") == []
+        assert await log.next("StreamChat", timeout_s=0.05) is None
 
 
 class Cdp:

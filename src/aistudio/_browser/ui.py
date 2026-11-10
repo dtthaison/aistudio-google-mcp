@@ -63,6 +63,12 @@ class CapturedResponse:
 class ResponseLog(Protocol):
     async def next(self, method: str, *, timeout_s: float) -> CapturedResponse | None: ...
 
+    def requests(self, method: str) -> list[str]:
+        """Bodies of the requests the page has sent for ``method`` so far, in send order. Unlike
+        a response, a request is known the moment it leaves, so it exists while a streamed reply
+        is still open."""
+        ...
+
 
 class Ui(Protocol):
     async def goto(self, url: str) -> None: ...
@@ -227,10 +233,17 @@ class _QueueLog:
         self._queues: defaultdict[str, asyncio.Queue[CapturedResponse]] = defaultdict(
             asyncio.Queue
         )
+        self._sent: defaultdict[str, list[str]] = defaultdict(list)
         self._closed = asyncio.Event()
 
     def put(self, response: CapturedResponse) -> None:
         self._queues[response.method].put_nowait(response)
+
+    def put_request(self, method: str, body: str) -> None:
+        self._sent[method].append(body)
+
+    def requests(self, method: str) -> list[str]:
+        return list(self._sent[method])
 
     def close(self) -> None:
         self._closed.set()
@@ -606,6 +619,15 @@ class PlaywrightUi:
                 log.put(CapturedResponse(method, response.status, text,
                                          response.request.post_data or ""))
 
+        def on_request(request: Any) -> None:
+            if marker in request.url:
+                try:
+                    body = request.post_data or ""
+                except Exception:  # noqa: BLE001 - a body that is not text; the check refuses
+                    body = ""
+                for method in _methods(request.url):
+                    log.put_request(method, body)
+
         def on_response(response: Any) -> None:
             if marker in response.url and response.request not in fetched:
                 task = asyncio.ensure_future(store(response))
@@ -617,11 +639,13 @@ class PlaywrightUi:
 
         if fetch_bodies:
             await self._page.route(matches, fetch)
+        self._page.on("request", on_request)
         self._page.on("response", on_response)
         self._page.on("close", on_close)
         try:
             yield log
         finally:
+            self._page.remove_listener("request", on_request)
             self._page.remove_listener("response", on_response)
             self._page.remove_listener("close", on_close)
             if fetch_bodies:

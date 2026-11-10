@@ -1280,6 +1280,55 @@ holds one song, so paging, other statuses and the model field are not seen live.
   and the full body under "Body". The fixed generate path (`ogiZ0b` into the body slot) has not
   run live yet.
 
+### Flow quote that never arrived: an open StreamChat reply (2026-11-11, no credits spent)
+
+- **Report.** Profile `second`, `flow video -m omni-1.2-flash --duration 6 --count 1 --aspect
+  16:9 --max-credits 18` with two ingredients. It worked at 01:45; from about 04:00 every run (4)
+  failed with `TIMEOUT`: "Flow's agent had not finished replying when aistudio stopped
+  waiting: Generating the Video arrow_forward_ios I'll generate 1 6-second video using Omni 1.2
+  Flash in 16:9 aspect ratio based on your prompt and attached reference images. Would you like
+  me to kick off this 1 video generation, costing 18 credits? check Approve check Always approve
+  in project close Reject". Nothing was approved, charged or made.
+- **What it shows.** The page had Flow's card, so Flow had asked. aistudio had read no StreamChat
+  reply (`answered` false), because it reads a reply only when its stream **ends**
+  (`route.fetch` then `response.text()`, or `response.text()` on the page's own response). So
+  the stream stayed open for the whole 90 s while the card waited for a click: Flow now seems to
+  hold the reply of a turn that asks for permission until the person answers (that fits the new
+  "Always approve in project" option, which suggests a permission model that lives inside the
+  turn). **Not confirmed live:** this is the reading that fits, not a trace. Not measured: whether
+  the answer to the card travels as a new StreamChat request (as before) or on the open stream,
+  and whether the page gets the open stream's chunks as they arrive or only when it ends.
+- **The card.** The text of the newest agent message now carries the tool chip ("Generating the
+  Video") and the card with icon names: "check Approve", "check Always approve in project",
+  "close Reject". "Always approve" became "Always approve in project". The options are still
+  looked up as `radio` named exactly "Approve" and "Reject" (an exact name never matches
+  "Always approve in project"); the 01:45 run approved through that lookup. aistudio never presses
+  "Always approve in project": it would approve every later request in the project with no quote.
+- **Fix.** When no structured request was read, `submit_for_quote` reads the quote from the page,
+  with these guards (`FlowPage._quote_on_page`):
+  - the StreamChat **request** of this run is known (requests are logged when they leave, so one
+    exists while the reply is open), and its body gives the attached media and characters, which
+    the same checks as for a stream quote compare;
+  - the chat holds more Approve options than before the message was sent, and exactly one is
+    enabled, the newest (what `approve_and_follow` needs);
+  - the newest `.agent-message-content` holds exactly one sentence of Flow's shape, "kick off
+    this N video|image generation(s), costing C credits", and the newest permission card shows
+    the same credits. The prompt box, the user's bubble and older messages are never read;
+  - the card must stay up for 8 s with no structured request read, because a reply that ends
+    normally brings the structured request first.
+
+  The result is the same `Quote`, so kind, count, model, length, `--max-credits` and the cost
+  re-read just before Approve all still run. The result gets `"quote_source": "page"` and a
+  warning. A structured request, when one arrives, always wins.
+- **Following the job does not use the stream.** After Approve, `_follow` polls `jwpduf`,
+  `as29s` and `bOKtO` (batchexecute calls that end at once) and the chat's "Failed" cards; it
+  never waits for a StreamChat body. `reject()` waits up to 60 s per Reject for the chat reply
+  and goes on when it does not end.
+- **Still to check live.** That a StreamChat request body is readable from the page's request
+  event (without it, a run with ingredients stops with a media mismatch, safely), that the
+  Approve option is still a `radio` in this card, and whether the page shows the card while
+  aistudio's `route.fetch` is still waiting for the stream to end.
+
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 
 Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard

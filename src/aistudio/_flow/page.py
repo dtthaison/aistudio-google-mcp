@@ -78,6 +78,10 @@ PROMPT_EDITOR = "flow-rich-text-editor.prompt-input .ProseMirror"
 AGENT_MESSAGE = ".agent-message-content"
 PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission request
 _SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
+# Flow's own question in the permission card (live 2026-11-11: "Would you like me to kick off
+# this 1 video generation, costing 18 credits?"). The only sentence a page-read quote is taken from.
+_ASKED = re.compile(r"kick off this (\d+) (video|image) generations?, costing ([\d,]+) credits?\b")
+PAGE_QUOTE_GRACE_S = 8.0  # the card must stay up this long with no structured request read
 TITLE = "Editable text"
 TUNE = "Settings"
 # Live 2026-11-02: the top bar gained its own "Settings" (tooltip "View settings": grid size,
@@ -210,6 +214,9 @@ class AgentTurn:
     generating: bool = False  # a free generation was still running when the wait ended
     answered: bool = True  # a StreamChat reply ended; False: the stream was still open
     lost: bool = False  # a reply ended but its body never reached aistudio (Chrome dropped it)
+    # "stream": Flow's structured request; "page": no reply was read, so the quote is Flow's own
+    # question in the permission card (findings, "a StreamChat stream that stays open")
+    quote_source: str = "stream"
 
 
 @dataclass(frozen=True)
@@ -351,8 +358,10 @@ class FlowPage:
                                expect_generation: bool = False) -> AgentTurn:
         """Send the instruction and read Flow's structured permission request for it.
 
-        The quote comes from the StreamChat response to this message, never from page text, so
-        an echoed prompt or an older message cannot fake a price.
+        The quote comes from the StreamChat response to this message. Page text is a fallback
+        for one case only: no reply was read (Flow can keep the stream open while its permission
+        card waits for a click, live 2026-11-11) and Flow's own card is up; see ``_quote_on_page``
+        for the guards that keep an echoed prompt or an older message from faking a price.
 
         ``expect_generation``: the model generates without asking (free images), so a reply
         without a quote is no answer yet. The agent can end one reply with "I will generate…"
@@ -362,13 +371,23 @@ class FlowPage:
         async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
+            before = await self._approve_options()  # requests already in the chat
             await self._ui.key("Enter")
             deadline = self._now() + timeout_s
             seen: list[object] = []
             answered = lost = False
+            card_since: float | None = None  # when the page's card first showed a quote
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
                 if response is None:
+                    # Nothing was read: the stream may still be open. A structured request would
+                    # end it, so the card must stay up for a grace period before it is trusted.
+                    if await self._quote_on_page(log, before) is None:
+                        card_since = None
+                        continue
+                    card_since = self._now() if card_since is None else card_since
+                    if self._now() - card_since >= PAGE_QUOTE_GRACE_S:
+                        break
                     continue
                 answered = True
                 if response.status >= 400:
@@ -392,9 +411,58 @@ class FlowPage:
                     deadline = min(deadline, self._now() + REPLY_GRACE_S)
         # A reply is captured only when its stream ends (live: ~47 s for free images): an open
         # stream at the deadline may still be generating, so it is never "nothing was spent"
+        on_page = await self._quote_on_page(log, before)
+        if on_page is not None:  # no structured request was read, but Flow's own card is up
+            return on_page
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                          generating=agent_pending(seen) or not answered or expect_generation,
                          answered=answered, lost=lost)
+
+    async def _approve_options(self) -> int | None:
+        """How many Approve options the chat holds (answered requests keep theirs, disabled);
+        None when the page cannot be read."""
+        try:
+            return len(await self._ui.enabled("radio", "Approve"))
+        except BrowserError:
+            return None
+
+    async def _quote_on_page(self, log: ResponseLog, before: int | None) -> AgentTurn | None:
+        """Flow's request as the permission card shows it, for when no reply could be read.
+
+        Live (2026-11-11) Flow left the StreamChat reply open while its card waited, so no body
+        ever completed. The price is then Flow's own question in its newest agent message, and
+        only when every guard holds, so the prompt (or an older message) cannot fake it:
+
+        - a chat message was sent in this run (``log``), and its body names the attachments;
+        - the chat holds more Approve options than before the message (``before``), so the card
+          is new, not a request left waiting by an earlier run;
+        - exactly one Approve option is enabled, on the newest request (what
+          ``approve_and_follow`` needs, and the card is up);
+        - the newest agent message holds one question of Flow's exact shape, and the newest
+          permission card shows the same credits;
+        - the caller still runs every check on the Quote (kind, count, plan, ``--max-credits``),
+          and ``approve_and_follow`` reads the card's cost again before it presses Approve.
+        """
+        sent = log.requests(CHAT_METHOD)
+        if not sent or before is None:
+            return None
+        try:
+            flags = await self._ui.enabled("radio", "Approve")
+            if len(flags) <= before or [i for i, ok in enumerate(flags) if ok] != [len(flags) - 1]:
+                return None
+            message = await self._ui.text_of(AGENT_MESSAGE)
+            card = _SHOWN_COST.search(await self._ui.text_of(PERMISSION_LAST))
+        except BrowserError:  # a page that cannot be read now is no quote; never a new failure
+            return None
+        asked = {m.groups() for m in _ASKED.finditer(message)}
+        if len(asked) != 1 or card is None:
+            return None
+        count, kind, credits = next(iter(asked))
+        if int(credits.replace(",", "")) != int(card.group(1).replace(",", "")):
+            return None
+        return AgentTurn(message, Quote(int(count), kind, int(credits.replace(",", ""))),
+                         tuple(sent_characters(sent[-1])), tuple(sent_media(sent[-1])),
+                         quote_source="page")
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an

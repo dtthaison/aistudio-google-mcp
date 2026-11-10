@@ -68,6 +68,11 @@ DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
 QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
+# Said when the quote was read from Flow's permission card, not from its structured request
+# (findings, "a StreamChat stream that stays open"): the same checks ran on it.
+PAGE_QUOTE_NOTE = ("no structured reply from Flow was read (its stream stayed open), so the "
+                   "price was read from its permission card on the page; its count, kind and "
+                   "cost were checked the same way")
 # A free image run: the reply carrying the generation ends only once the image is made; with a
 # character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
 FREE_REPLY_TIMEOUT_S = 240.0
@@ -166,6 +171,7 @@ async def flow_generate(
         uploads: list[dict[str, str]] = []
         attached_ids: list[str] = []  # in attach order: frames are named "in order"
         quoted: dict[str, Any] | None = None  # built here, returned after the restore
+        source: dict[str, str] = {}  # "quote_source": "page" when the quote came from the page
         failure: AIStudioError | None = None
         try:
             if wanted != previous:
@@ -278,6 +284,9 @@ async def flow_generate(
                                         "Flow, then re-run", waiting))
                 expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
                                 duration)
+                if turn.quote_source == "page":  # same checks below; only the source differs
+                    source = {"quote_source": "page"}
+                    warnings.append(PAGE_QUOTE_NOTE)
                 decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
                 if decision is Decision.QUOTE_ONLY:
                     # Declined in Flow too: a waiting request could later be approved there with
@@ -292,7 +301,7 @@ async def flow_generate(
                     warnings += wrong
                     quoted = {"status": "quoted", "declined": declined,
                               "credits": turn.quote.credits, "count": turn.quote.count,
-                              "plan": turn.text, "project": project_id,
+                              "plan": turn.text, "project": project_id, **source,
                               **({"uploads": uploads} if uploads else {})}
                 elif decision is Decision.REJECT_MISMATCH:
                     waiting = await _reject_noting(page)
@@ -373,7 +382,7 @@ async def flow_generate(
                                 f"Flow before re-running")
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": spent, "credits_left": after,
-                **({"warnings": warnings} if warnings else {})}
+                **source, **({"warnings": warnings} if warnings else {})}
     expected_id = flow_model.id if flow_model else label_to_id(wanted.model)
     made = {MODEL_KEYS[m.model_key] for m in outcome.media if m.model_key in MODEL_KEYS}
     warnings += [f"Flow made the {kind} with {got}, not {expected_id}"
@@ -388,7 +397,7 @@ async def flow_generate(
     warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": turn.quote.credits,
             "credits_left": outcome.credits_left,
-            "model": expected_id, "project": project_id,
+            "model": expected_id, "project": project_id, **source,
             **({"warnings": warnings} if warnings else {})}
 
 
