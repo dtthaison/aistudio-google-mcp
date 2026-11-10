@@ -1301,9 +1301,13 @@ holds one song, so paging, other statuses and the model field are not seen live.
 - **The card.** The text of the newest agent message now carries the tool chip ("Generating the
   Video") and the card with icon names: "check Approve", "check Always approve in project",
   "close Reject". "Always approve" became "Always approve in project". The options are still
-  looked up as `radio` named exactly "Approve" and "Reject" (an exact name never matches
-  "Always approve in project"); the 01:45 run approved through that lookup. aistudio never presses
-  "Always approve in project": it would approve every later request in the project with no quote.
+  looked up as `radio` named "Approve" and "Reject" (the 01:45 run approved through an exact
+  lookup). Other Flow controls carry their icon's name in their accessible name (see "Create
+  body"), so since this card shows icon names the lookup also takes one lower-case icon word
+  before the label (`^(?:[a-z_]+\s+)?Approve$`); "Always approve in project" never matches. If an
+  exact "Reject" had stopped matching, `reject()` would have pressed nothing and left the card
+  waiting. aistudio never presses "Always approve in project": it would approve every later
+  request in the project with no quote.
 - **Fix.** When no structured request was read, `submit_for_quote` reads the quote from the page,
   with these guards (`FlowPage._quote_on_page`):
   - the StreamChat **request** of this run is known (requests are logged when they leave, so one
@@ -1324,6 +1328,13 @@ holds one song, so paging, other statuses and the model field are not seen live.
   `as29s` and `bOKtO` (batchexecute calls that end at once) and the chat's "Failed" cards; it
   never waits for a StreamChat body. `reject()` waits up to 60 s per Reject for the chat reply
   and goes on when it does not end.
+- **First live check of this fix failed (quote-only run, no credits).** The fallback did not
+  trigger: same "had not finished replying" with the card text (this time starting "I will
+  generate 1 6-second video…"). The cause was not visible from the code, so `aistudio -vv` now
+  logs every guard with what it saw (`aistudio._flow.page`), and every StreamChat request,
+  route fetch, response event, other POST and websocket during the wait (`aistudio._browser.ui`).
+  Suspects, in order: the Approve radio's name (icon word, role), no StreamChat request seen
+  (endpoint or transport moved), the card text not in `flow-permission-message`.
 - **Still to check live.** That a StreamChat request body is readable from the page's request
   event (without it, a run with ingredients stops with a media mismatch, safely), that the
   Approve option is still a `radio` in this card, and whether the page shows the card while

@@ -82,6 +82,11 @@ async def test_responses_are_logged_per_method_until_the_block_ends():
     assert page.handlers == {"request": [], "response": [], "close": []}
 
 
+def request(url, post_data, method="POST"):
+    return type("Req", (), {"url": url, "post_data": post_data, "method": method,
+                            "resource_type": "fetch", "post_data_buffer": b"xy"})()
+
+
 async def test_requests_are_logged_when_they_leave_not_when_the_reply_ends():
     # Flow can keep a StreamChat reply open while its permission card waits (live, 2026-11-11):
     # the request body is known at once, the response never completes
@@ -89,9 +94,9 @@ async def test_requests_are_logged_when_they_leave_not_when_the_reply_ends():
     base = "https://flow.google.com/x/FlowCreationAgentService/"
     async with PlaywrightUi(page).responses(marker="StreamChat") as log:
         for handler in page.handlers["request"]:
-            handler(type("Req", (), {"url": base + "StreamChat", "post_data": "f.req=[1]"})())
-            handler(type("Req", (), {"url": base + "Other", "post_data": "no"})())
-            handler(type("Req", (), {"url": base + "StreamChat", "post_data": None})())
+            handler(request(base + "StreamChat", "f.req=[1]"))
+            handler(request(base + "Other", "no"))
+            handler(request(base + "StreamChat", None))
         assert log.requests("StreamChat") == ["f.req=[1]", ""]
         assert log.requests("Other") == []
         assert await log.next("StreamChat", timeout_s=0.05) is None
@@ -431,3 +436,47 @@ def test_a_closed_window_is_its_own_browser_error():
     error = _window_closed()
     assert isinstance(error, WindowClosedError) and isinstance(error, BrowserError)
     assert error.code == "BROWSER_ERROR"
+
+
+class ChatPage(Page):
+    """A page that can route, for responses(fetch_bodies=True)."""
+
+    def __init__(self):
+        super().__init__()
+        self.routes = []
+
+    async def route(self, matches, handler):
+        self.routes.append(handler)
+
+    async def unroute(self, matches, handler):
+        self.routes.remove(handler)
+
+
+async def test_the_chat_window_logs_every_post_and_websocket_at_debug(caplog):
+    # Flow's chat endpoint may move: -vv must show what the page sent while aistudio waited
+    import logging
+
+    page = ChatPage()
+    chat = "https://flow.google.com/x/FlowCreationAgentService/StreamChat?token=SECRET"
+    other = "https://flow.google.com/x/FlowCreationAgentService/StreamChatV2?token=SECRET"
+    rpc = "https://flow.google.com/_/App/data/batchexecute?rpcids=jwpduf&at=SECRET"
+    with caplog.at_level(logging.DEBUG, logger="aistudio._browser.ui"):
+        async with PlaywrightUi(page).responses(marker="StreamChat", fetch_bodies=True) as log:
+            assert len(page.routes) == 1 and "websocket" in page.handlers
+            for handler in page.handlers["request"]:
+                handler(request(chat, "f.req=1"))
+                handler(request(other + "", "xyz"))  # "StreamChat" in "StreamChatV2" matches too
+                handler(request(rpc, "f.req=2"))
+                handler(request("https://flow.google.com/static.js", None, method="GET"))
+            for handler in page.handlers["websocket"]:
+                handler(type("Socket", (), {"url": "wss://flow.google.com/live?token=SECRET"})())
+            assert log.requests("StreamChat") == ["f.req=1"]
+    assert page.handlers["websocket"] == [] and page.routes == []
+    text = caplog.text
+    assert ("request: POST flow.google.com/x/FlowCreationAgentService/StreamChat "
+            "(text=7 bytes=2)") in text
+    assert ("other request: POST fetch flow.google.com/_/App/data/batchexecute "
+            "rpcids=jwpduf") in text
+    assert "websocket opened: flow.google.com/live" in text
+    assert "static.js" not in text  # a GET is not a chat request
+    assert "SECRET" not in text  # never a query string or token

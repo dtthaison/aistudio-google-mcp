@@ -284,3 +284,91 @@ async def test_a_structured_quote_is_not_marked_as_a_page_quote(
     result = await run_generate(logged_in_profile, tmp_path, ui, max_credits=18)
     assert result["status"] == "done" and "quote_source" not in result
     assert PAGE_QUOTE_NOTE not in result.get("warnings", [])
+
+
+# The card's option names, and the -vv log a failed run needs.
+
+def test_the_option_names_take_an_icon_word_but_never_always_approve():
+    # Live 2026-11-11: the card's text reads "check Approve check Always approve in project close
+    # Reject"; an icon's name can come first in a control's accessible name.
+    from aistudio._flow.page import APPROVE, REJECT
+
+    for name in ("Approve", "check Approve"):
+        assert APPROVE.search(name)
+    for name in ("Always approve in project", "check Always approve in project", "Always approve",
+                 "Approve all", "check_circle Always approve", "Reject", "check approve"):
+        assert not APPROVE.search(name)
+    for name in ("Reject", "close Reject"):
+        assert REJECT.search(name)
+    for name in ("Approve", "close Reject all", "Rejected"):
+        assert not REJECT.search(name)
+
+
+async def test_a_page_quote_run_logs_each_guard_with_what_it_saw(fake_ui, caplog):
+    import logging
+
+    ui = page_ui(fake_ui, labels={("radio", "approve|reject"): [["check Approve", "close Reject"]]})
+    with caplog.at_level(logging.DEBUG, logger="aistudio._flow.page"):
+        await quote_of(ui)
+    text = caplog.text
+    assert "the chat held 0 Approve option(s) before the message" in text
+    assert "PASS chat request sent in this run: 1 StreamChat request(s) seen" in text
+    assert "PASS a new Approve option showed: before=0, now=1" in text
+    assert "PASS exactly one Approve option enabled, the newest: enabled at [0] of 1" in text
+    assert "PASS one question of Flow's shape in the newest agent message" in text
+    assert "found [('1', 'video', '18')]" in text
+    assert "PASS the permission card shows the same credits: " in text and "read 18" in text
+    assert "QUOTE TAKEN" in text and "page quote: using Quote(count=1, kind='video'" in text
+    assert "option labels the page shows: ['check Approve', 'close Reject']" in text
+
+
+async def test_a_failed_guard_is_named_with_the_value_that_failed_it(fake_ui, caplog):
+    import logging
+
+    # no StreamChat request seen (an endpoint that moved), and a message with no question
+    ui = page_ui(fake_ui, "Generating the Video", "", sent=())
+    with caplog.at_level(logging.DEBUG, logger="aistudio._flow.page"):
+        await quote_of(ui, timeout_s=30)
+    text = caplog.text
+    assert "FAIL chat request sent in this run: 0 StreamChat request(s) seen" in text
+    assert "FAIL one question of Flow's shape in the newest agent message" in text
+    assert "found []" in text and "no quote" in text and "no quote: reply read=False" in text
+    assert text.count("page quote probe") == 1  # logged once, not once per poll
+    assert "PASS a new Approve option showed" in text  # every guard is read, not just the first
+
+
+async def test_a_page_that_cannot_be_read_is_logged_too(fake_ui, caplog):
+    import logging
+
+    from aistudio.exceptions import BrowserError
+
+    ui = page_ui(fake_ui)
+
+    async def broken(role, name):
+        raise BrowserError("the page did not show what aistudio expected in time")
+
+    ui.enabled = broken
+    with caplog.at_level(logging.DEBUG, logger="aistudio._flow.page"):
+        await quote_of(ui, timeout_s=30)
+    assert "could not count the Approve options before sending" in caplog.text
+    assert "FAIL page read" in caplog.text
+
+
+async def test_the_card_options_are_looked_up_by_the_tolerant_names(fake_ui):
+    # approve and reject use the same names as the quote probe, so an icon word cannot hide them
+    from aistudio._flow.page import APPROVE, REJECT
+
+    seen = []
+    ui = page_ui(fake_ui)
+    real = ui.enabled
+
+    async def spy(role, name):
+        seen.append((role, name))
+        return await real(role, name)
+
+    ui.enabled = spy
+    await quote_of(ui)
+    assert ("radio", APPROVE) in seen
+    seen.clear()
+    await FlowPage(ui, now=Clock()).reject()
+    assert ("radio", REJECT) in seen

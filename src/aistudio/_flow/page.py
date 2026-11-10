@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import logging
 import re
 import time
 import uuid
@@ -69,6 +70,9 @@ from aistudio.exceptions import (
     WindowClosedError,
 )
 
+_LOG = logging.getLogger(__name__)
+log_debug = _LOG.debug  # a local ``log`` (a ResponseLog) shadows the module's logger
+
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
 CREATE_TOOL_URL = "https://flow.google.com/project/{id}/create-tool"
@@ -78,6 +82,13 @@ PROMPT_EDITOR = "flow-rich-text-editor.prompt-input .ProseMirror"
 AGENT_MESSAGE = ".agent-message-content"
 PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission request
 _SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
+# The card's options by their accessible names. Flow's card page text now reads "check Approve
+# check Always approve in project close Reject" (live 2026-11-11): the icon's name can come
+# before the label (other Flow controls do, see CREATE_BODY), so an exact "Approve" may no longer
+# match. One lower-case icon word may precede the label; "Always approve in project" never
+# matches either name.
+APPROVE = re.compile(r"^(?:[a-z_]+\s+)?Approve$")
+REJECT = re.compile(r"^(?:[a-z_]+\s+)?Reject$")
 # Flow's own question in the permission card (live 2026-11-11: "Would you like me to kick off
 # this 1 video generation, costing 18 credits?"). The only sentence a page-read quote is taken from.
 _ASKED = re.compile(r"kick off this (\d+) (video|image) generations?, costing ([\d,]+) credits?\b")
@@ -263,6 +274,11 @@ def timecode_frame(text: str) -> int | None:
     return (minutes * 60 + seconds) * FPS + frames
 
 
+def _credits(text: str) -> int:
+    """'1,200' -> 1200."""
+    return int(text.replace(",", ""))
+
+
 def _label(text: str) -> str:
     """'🍌 Nano Banana 2.1 arrow_drop_down' -> 'Nano Banana 2.1'."""
     label = " ".join(w for w in text.split() if w != "arrow_drop_down")
@@ -278,6 +294,7 @@ class FlowPage:
         self._now = now
         self._clock = clock  # wall clock, compared with Flow's job creation times
         self._poll_s = poll_s
+        self._last_probe: list[str] | None = None  # the card probe last logged (-vv)
         self.paid_media: list[str] = []  # media ids of the approved job, as soon as seen
         self.started = False  # Start was pressed: from here on, failures may have spent
 
@@ -372,7 +389,9 @@ class FlowPage:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
             before = await self._approve_options()  # requests already in the chat
+            self._last_probe = None
             await self._ui.key("Enter")
+            log_debug("sent the message; waiting up to %.0f s for Flow's reply", timeout_s)
             deadline = self._now() + timeout_s
             seen: list[object] = []
             answered = lost = False
@@ -387,9 +406,13 @@ class FlowPage:
                         continue
                     card_since = self._now() if card_since is None else card_since
                     if self._now() - card_since >= PAGE_QUOTE_GRACE_S:
+                        log_debug("page quote: the card stayed up %.0f s with no reply read",
+                                  PAGE_QUOTE_GRACE_S)
                         break
                     continue
                 answered = True
+                log_debug("StreamChat reply read: status %s, %d chars", response.status,
+                          len(response.text))
                 if response.status >= 400:
                     continue
                 lost = lost or not response.text  # live: Chrome can drop a reply body
@@ -413,7 +436,10 @@ class FlowPage:
         # stream at the deadline may still be generating, so it is never "nothing was spent"
         on_page = await self._quote_on_page(log, before)
         if on_page is not None:  # no structured request was read, but Flow's own card is up
+            log_debug("page quote: using %s", on_page.quote)
             return on_page
+        log_debug("no quote: reply read=%s, lost=%s, generated=%s", answered, lost,
+                  bool(agent_generated(seen)))
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                          generating=agent_pending(seen) or not answered or expect_generation,
                          answered=answered, lost=lost)
@@ -422,9 +448,12 @@ class FlowPage:
         """How many Approve options the chat holds (answered requests keep theirs, disabled);
         None when the page cannot be read."""
         try:
-            return len(await self._ui.enabled("radio", "Approve"))
-        except BrowserError:
+            count = len(await self._ui.enabled("radio", APPROVE))
+        except BrowserError as exc:
+            log_debug("page quote: could not count the Approve options before sending: %s", exc)
             return None
+        log_debug("page quote: the chat held %d Approve option(s) before the message", count)
+        return count
 
     async def _quote_on_page(self, log: ResponseLog, before: int | None) -> AgentTurn | None:
         """Flow's request as the permission card shows it, for when no reply could be read.
@@ -442,27 +471,71 @@ class FlowPage:
           permission card shows the same credits;
         - the caller still runs every check on the Quote (kind, count, plan, ``--max-credits``),
           and ``approve_and_follow`` reads the card's cost again before it presses Approve.
+
+        Every guard is read before any is judged, and each is logged (``-vv``) when what was
+        seen changes, so a run that fell short says which guard and what it saw.
         """
         sent = log.requests(CHAT_METHOD)
-        if not sent or before is None:
-            return None
+        seen: list[str] = []  # one line per guard: PASS or FAIL, and what was observed
+        flags: list[bool] = []
+        message = card_text = ""
         try:
-            flags = await self._ui.enabled("radio", "Approve")
-            if len(flags) <= before or [i for i, ok in enumerate(flags) if ok] != [len(flags) - 1]:
-                return None
+            flags = await self._ui.enabled("radio", APPROVE)
             message = await self._ui.text_of(AGENT_MESSAGE)
-            card = _SHOWN_COST.search(await self._ui.text_of(PERMISSION_LAST))
-        except BrowserError:  # a page that cannot be read now is no quote; never a new failure
-            return None
+            card_text = await self._ui.text_of(PERMISSION_LAST)
+        except BrowserError as exc:  # a page that cannot be read now is no quote
+            seen.append(f"FAIL page read: {exc}")
+        waiting = [i for i, ok in enumerate(flags) if ok]
         asked = {m.groups() for m in _ASKED.finditer(message)}
-        if len(asked) != 1 or card is None:
+        shown = _SHOWN_COST.search(card_text)
+        sizes = [len(body) for body in sent]
+        seen.append(f"{'PASS' if sent else 'FAIL'} chat request sent in this run: "
+                    f"{len(sent)} StreamChat request(s) seen, body lengths {sizes}")
+        fresh = before is not None and len(flags) > before
+        seen.append(f"{'PASS' if fresh else 'FAIL'} a new Approve option showed: before="
+                    f"{before}, now={len(flags)}")
+        only = waiting == [len(flags) - 1]
+        seen.append(f"{'PASS' if only else 'FAIL'} exactly one Approve option enabled, the "
+                    f"newest: enabled at {waiting} of {len(flags)}")
+        seen.append(f"{'PASS' if len(asked) == 1 else 'FAIL'} one question of Flow's shape in "
+                    f"the newest agent message: {len(message)} chars, found {sorted(asked)}, "
+                    f"tail {message[-160:]!r}")
+        agree = (len(asked) == 1 and shown is not None
+                 and _credits(next(iter(asked))[2]) == _credits(shown.group(1)))
+        seen.append(f"{'PASS' if agree else 'FAIL'} the permission card shows the same credits: "
+                    f"{len(card_text)} chars, read {shown.group(1) if shown else None}, "
+                    f"tail {card_text[-120:]!r}")
+        verdict = bool(sent) and fresh and only and agree
+        await self._debug_card(seen, verdict)
+        if not verdict:
             return None
         count, kind, credits = next(iter(asked))
-        if int(credits.replace(",", "")) != int(card.group(1).replace(",", "")):
-            return None
-        return AgentTurn(message, Quote(int(count), kind, int(credits.replace(",", ""))),
+        return AgentTurn(message, Quote(int(count), kind, _credits(credits)),
                          tuple(sent_characters(sent[-1])), tuple(sent_media(sent[-1])),
                          quote_source="page")
+
+    async def _debug_card(self, seen: list[str], verdict: bool) -> None:
+        """Log what the card probe saw, once per change, with a look at the option controls'
+        roles and names (the cause if Approve is not found by its label)."""
+        if not _LOG.isEnabledFor(logging.DEBUG):
+            return
+        probe = [*seen, str(verdict)]
+        if probe == self._last_probe:
+            return
+        self._last_probe = probe
+        try:
+            roles = {
+                f"{role} {word}": await self._ui.enabled(role, re.compile(word, re.I))
+                for role in ("radio", "button") for word in ("approve", "reject")}
+            names = await self._ui.labels("radio", re.compile("approve|reject", re.I))
+            names += await self._ui.labels("button", re.compile("approve|reject", re.I))
+        except BrowserError as exc:
+            roles, names = {}, [f"unreadable: {exc}"]
+        log_debug("page quote probe (%s)", "QUOTE TAKEN" if verdict else "no quote")
+        for line in seen:  # one record per line, so each carries the logger's name
+            log_debug("page quote: %s", line)
+        log_debug("page quote: options by role, enabled flags: %s", roles)
+        log_debug("page quote: option labels the page shows: %s", names)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
@@ -483,7 +556,7 @@ class FlowPage:
         one (live). With ``expect`` (a quote was just read) the request may render a moment
         after the stream, so wait for it before concluding there is nothing to reject."""
         for _ in range(REJECT_WAIT_POLLS if expect else 0):
-            if any(await self._ui.enabled("radio", "Reject")):
+            if any(await self._ui.enabled("radio", REJECT)):
                 break
             await self._ui.pause(500)
         pressed = 0
@@ -491,11 +564,11 @@ class FlowPage:
         # left unfinished, Flow gave it as the answer to the next run's prompt (2026-11-02).
         async with self._ui.responses(marker=CHAT_RPC) as log:
             for _ in range(REJECT_ROUNDS):
-                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject"))
+                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", REJECT))
                            if ok]
                 if not waiting:
                     break
-                await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
+                await self._ui.activate("radio", REJECT, exact=True, nth=waiting[0])
                 await self._ui.pause(1000)
                 pressed += 1
             else:
@@ -509,7 +582,7 @@ class FlowPage:
                                  kind: str, known: set[str] | frozenset[str] = frozenset()
                                  ) -> FlowOutcome:
         """Approve the one waiting request, only if it shows the cost that was checked."""
-        flags = await self._ui.enabled("radio", "Approve")
+        flags = await self._ui.enabled("radio", APPROVE)
         waiting = [i for i, ok in enumerate(flags) if ok]
         # The quote just read must be the only request that can be approved, and the newest one:
         # its cost is read from the newest permission message below.
@@ -528,7 +601,7 @@ class FlowPage:
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True
-            await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
+            await self._ui.activate("radio", APPROVE, exact=True, nth=waiting[0])
             # ``known``: media that existed before the run, which a back-to-back run's clip
             # (inside the creation-time slack) would otherwise be taken for.
             return await self._follow(log, count, timeout_s, kind, since, exclude=known,
