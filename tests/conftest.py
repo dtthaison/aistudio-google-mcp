@@ -255,8 +255,9 @@ class FakeUi:
         self.ops.append(("dispatch_near", role, self._key(name), text))
 
     @contextlib.asynccontextmanager
-    async def responses(self, marker=None, *, fetch_bodies=False):
+    async def responses(self, marker=None, *, fetch_bodies=False, watch=()):
         self.fetch_bodies = fetch_bodies
+        self.watched = tuple(watch)
         yield self
 
     @contextlib.asynccontextmanager

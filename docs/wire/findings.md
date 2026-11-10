@@ -1280,7 +1280,7 @@ holds one song, so paging, other statuses and the model field are not seen live.
   and the full body under "Body". The fixed generate path (`ogiZ0b` into the body slot) has not
   run live yet.
 
-### Flow quote that never arrived: an open StreamChat reply (2026-11-11, no credits spent)
+### Flow's chat moved to a WebChannel; the quote is read from the page (2026-11-11, no credits spent)
 
 - **Report.** Profile `second`, `flow video -m omni-1.2-flash --duration 6 --count 1 --aspect
   16:9 --max-credits 18` with two ingredients. It worked at 01:45; from about 04:00 every run (4)
@@ -1289,56 +1289,63 @@ holds one song, so paging, other statuses and the model field are not seen live.
   Flash in 16:9 aspect ratio based on your prompt and attached reference images. Would you like
   me to kick off this 1 video generation, costing 18 credits? check Approve check Always approve
   in project close Reject". Nothing was approved, charged or made.
-- **What it shows.** The page had Flow's card, so Flow had asked. aistudio had read no StreamChat
-  reply (`answered` false), because it reads a reply only when its stream **ends**
-  (`route.fetch` then `response.text()`, or `response.text()` on the page's own response). So
-  the stream stayed open for the whole 90 s while the card waited for a click: Flow now seems to
-  hold the reply of a turn that asks for permission until the person answers (that fits the new
-  "Always approve in project" option, which suggests a permission model that lives inside the
-  turn). **Not confirmed live:** this is the reading that fits, not a trace. Not measured: whether
-  the answer to the card travels as a new StreamChat request (as before) or on the open stream,
-  and whether the page gets the open stream's chunks as they arrive or only when it ends.
-- **The card.** The text of the newest agent message now carries the tool chip ("Generating the
-  Video") and the card with icon names: "check Approve", "check Always approve in project",
-  "close Reject". "Always approve" became "Always approve in project". The options are still
-  looked up as `radio` named "Approve" and "Reject" (the 01:45 run approved through an exact
-  lookup). Other Flow controls carry their icon's name in their accessible name (see "Create
-  body"), so since this card shows icon names the lookup also takes one lower-case icon word
-  before the label (`^(?:[a-z_]+\s+)?Approve$`); "Always approve in project" never matches. If an
-  exact "Reject" had stopped matching, `reject()` would have pressed nothing and left the card
-  waiting. aistudio never presses "Always approve in project": it would approve every later
-  request in the project with no quote.
-- **Fix.** When no structured request was read, `submit_for_quote` reads the quote from the page,
-  with these guards (`FlowPage._quote_on_page`):
-  - the StreamChat **request** of this run is known (requests are logged when they leave, so one
-    exists while the reply is open), and its body gives the attached media and characters, which
-    the same checks as for a stream quote compare;
+- **Root cause (traced with `-vv`, free quote-only run, credits unchanged at 1014).** The chat
+  **moved to a Google WebChannel**: there is no `FlowCreationAgentService/StreamChat` request any
+  more. The page sends its messages as POSTs to
+  `aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/streamCreationAgentChat/channel`
+  (resource type `xhr`), first a 7-byte one (`count=0`, the opening) and then, right after the
+  message was sent, one of 4668 bytes that carries the prompt and the attachments. Flow's reply
+  comes down the same long-lived channel and never ends. aistudio waited for a StreamChat
+  response that no longer exists, so `answered` stayed false and the run said "had not finished
+  replying", while the page showed the card. (The earlier guess, a StreamChat reply held open
+  until the card is answered, was wrong; the page and its options were fine.)
+- **The channel's body.** The WebChannel form is `count=1&ofs=N&req0___data__=<url-encoded
+  JSON>`. The JSON's inner layout is **not confirmed** (it may be the old StreamChat message
+  `[session, [[[[prompt]]], media, None, characters], …]`, possibly inside a string). aistudio
+  reads it two ways: the old slots, and plain text, where each attached media and character id
+  must appear verbatim and in the order attached. An id not found is reported as not sent, so
+  the run is refused (`PLAN_MISMATCH`). With no attachments the body is not checked for extras.
+  The channel's reply is never routed or read: routing a never-ending reply would stall the page,
+  and the structured quote it carries cannot be read before the channel closes, so the page is
+  the way to read the quote.
+- **The card (all read from the page, live).** The newest agent message ends with the question
+  and the options; the permission card shows "check Approve", "check Always approve in project",
+  "close Reject". "Always approve" became "Always approve in project". The options are
+  `role=radio`, with accessible names "Approve", "Always approve in project" and "Reject" (read
+  with `-vv`): the exact lookup was right, and the lookup now also takes one lower-case icon word
+  before the label (`^(?:[a-z_]+\s+)?Approve$`) in case a name starts with its icon, as other
+  Flow controls do (see "Create body"). "Always approve in project" never matches. aistudio never
+  presses it: it would approve every later request in the project with no quote.
+- **Fix.** `submit_for_quote` reads the quote from the page when no structured reply was read,
+  with these guards (`FlowPage._quote_on_page`, each logged with `-vv`):
+  - a chat message was sent in this run: a StreamChat request (the old path) or a WebChannel
+    POST that carries a message (not the opening `count=0`). The page's requests are logged as
+    they leave, so this holds while the reply is open;
   - the chat holds more Approve options than before the message was sent, and exactly one is
     enabled, the newest (what `approve_and_follow` needs);
   - the newest `.agent-message-content` holds exactly one sentence of Flow's shape, "kick off
     this N video|image generation(s), costing C credits", and the newest permission card shows
     the same credits. The prompt box, the user's bubble and older messages are never read;
-  - the card must stay up for 8 s with no structured request read, because a reply that ends
-    normally brings the structured request first.
+  - the card must stay up for 8 s with no structured reply read, because a StreamChat reply that
+    ends normally brings the structured request first;
+  - the attached media and character ids are found in the chat request's body as above.
 
-  The result is the same `Quote`, so kind, count, model, length, `--max-credits` and the cost
-  re-read just before Approve all still run. The result gets `"quote_source": "page"` and a
-  warning. A structured request, when one arrives, always wins.
-- **Following the job does not use the stream.** After Approve, `_follow` polls `jwpduf`,
-  `as29s` and `bOKtO` (batchexecute calls that end at once) and the chat's "Failed" cards; it
-  never waits for a StreamChat body. `reject()` waits up to 60 s per Reject for the chat reply
-  and goes on when it does not end.
-- **First live check of this fix failed (quote-only run, no credits).** The fallback did not
-  trigger: same "had not finished replying" with the card text (this time starting "I will
-  generate 1 6-second video…"). The cause was not visible from the code, so `aistudio -vv` now
-  logs every guard with what it saw (`aistudio._flow.page`), and every StreamChat request,
-  route fetch, response event, other POST and websocket during the wait (`aistudio._browser.ui`).
-  Suspects, in order: the Approve radio's name (icon word, role), no StreamChat request seen
-  (endpoint or transport moved), the card text not in `flow-permission-message`.
-- **Still to check live.** That a StreamChat request body is readable from the page's request
-  event (without it, a run with ingredients stops with a media mismatch, safely), that the
-  Approve option is still a `radio` in this card, and whether the page shows the card while
-  aistudio's `route.fetch` is still waiting for the stream to end.
+  The result is the same `Quote`, so kind, count, model, length, `--max-credits`, the
+  attachments and the cost re-read just before Approve all still run. The result gets
+  `"quote_source": "page"` and a warning. A structured StreamChat reply, if one ever arrives,
+  wins.
+- **Following the job does not use the chat.** After Approve, `_follow` polls `jwpduf`, `as29s`
+  and `bOKtO` (batchexecute calls that end at once) and the chat's "Failed" cards. **Known cost:**
+  `reject()` still waits up to 60 s per Reject for a StreamChat reply, which cannot arrive on the
+  channel, so each rejected request adds up to a minute.
+- **What `-vv` shows** (loggers `aistudio._flow.page` and `aistudio._browser.ui`): every guard
+  with PASS or FAIL and what it saw, the option controls by role and label, every request of the
+  chat window (the channel's POSTs with their decoded, token-shortened bodies, every other POST
+  by host and path, websockets), route fetches and response events. No query string or token is
+  logged.
+- **Still to check live.** An approved run through the channel: that the verbatim ids check
+  passes with two ingredients (the first quote-only check had its other guards passing), and
+  that the follow finds the job as before.
 
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 

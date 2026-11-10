@@ -447,6 +447,7 @@ class ChatPage(Page):
 
     async def route(self, matches, handler):
         self.routes.append(handler)
+        self.matchers = [*getattr(self, "matchers", []), matches]
 
     async def unroute(self, matches, handler):
         self.routes.remove(handler)
@@ -480,3 +481,33 @@ async def test_the_chat_window_logs_every_post_and_websocket_at_debug(caplog):
     assert "websocket opened: flow.google.com/live" in text
     assert "static.js" not in text  # a GET is not a chat request
     assert "SECRET" not in text  # never a query string or token
+
+
+async def test_a_watched_channel_logs_its_requests_but_is_never_routed_or_read(caplog):
+    # Flow's chat moved to a WebChannel (2026-11-11): its reply is a long-lived stream, so routing
+    # it would stall the page; only the requests are logged, with their decoded bodies
+    import logging
+
+    page = ChatPage()
+    channel = ("https://aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/"
+               "streamCreationAgentChat/channel?VER=8&SID=SECRET&RID=1")
+    token = "A" * 300
+    body = "count=1&ofs=0&req0___data__=%5B%22hello%20world%22%2C%22" + token + "%22%5D"
+    with caplog.at_level(logging.DEBUG, logger="aistudio._browser.ui"):
+        async with PlaywrightUi(page).responses(
+                marker="FlowCreationAgentService/StreamChat", fetch_bodies=True,
+                watch=("flowCreationAgent/streamCreationAgentChat/channel",)) as log:
+            (matches,) = page.matchers
+            assert not matches(channel)  # never routed: the page keeps its own stream
+            for handler in page.handlers["request"]:
+                handler(request(channel, "count=0"))
+                handler(request(channel, body))
+            for handler in page.handlers["response"]:
+                handler(Response(channel, text="never read"))
+            assert log.requests("channel") == ["count=0", body]
+            assert await log.next("channel", timeout_s=0.05) is None  # no response is stored
+    text = caplog.text
+    assert "request: POST aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/" in text
+    assert 'body: count=1&ofs=0&req0___data__=["hello world","<300 chars>"]' in text
+    assert "response event: " in text and "(watched: its body is not read)" in text
+    assert "SECRET" not in text and token not in text

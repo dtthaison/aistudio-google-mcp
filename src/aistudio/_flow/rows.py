@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 from urllib.parse import parse_qs
@@ -333,8 +334,71 @@ def _sent_ids(body: str, slot: int) -> list[str]:
         message = json.loads(inner) if isinstance(inner, str) else None
     except ValueError:
         return []
+    return _ids_in(message, slot)
+
+
+def _ids_in(message: Any, slot: int) -> list[str]:
     return [c[0] for c in opt_index(message, 1, slot) or []
             if isinstance(c, list) and c and isinstance(c[0], str)]
+
+
+# Flow's chat moved to a Google WebChannel on 2026-11-11 (findings): the page POSTs
+# ``count=1&ofs=N&req0___data__=<url-encoded JSON>`` to .../streamCreationAgentChat/channel, after
+# an opening ``count=0``. The shape of that JSON is not confirmed, so it is read two ways: as the
+# old StreamChat message (``channel_ids``), and as plain text for ids that must appear verbatim.
+_CHANNEL_FIELD = re.compile(r"^req\d+_")
+
+
+def channel_values(body: str) -> list[str]:
+    """The url-decoded ``req<N>_…`` fields of a WebChannel POST: the messages it carries.
+    Empty for the opening ``count=0`` and for a body that is not form-encoded."""
+    fields = parse_qs(body, keep_blank_values=True)
+    return [value for key, values in fields.items() if _CHANNEL_FIELD.match(key)
+            for value in values]
+
+
+def channel_text(body: str) -> str | None:
+    """The messages of a WebChannel POST as one text, or None when it carries none."""
+    values = channel_values(body)
+    return "\n".join(values) if values else None
+
+
+def _json_layers(raw: str, depth: int = 0) -> list[Any]:
+    """A JSON text, and any JSON text held in it as a string (proto-JSON is often nested)."""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return []
+    out = [value]
+    if depth < 3:
+        inner = [value] if isinstance(value, str) else (
+            [v for v in value if isinstance(v, str)] if isinstance(value, list) else [])
+        for text in inner:
+            if text[:1] in ("[", "{", '"'):
+                out += _json_layers(text, depth + 1)
+    return out
+
+
+def channel_ids(body: str, slot: int) -> list[str]:
+    """Ids in slot ``slot`` of a channel message that has the old StreamChat shape
+    (``[session, [[[[prompt]]], media, None, [[character_id], …]], …]``); [] when none does."""
+    for raw in channel_values(body):
+        for message in _json_layers(raw):
+            found = _ids_in(message, slot)
+            if found:
+                return found
+    return []
+
+
+def appear_in_order(text: str, ids: Sequence[str]) -> bool:
+    """Every id appears in ``text`` verbatim, the first after nothing and each later one after the
+    one before it. An id with no characters of its own (an empty string) never counts."""
+    at = -1
+    for item in ids:
+        at = text.find(item, at + 1) if item else -1
+        if at < 0:
+            return False
+    return True
 
 
 def linked_image(payload: Any) -> str | None:

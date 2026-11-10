@@ -6,13 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
 ## Unreleased
 
 ### Fixed
-- `aistudio flow video|image` no longer times out with "Flow's agent had not finished replying"
-  when Flow keeps its reply open while its permission card waits (seen 2026-11-11). If no
-  structured request was read but Flow's own card is up, the price is read from the card's
+- `aistudio flow video|image` no longer times out with "Flow's agent had not finished replying".
+  Flow's chat moved to a Google WebChannel on 2026-11-11, so there was no reply to read. If no
+  structured reply was read but Flow's own card is up, the price is read from the card's
   question ("kick off this N video generations, costing C credits"), and every existing check
-  still runs: count, kind, model, `--max-credits`, attachments, and the cost shown again just
-  before Approve. The result then has `"quote_source": "page"` and a warning. aistudio presses
-  only Approve, never "Always approve in project".
+  still runs: count, kind, model, `--max-credits`, attachments (each ingredient must be in the
+  chat request), and the cost shown again just before Approve. The result then has
+  `"quote_source": "page"` and a warning. aistudio presses only Approve, never "Always approve in
+  project". `aistudio -vv` logs every guard and the chat window's network.
 
 ## 0.2.0 - 2026-11-07
 

@@ -15,7 +15,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,7 +35,10 @@ from aistudio._flow.rows import (
     ToolFile,
     agent_generated,
     agent_pending,
+    appear_in_order,
     body_request_target,
+    channel_ids,
+    channel_text,
     character_id,
     character_name,
     character_voice,
@@ -167,6 +170,11 @@ GROUP = {"image": 0, "video": 1}  # tune panel: the image group comes first
 FLOW_RPC = "batchexecute"
 CHAT_RPC = "FlowCreationAgentService/StreamChat"
 CHAT_METHOD = "StreamChat"
+# Since 2026-11-11 the page sends its chat messages to a Google WebChannel instead (findings):
+# POSTs to aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/
+# streamCreationAgentChat/channel, whose reply is a long-lived stream that is never routed.
+CHANNEL_RPC = "flowCreationAgent/streamCreationAgentChat/channel"
+CHANNEL_METHOD = "channel"
 ASKS_FIRST = re.compile(r"^Always\b.*ask for confirmation")  # "Confirm before generating"
 CREATED_SLACK_S = 120  # clock skew allowed when matching job records to this run
 REPLY_GRACE_S = 10.0  # after a reply without a permission request, wait this long for one
@@ -226,7 +234,7 @@ class AgentTurn:
     answered: bool = True  # a StreamChat reply ended; False: the stream was still open
     lost: bool = False  # a reply ended but its body never reached aistudio (Chrome dropped it)
     # "stream": Flow's structured request; "page": no reply was read, so the quote is Flow's own
-    # question in the permission card (findings, "a StreamChat stream that stays open")
+    # question in the permission card (findings, "Flow's chat moved to a WebChannel")
     quote_source: str = "stream"
 
 
@@ -272,6 +280,21 @@ def timecode_frame(text: str) -> int | None:
         return None
     minutes, seconds, frames = (int(g) for g in match.groups())
     return (minutes * 60 + seconds) * FPS + frames
+
+
+def _channel_attachments(body: str, slot: int, expected: Sequence[str]
+                         ) -> tuple[tuple[str, ...], str]:
+    """The ids a WebChannel body carries, as far as can be told (its shape is not confirmed):
+    ``expected`` when each appears verbatim in the message, in order; else what the old message
+    slots hold (usually nothing), so the caller's check sees a mismatch. Also says how."""
+    text = channel_text(body) or ""
+    slots = channel_ids(body, slot)
+    if appear_in_order(text, expected):
+        how = "none expected" if not expected else "each expected id appears verbatim, in order"
+        return tuple(expected), f"{how}; old slot {slot} read {slots}"
+    missing = [i for i in expected if i not in text]
+    return tuple(slots), (f"expected ids not found in order (missing {missing}); old slot "
+                          f"{slot} read {slots}")
 
 
 def _credits(text: str) -> int:
@@ -372,7 +395,9 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
 
     async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0,
-                               expect_generation: bool = False) -> AgentTurn:
+                               expect_generation: bool = False,
+                               attached: Sequence[str] = (),
+                               characters: Sequence[str] = ()) -> AgentTurn:
         """Send the instruction and read Flow's structured permission request for it.
 
         The quote comes from the StreamChat response to this message. Page text is a fallback
@@ -384,8 +409,12 @@ class FlowPage:
         without a quote is no answer yet. The agent can end one reply with "I will generate…"
         and send the generation in a later one, well after REPLY_GRACE_S (live, 2026-11-02):
         wait for it, and never call such a reply "nothing was made".
+
+        ``attached`` and ``characters``: the media and character ids attached to this message, in
+        order. A page-read quote verifies them in the chat request's body (``_quote_on_page``).
         """
-        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True) as log:
+        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True,
+                                      watch=(CHANNEL_RPC,)) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
             before = await self._approve_options()  # requests already in the chat
@@ -401,7 +430,7 @@ class FlowPage:
                 if response is None:
                     # Nothing was read: the stream may still be open. A structured request would
                     # end it, so the card must stay up for a grace period before it is trusted.
-                    if await self._quote_on_page(log, before) is None:
+                    if await self._quote_on_page(log, before, attached, characters) is None:
                         card_since = None
                         continue
                     card_since = self._now() if card_since is None else card_since
@@ -434,7 +463,7 @@ class FlowPage:
                     deadline = min(deadline, self._now() + REPLY_GRACE_S)
         # A reply is captured only when its stream ends (live: ~47 s for free images): an open
         # stream at the deadline may still be generating, so it is never "nothing was spent"
-        on_page = await self._quote_on_page(log, before)
+        on_page = await self._quote_on_page(log, before, attached, characters)
         if on_page is not None:  # no structured request was read, but Flow's own card is up
             log_debug("page quote: using %s", on_page.quote)
             return on_page
@@ -455,27 +484,40 @@ class FlowPage:
         log_debug("page quote: the chat held %d Approve option(s) before the message", count)
         return count
 
-    async def _quote_on_page(self, log: ResponseLog, before: int | None) -> AgentTurn | None:
+    async def _quote_on_page(self, log: ResponseLog, before: int | None,
+                             attached: Sequence[str] = (),
+                             characters: Sequence[str] = ()) -> AgentTurn | None:
         """Flow's request as the permission card shows it, for when no reply could be read.
 
-        Live (2026-11-11) Flow left the StreamChat reply open while its card waited, so no body
-        ever completed. The price is then Flow's own question in its newest agent message, and
-        only when every guard holds, so the prompt (or an older message) cannot fake it:
+        Live (2026-11-11) Flow's chat reply never ended while its card waited, so no body was
+        read; then the chat moved to a WebChannel (findings). The price is then Flow's own
+        question in its newest agent message, and only when every guard holds, so the prompt (or
+        an older message) cannot fake it:
 
-        - a chat message was sent in this run (``log``), and its body names the attachments;
+        - a chat message was sent in this run (``log``): a StreamChat request, or a WebChannel
+          POST that carries a message (the opening ``count=0`` does not);
         - the chat holds more Approve options than before the message (``before``), so the card
           is new, not a request left waiting by an earlier run;
         - exactly one Approve option is enabled, on the newest request (what
           ``approve_and_follow`` needs, and the card is up);
         - the newest agent message holds one question of Flow's exact shape, and the newest
           permission card shows the same credits;
-        - the caller still runs every check on the Quote (kind, count, plan, ``--max-credits``),
-          and ``approve_and_follow`` reads the card's cost again before it presses Approve.
+        - the caller still runs every check on the Quote (kind, count, plan, ``--max-credits``)
+          and on the attachments the turn reports, and ``approve_and_follow`` reads the card's
+          cost again before it presses Approve.
+
+        The attachments come from the request body. A StreamChat body is read by its slots. A
+        WebChannel body's shape is not confirmed, so ``attached`` and ``characters`` must each
+        appear in it verbatim and in order (or be read by the old slots, exactly); what was not
+        found is reported as sent, so the caller's check refuses it.
 
         Every guard is read before any is judged, and each is logged (``-vv``) when what was
         seen changes, so a run that fell short says which guard and what it saw.
         """
-        sent = log.requests(CHAT_METHOD)
+        stream_sent = log.requests(CHAT_METHOD)
+        channel_posts = log.requests(CHANNEL_METHOD)
+        channel_sent = [body for body in channel_posts if channel_text(body) is not None]
+        sent = channel_sent or stream_sent
         seen: list[str] = []  # one line per guard: PASS or FAIL, and what was observed
         flags: list[bool] = []
         message = card_text = ""
@@ -488,9 +530,10 @@ class FlowPage:
         waiting = [i for i, ok in enumerate(flags) if ok]
         asked = {m.groups() for m in _ASKED.finditer(message)}
         shown = _SHOWN_COST.search(card_text)
-        sizes = [len(body) for body in sent]
         seen.append(f"{'PASS' if sent else 'FAIL'} chat request sent in this run: "
-                    f"{len(sent)} StreamChat request(s) seen, body lengths {sizes}")
+                    f"{len(stream_sent)} StreamChat request(s), {len(channel_posts)} WebChannel "
+                    f"POST(s) of which {len(channel_sent)} carry a message, body lengths "
+                    f"{[len(body) for body in sent]}")
         fresh = before is not None and len(flags) > before
         seen.append(f"{'PASS' if fresh else 'FAIL'} a new Approve option showed: before="
                     f"{before}, now={len(flags)}")
@@ -506,13 +549,29 @@ class FlowPage:
                     f"{len(card_text)} chars, read {shown.group(1) if shown else None}, "
                     f"tail {card_text[-120:]!r}")
         verdict = bool(sent) and fresh and only and agree
+        media: tuple[str, ...] = ()
+        characters_sent: tuple[str, ...] = ()
+        if sent:
+            body = sent[-1]
+            if channel_sent:
+                media, how_media = _channel_attachments(body, 1, attached)
+                characters_sent, how_chars = _channel_attachments(body, 3, characters)
+                found = f"WebChannel body: media {how_media}; characters {how_chars}"
+            else:
+                media, characters_sent = tuple(sent_media(body)), tuple(sent_characters(body))
+                found = (f"StreamChat body slots: media {list(media)}, "
+                         f"characters {list(characters_sent)}")
+            right = (list(dict.fromkeys(media)) == list(dict.fromkeys(attached))
+                     and set(characters_sent) == set(characters))
+            seen.append(f"{'PASS' if right else 'FAIL'} the attachments are in the chat request "
+                        f"(the caller refuses a run if not): expected media {list(attached)}, "
+                        f"characters {list(characters)}; {found}")
         await self._debug_card(seen, verdict)
         if not verdict:
             return None
         count, kind, credits = next(iter(asked))
-        return AgentTurn(message, Quote(int(count), kind, _credits(credits)),
-                         tuple(sent_characters(sent[-1])), tuple(sent_media(sent[-1])),
-                         quote_source="page")
+        return AgentTurn(message, Quote(int(count), kind, _credits(credits)), characters_sent,
+                         media, quote_source="page")
 
     async def _debug_card(self, seen: list[str], verdict: bool) -> None:
         """Log what the card probe saw, once per change, with a look at the option controls'

@@ -74,7 +74,8 @@ class FakePage:
     async def new_session(self):
         self.calls.append(("session",))
 
-    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False):
+    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False,
+                               attached=(), characters=()):
         self.expect_generation, self.reply_timeout_s = expect_generation, timeout_s
         self.calls.append(("submit", text))
         return self.turn

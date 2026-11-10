@@ -160,8 +160,9 @@ quotes and write each `'` as `'\''`.
   `flow character body`, `OVER_BUDGET` is aistudio's own refusal before anything was sent.
   A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
   `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
-  `"quote_source": "page"` (with a warning) means Flow kept its reply open, so the price was read
-  from its permission card; the same checks and the `--max-credits` limit applied, and only
+  `"quote_source": "page"` (with a warning) means Flow's chat reply could not be read (its chat
+  moved to a WebChannel on 2026-11-11), so the price was read from its permission card; the same
+  checks, including the attached ingredients, and the `--max-credits` limit applied, and only
   Approve is ever pressed (never "Always approve in project"). Treat the quote as usual.
   `"status": "timeout"` means the job was approved: give the user `project_url`. Its
   `credits_spent` is measured (`credits_left` too); 0 with a warning means Flow has not charged:

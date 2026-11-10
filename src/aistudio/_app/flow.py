@@ -69,10 +69,10 @@ _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
                       r"[0-9a-f]{12})/?$")
 QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
 # Said when the quote was read from Flow's permission card, not from its structured request
-# (findings, "a StreamChat stream that stays open"): the same checks ran on it.
-PAGE_QUOTE_NOTE = ("no structured reply from Flow was read (its stream stayed open), so the "
-                   "price was read from its permission card on the page; its count, kind and "
-                   "cost were checked the same way")
+# (findings, "Flow's chat moved to a WebChannel"): the same checks ran on it.
+PAGE_QUOTE_NOTE = ("no structured reply from Flow was read (its chat is a WebChannel whose reply "
+                   "never ends), so the price was read from its permission card on the page; its "
+                   "count, kind, cost and attachments were checked the same way")
 # A free image run: the reply carrying the generation ends only once the image is made; with a
 # character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
 FREE_REPLY_TIMEOUT_S = 240.0
@@ -211,7 +211,8 @@ async def flow_generate(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect), expect_generation=kind == "image",  # images: free models only
-                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S)
+                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S,
+                attached=attached_ids, characters=[c.id for c in chosen])
             if (turn.quote is None and not turn.generated and turn.generating
                     and kind == "image"):
                 found = await _made_in_project(page, project_id, existing | set(attached_ids),

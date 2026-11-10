@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
 from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
@@ -101,7 +101,8 @@ class Ui(Protocol):
 
     async def pause(self, ms: int) -> None: ...
 
-    def responses(self, marker: str = ..., *, fetch_bodies: bool = False
+    def responses(self, marker: str = ..., *, fetch_bodies: bool = False,
+                  watch: tuple[str, ...] = ()
                   ) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
         ...
 
@@ -221,6 +222,20 @@ def _body_sizes(request: Any) -> str:
     except Exception:  # noqa: BLE001 - not every request has a buffer
         raw = -1
     return f"text={text} bytes={raw}"
+
+
+_LONG_TOKEN = re.compile(r"[A-Za-z0-9_\-+/=.]{100,}")
+
+
+def _body_snippet(request: Any, limit: int = 1500) -> str:
+    """A request body for the debug log: url-decoded, long tokens (reCAPTCHA, base64) replaced by
+    their length, cut at ``limit`` characters."""
+    try:
+        text = unquote_plus(request.post_data or "")
+    except Exception:  # noqa: BLE001 - a body that is not text
+        return "<not text>"
+    text = _LONG_TOKEN.sub(lambda m: f"<{len(m.group(0))} chars>", text)
+    return text if len(text) <= limit else text[:limit] + f"... <{len(text) - limit} more chars>"
 
 
 def _methods(url: str) -> list[str]:
@@ -604,11 +619,15 @@ class PlaywrightUi:
         await self._act(role, name, run)
 
     @contextlib.asynccontextmanager
-    async def responses(self, marker: str = RPC_MARKER, *,
-                        fetch_bodies: bool = False) -> AsyncIterator[ResponseLog]:
+    async def responses(self, marker: str = RPC_MARKER, *, fetch_bodies: bool = False,
+                        watch: tuple[str, ...] = ()) -> AsyncIterator[ResponseLog]:
         """Log replies whose URL holds ``marker``. With ``fetch_bodies`` aistudio fetches them
         itself and fulfils the page with the same response: Chrome can hand a streamed reply's
-        body over empty (live, 2026-11-02: 3 of 4 StreamChat replies), which loses a quote."""
+        body over empty (live, 2026-11-02: 3 of 4 StreamChat replies), which loses a quote.
+
+        ``watch``: more URL markers whose *requests* are logged (``log.requests``), never routed
+        or read: a long-lived channel's reply would never end, and routing it would stall the
+        page."""
         log = _QueueLog()
         pending: set[asyncio.Task[None]] = set()
         fetched: set[Any] = set()  # requests already logged from their own fetch
@@ -648,10 +667,13 @@ class PlaywrightUi:
                 log.put(CapturedResponse(method, response.status, text,
                                          response.request.post_data or ""))
 
+        def watched(url: str) -> bool:
+            return any(marker_ in url for marker_ in watch)
+
         def on_request(request: Any) -> None:
-            if marker in request.url:
-                log_debug("request: %s %s (%s)", request.method, _where(request.url),
-                          _body_sizes(request))
+            if marker in request.url or watched(request.url):
+                log_debug("request: %s %s (%s) body: %s", request.method, _where(request.url),
+                          _body_sizes(request), _body_snippet(request))
                 try:
                     body = request.post_data or ""
                 except Exception:  # noqa: BLE001 - a body that is not text; the check refuses
@@ -664,10 +686,11 @@ class PlaywrightUi:
                           _where(request.url), _body_sizes(request))
 
         def on_response(response: Any) -> None:
-            if marker in response.url:
+            if marker in response.url or watched(response.url):
                 log_debug("response event: %s, status %s%s", _where(response.url),
                           response.status,
                           " (already fetched by the route)" if response.request in fetched
+                          else " (watched: its body is not read)" if watched(response.url)
                           else "")
             if marker in response.url and response.request not in fetched:
                 task = asyncio.ensure_future(store(response))
@@ -680,7 +703,8 @@ class PlaywrightUi:
         def on_close(_page: Any) -> None:
             log.close()
 
-        log_debug("responses: logging %r, fetch_bodies=%s", marker, fetch_bodies)
+        log_debug("responses: logging %r, fetch_bodies=%s, watching requests of %s", marker,
+                  fetch_bodies, list(watch))
         if fetch_bodies:
             await self._page.route(matches, fetch)
             self._page.on("websocket", on_websocket)
