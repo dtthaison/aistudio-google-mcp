@@ -150,7 +150,7 @@ aistudio flow scene stitch <media-id> <media-id>@2-5 -o joined.mp4   # free; tri
 aistudio flow scene download <scene-id> -o scene.mp4
 aistudio flow storyboard scene.yaml                            # a whole scene from one file: plan + quotes, spends nothing
 aistudio flow storyboard scene.yaml --keyframes                # + the free keyframes, to review before paying
-aistudio flow storyboard scene.yaml --max-credits 40 -o scene.mp4   # make it; a re-run continues, never pays twice
+aistudio flow storyboard scene.yaml --max-credits 42 -o scene.mp4   # make it; a re-run continues, never pays twice
 aistudio flow frame save <media-id> -o last.jpg                 # free: the last frame, as a new image
 aistudio flow tool list --kind mine            # your Tools; also template, community
 aistudio flow tool get <id-prefix>             # its files, and whether its code can spend credits
@@ -221,12 +221,13 @@ clip before, `frame_at` seconds in) or `extend`; its `mode` is `start_frame` (th
 the frame, no character) or `ingredient` (the frame is a guide, with the character and its
 voice). The whole file is checked before anything runs, and every problem is listed at once:
 Flow cannot combine a start frame with a character, a clip with a character takes at most one
-ingredient, an extend shot carries only a prompt, stitch trims are whole seconds, character
+ingredient, an extend shot carries only a prompt and an optional `duration` (3 to 10 s,
+default 4; Omni Extend), stitch trims are whole seconds, character
 names are unique.
 
 | Command | What it does | Spends |
 |---|---|---|
-| `flow storyboard scene.yaml` | checks the file, asks Flow for one quote per model, length and aspect, prices extensions from aistudio's measured table (10 credits), prints the plan and one total | nothing, makes nothing |
+| `flow storyboard scene.yaml` | checks the file, asks Flow for one quote per model, length and aspect, prices extensions at Omni Extend's 3 credits a second (12 for the default 4 s), prints the plan and one total | nothing, makes nothing |
 | `... --keyframes` | the same, and makes the free assets: new characters, location plates and keyframes on Nano Banana 2.1 (0 credits, but they are generated in your Flow project), saved in `scene.assets/` | nothing |
 | `... --max-credits N -o scene.mp4` | refuses if the clips still to make are quoted above N; otherwise makes the missing assets, then the clips in order (each capped at its own quote), then joins them into `scene.mp4` | up to N |
 

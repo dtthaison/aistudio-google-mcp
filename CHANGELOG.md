@@ -14,6 +14,10 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
   `--max-credits` it sends nothing and prints the quote (`status: quoted`). The old path stays
   for a clip that still offers it. Before, every extend failed with "Flow offered no Extend for
   this clip". There is no "Jump to" in the clip or scene editor, so no `jump-to` command.
+- `aistudio flow storyboard` extends with Omni Extend too. An extend shot may set `duration`
+  (3 to 10 s, default 4) and is priced at 3 credits a second (12 for 4 s) instead of the old
+  10-credit Veo Lite price, so its `--max-credits` cap no longer falls below Flow's quote. Omni
+  clips can now be extended, and an extend shot's trim may run to its own length.
 
 ### Fixed
 - `aistudio flow video|image` no longer times out with "Flow's agent had not finished replying".

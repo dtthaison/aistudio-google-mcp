@@ -294,7 +294,7 @@ or `media`), and `shots` (`id`, `prompt`, `say`, `speaker`, `join: cut|frame|ext
 start_frame|ingredient`, `characters`, `location`, `keyframe` (text, or `{prompt, characters,
 location, ingredients, media}`), `frame_at`, `ingredients`, `model`, `duration`, `aspect`,
 `trim: [start, end]`). The whole file is checked first and every problem is listed (a start frame
-with a character, two ingredients with a character, an extend shot with anything but a prompt,
+with a character, two ingredients with a character, an extend shot with anything but a prompt and a 3–10 s `duration`,
 fractional trims, duplicate character names); relay them and fix the file, nothing ran.
 
 1. Run it with no flags: spends nothing, makes nothing. The result has `status: "quoted"`,
@@ -317,8 +317,8 @@ fractional trims, duplicate character names); relay them and fix the file, nothi
 
 Limits: no local image is uploaded from a storyboard (use media ids; `--i-have-rights` is never
 passed); new characters get no voice (`flow character voice` first); a start-frame clip takes no
-extra ingredients (not measured); an extension adds 7-8 s, is always Veo 3.1 Lite and takes no
-frames or characters; a clip's quote is checked again when it is made and a higher one is refused.
+extra ingredients (not measured); an extension is Omni Extend (Omni 1.2 Flash): it adds its `duration` (3–10 s,
+default 4) at 3 credits a second and takes no frames or characters; a clip's quote is checked again when it is made and a higher one is refused.
 The manual steps below are what it does.
 
 A **clip** is one generation (4–10 s, 8 s on Veo 3.1 Lite). A **scene** is Flow's timeline of

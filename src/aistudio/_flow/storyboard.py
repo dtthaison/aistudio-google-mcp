@@ -6,7 +6,7 @@ measured live (docs/wire/findings.md, SKILL.md "Making a Flow scene"):
 
 - Flow cannot combine a start frame with a character (its agent asks a question instead).
 - A character clip takes at most one ingredient (a character plus two failed, refunded).
-- ``flow extend`` takes only a prompt and always uses Veo 3.1 Lite.
+- ``flow extend`` takes a prompt and an optional 3–10 s length, and uses Omni 1.2 Flash.
 - Stitch trims are whole seconds.
 """
 
@@ -28,7 +28,10 @@ from aistudio.exceptions import ValidationError
 DEFAULT_MODEL = "veo-3.1-lite"
 DEFAULT_DURATION = 8
 DEFAULT_ASPECT = "16:9"
-EXTEND_TRIM_MAX = 7  # an extension adds 7-8 s (live); a trim past 7 could miss the clip's end
+EXTEND_MODEL = "omni-1.2-flash"
+DEFAULT_EXTEND_DURATION = 4  # Flow's default Extend length (4 s = 12 credits, live)
+EXTEND_DURATIONS = tuple(range(3, 11))  # Omni Extend slider: 3 to 10 whole seconds
+EXTEND_CREDITS_PER_S = 3  # 3 credits per second across 3..10 s (live, 2026-11-11)
 LONG_LINE_WORDS = 20  # SKILL.md: a spoken line under about 20 words fits an 8-second clip
 JOINS = ("cut", "extend", "frame")
 MODES = ("start_frame", "ingredient")
@@ -46,9 +49,9 @@ _LOCATION = {"name", "prompt", "media", "aspect"}
 _SHOT = {"id", "prompt", "say", "speaker", "join", "mode", "characters", "location",
          "ingredients", "keyframe", "frame_at", "model", "duration", "aspect", "trim"}
 _KEYFRAME = {"prompt", "media", "characters", "location", "ingredients"}
-# What an extend shot may not carry: Flow extends the clip as it is (flow extend takes a prompt)
+# What an extend shot may not carry: Flow extends the clip before as it is (prompt + 3..10 s)
 _EXTEND_REFUSES = ("mode", "characters", "location", "ingredients", "keyframe", "frame_at",
-                   "duration", "aspect")
+                   "aspect")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,7 +97,7 @@ class ShotSpec:
     keyframe: KeyframeSpec | None  # join "cut" only
     frame_at: float | None
     model: str
-    duration: int | None  # None for an extension (Flow decides, 7-8 s)
+    duration: int | None  # seconds (for an extension, 3-10 s, default 4)
     aspect: str
     trim: tuple[int, int] | None
 
@@ -506,21 +509,31 @@ class _Parser:
         for key in _EXTEND_REFUSES:
             if item.get(key) is not None:
                 self.bad(where, f"{key} cannot be set on an extend shot: Flow extends the clip "
-                                f"before as it is (flow extend takes only a prompt)")
+                                f"before as it is")
         if item.get("model") is not None and self.model(item["model"], f"{where} model") != (
-                DEFAULT_MODEL):
+                EXTEND_MODEL):
             self.bad(where, "model cannot be set on an extend shot: Flow always extends with "
-                            "Veo 3.1 Lite")
-        if previous is not None and not previous.model.startswith("veo"):
-            self.bad(where, f"cannot extend a {previous.model} clip: Flow extends Veo clips "
-                            f"(Veo 3.1 Lite measured); use join: cut or frame")
-        trim = self.trim(item.get("trim"), where, EXTEND_TRIM_MAX)
+                            "Omni 1.2 Flash")
+        shot_duration = self.extend_duration(item.get("duration"), f"{where} duration")
+        trim = self.trim(item.get("trim"), where, shot_duration)
         if say and len(say.split()) > LONG_LINE_WORDS:
             self.warnings.append(f"shot {sid}: the spoken line has {len(say.split())} words; "
                                  f"under about {LONG_LINE_WORDS} fits one clip")
         text = compose_clip_prompt(prompt or "", say, speaker, fixed)
-        return ShotSpec(sid, "extend", text, None, (), (), None, None, None, DEFAULT_MODEL, None,
-                        previous.aspect if previous else DEFAULT_ASPECT, trim)
+        return ShotSpec(sid, "extend", text, None, (), (), None, None, None, EXTEND_MODEL,
+                        shot_duration, previous.aspect if previous else DEFAULT_ASPECT, trim)
+
+    def extend_duration(self, value: Any, where: str) -> int | None:
+        if value is None:
+            return DEFAULT_EXTEND_DURATION
+        if isinstance(value, bool) or not isinstance(value, int):
+            self.bad(where, "duration must be a whole number of seconds")
+            return None
+        if value not in EXTEND_DURATIONS:
+            self.bad(where, f"extend duration must be {EXTEND_DURATIONS[0]} to "
+                            f"{EXTEND_DURATIONS[-1]} seconds, not {value}")
+            return None
+        return value
 
     def speaker(self, item: Mapping[str, Any], known: dict[str, str], where: str) -> str | None:
         value = self.text(item, "speaker", where)
