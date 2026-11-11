@@ -5,6 +5,30 @@ versions follow [Semantic Versioning](https://semver.org/) once the first releas
 
 ## Unreleased
 
+### Added
+- `aistudio flow extend` works with Flow's current Extend. Flow retired the old Veo Extend
+  ("Extend (Veo 3.1 - Lite)") and now extends a clip, Omni or Veo, with Omni 1.2 Flash from the
+  "+" at the clip's tail. Its box shows the length and "Generating will use N credits" before
+  Start. aistudio reads that quote from the page (`"quote_source": "page"`), sets the length
+  with the new `--duration 3..10`, and checks the quote against `--max-credits`. Without
+  `--max-credits` it sends nothing and prints the quote (`status: quoted`). The old path stays
+  for a clip that still offers it. Before, every extend failed with "Flow offered no Extend for
+  this clip". There is no "Jump to" in the clip or scene editor, so no `jump-to` command.
+- `aistudio flow storyboard` extends with Omni Extend too. An extend shot may set `duration`
+  (3 to 10 s, default 4) and is priced at 3 credits a second (12 for 4 s) instead of the old
+  10-credit Veo Lite price, so its `--max-credits` cap no longer falls below Flow's quote. Omni
+  clips can now be extended, and an extend shot's trim may run to its own length.
+
+### Fixed
+- `aistudio flow video|image` no longer times out with "Flow's agent had not finished replying".
+  Flow's chat moved to a Google WebChannel on 2026-11-11, so there was no reply to read. If no
+  structured reply was read but Flow's own card is up, the price is read from the card's
+  question ("kick off this N video generations, costing C credits"), and every existing check
+  still runs: count, kind, model, `--max-credits`, attachments (each ingredient must be in the
+  chat request), and the cost shown again just before Approve. The result then has
+  `"quote_source": "page"` and a warning. aistudio presses only Approve, never "Always approve in
+  project". `aistudio -vv` logs every guard and the chat window's network.
+
 ## 0.2.0 - 2026-11-07
 
 ### Added

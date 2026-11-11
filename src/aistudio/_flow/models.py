@@ -22,6 +22,7 @@ class FlowModel:
 
 MODELS = (
     FlowModel("omni-1.1-flash", "Omni 1.1 Flash", "video", (4, 6, 8, 10)),
+    FlowModel("omni-1.2-flash", "Omni 1.2 Flash", "video", (4, 6, 8, 10)),
     FlowModel("veo-3.1-lite", "Veo 3.1 - Lite", "video", (4, 6, 8)),
     FlowModel("veo-3.1-fast", "Veo 3.1 - Fast", "video", (4, 6, 8)),
     FlowModel("veo-3.1-quality", "Veo 3.1 - Quality", "video", (8,)),
@@ -31,7 +32,9 @@ MODELS = (
 
 
 # Flow's internal model keys seen in job records (findings), mapped to CLI ids.
-MODEL_KEYS = {"veo_3_1_t2v_lite": "veo-3.1-lite", "veo_3_1_extension_lite": "veo-3.1-lite"}
+MODEL_KEYS = {"veo_3_1_t2v_lite": "veo-3.1-lite", "veo_3_1_extension_lite": "veo-3.1-lite",
+              "macaron_cookie_r2v_8s": "omni-1.2-flash",
+              "macaron_cookie_r2v_10s": "omni-1.2-flash"}  # Omni 1.2 Flash, reference-to-video
 
 
 def model_by_label(label: str) -> FlowModel | None:

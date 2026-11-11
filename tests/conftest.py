@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
+from aistudio._flow.page import APPROVE, REJECT
 from aistudio._rpc import wire
 from aistudio.exceptions import BrowserError
 from aistudio.paths import get_profile
@@ -96,6 +97,9 @@ def make_client():
     return make
 
 
+CARD_OPTIONS = {APPROVE.pattern: "Approve", REJECT.pattern: "Reject"}
+
+
 class FakeUi:
     """Scripted stand-in for aistudio._browser.ui.Ui: records ops, replays responses per method.
 
@@ -134,7 +138,11 @@ class FakeUi:
 
     @staticmethod
     def _key(name):
-        return name.pattern if isinstance(name, re.Pattern) else name
+        """A name as tests script it: the card's options by their label ("Approve"), others by
+        their pattern."""
+        if isinstance(name, re.Pattern):
+            return CARD_OPTIONS.get(name.pattern, name.pattern)
+        return name
 
     @staticmethod
     def _answer(table, key, default):
@@ -247,8 +255,9 @@ class FakeUi:
         self.ops.append(("dispatch_near", role, self._key(name), text))
 
     @contextlib.asynccontextmanager
-    async def responses(self, marker=None, *, fetch_bodies=False):
+    async def responses(self, marker=None, *, fetch_bodies=False, watch=()):
         self.fetch_bodies = fetch_bodies
+        self.watched = tuple(watch)
         yield self
 
     @contextlib.asynccontextmanager
@@ -259,6 +268,10 @@ class FakeUi:
                    for body in getattr(self, "sent_bodies", {}).get(method, []) if not allow(body)]
         self.ops.append(("refuse_requests", tuple(methods)))
         yield refused
+
+    def requests(self, method):
+        """The bodies the page sent for ``method`` (``sent_bodies``, per method)."""
+        return list(getattr(self, "sent_bodies", {}).get(method, []))
 
     async def next(self, method, *, timeout_s):
         self.waits.append((method, timeout_s))

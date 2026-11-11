@@ -82,7 +82,8 @@ class FakePage(PlanBPage):
             return self.after
         return await super().contents(pid)
 
-    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False):
+    async def submit_for_quote(self, text, *, timeout_s=90.0, expect_generation=False,
+                               attached=(), characters=()):
         self.expect_generation = expect_generation
         self.calls.append(("submit", text))
         return AgentTurn("kick off this 1 video generation, costing 10 credits?",

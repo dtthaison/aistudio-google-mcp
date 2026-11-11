@@ -36,6 +36,11 @@ def test_check_options_rejects_what_flow_does_not_offer(kind, model, aspect, cou
         check_options(kind, find_model(model, kind) if model else None, aspect, count, duration)
 
 
+def test_omni_1_2_flash_is_a_video_model():
+    omni = find_model("omni-1.2-flash", "video")
+    assert (omni.label, omni.durations) == ("Omni 1.2 Flash", (4, 6, 8, 10))
+
+
 def test_check_options_accepts_valid_choices():
     check_options("video", LITE, "9:16", 4, 6)
     check_options("image", None, "3:4", 2, None)

@@ -3,7 +3,8 @@ import copy
 import pytest
 
 from aistudio._flow.storyboard import (
-    EXTEND_TRIM_MAX,
+    DEFAULT_EXTEND_DURATION,
+    EXTEND_MODEL,
     compose_clip_prompt,
     fingerprint,
     parse_storyboard,
@@ -52,7 +53,8 @@ def test_a_full_storyboard_parses_with_defaults_filled_in():
     assert (s1.mode, s1.join) == ("ingredient", "cut")  # a character picks the mode
     assert s1.keyframe is not None and s1.keyframe.characters == ("Mai",)
     assert s1.keyframe.location == "gym"
-    assert s2.join == "extend" and s2.keyframe is None and s2.model == "veo-3.1-lite"
+    assert s2.join == "extend" and s2.keyframe is None and s2.model == EXTEND_MODEL
+    assert s2.duration == DEFAULT_EXTEND_DURATION
     assert s3.join == "frame" and s3.keyframe is None and s3.frame_at is None
     assert s4.mode == "start_frame" and s4.characters == ()
     assert s4.keyframe is not None and s4.keyframe.characters == ("Mai",)
@@ -85,7 +87,7 @@ def test_defaults_can_be_set_at_the_top_and_per_shot():
     sb = parse_storyboard(data)
     assert (sb.shots[0].model, sb.shots[0].duration, sb.shots[0].aspect) == (
         "veo-3.1-quality", 8, "9:16")
-    assert sb.shots[1].model == "veo-3.1-lite"  # an extension is always Lite
+    assert sb.shots[1].model == EXTEND_MODEL and sb.shots[1].duration == DEFAULT_EXTEND_DURATION
     assert sb.shots[3].duration == 6 and sb.shots[3].model == "veo-3.1-fast"
     # the saved frame and the plate follow the video's aspect
     assert sb.locations[0].aspect == "9:16"
@@ -208,22 +210,26 @@ def test_start_frame_with_ingredients_is_not_measured_and_refused():
                for p in problems(data))
 
 
-def test_an_extension_carries_only_a_prompt_and_a_line():
+def test_an_extension_carries_only_a_prompt_a_line_and_an_optional_length():
     for key, value in [("mode", "start_frame"), ("characters", ["Mai"]), ("location", "gym"),
-                       ("duration", 6), ("aspect", "9:16"), ("model", "veo-3.1-fast"),
-                       ("keyframe", "x"), ("ingredients", [PRODUCT]), ("frame_at", 1)]:
+                       ("aspect", "9:16"), ("model", "veo-3.1-fast"),
+                       ("keyframe", "x"), ("ingredients", [PRODUCT]), ("frame_at", 1),
+                       ("duration", 2), ("duration", 11)]:
         data = board()
         data["shots"][1][key] = value
         assert any("s2" in p and key in p and "extend" in p for p in problems(data)), key
     data = board()
-    data["shots"][1].update(say="More", model="veo-3.1-lite")
-    parse_storyboard(data)
+    data["shots"][1].update(say="More", duration=6, model=EXTEND_MODEL)
+    sb = parse_storyboard(data)
+    assert sb.shots[1].duration == 6 and sb.shots[1].model == EXTEND_MODEL
 
 
-def test_extending_needs_a_veo_clip_before_it():
-    data = board()
-    data["shots"][0].update(model="omni-1.1-flash", duration=8)
-    assert any("s2" in p and "Veo" in p for p in problems(data))
+def test_extending_works_after_veo_and_omni_clips():
+    for model in ("veo-3.1-lite", "omni-1.1-flash", "omni-1.2-flash"):
+        data = board()
+        data["shots"][0].update(model=model, duration=8)
+        sb = parse_storyboard(data)
+        assert sb.shots[1].join == "extend" and sb.shots[1].model == EXTEND_MODEL
 
 
 def test_a_frame_join_keeps_the_aspect_of_the_clip_before():
@@ -262,9 +268,11 @@ def test_stitch_trims_are_whole_seconds_within_the_clip():
     for bad in ([1.5, 5], [0, 9], [5, 5], [3, 1], [1], "2-5", [True, 4]):
         data["shots"][0]["trim"] = bad
         assert any("s1" in p and "trim" in p for p in problems(data)), bad
-    data["shots"][0]["trim"] = [0, EXTEND_TRIM_MAX]
-    data["shots"][1]["trim"] = [0, EXTEND_TRIM_MAX + 1]  # an extension adds 7-8 s
+    data["shots"][0]["trim"] = [0, DEFAULT_EXTEND_DURATION]
+    data["shots"][1]["trim"] = [0, DEFAULT_EXTEND_DURATION + 1]  # default extend is 4 s
     assert any("s2" in p and "trim" in p for p in problems(data))
+    data["shots"][1].update(duration=7, trim=[0, 7])
+    assert parse_storyboard(data).shots[1].trim == (0, 7)
 
 
 def test_model_duration_and_aspect_are_checked_like_flow_video():

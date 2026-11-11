@@ -1280,6 +1280,112 @@ holds one song, so paging, other statuses and the model field are not seen live.
   and the full body under "Body". The fixed generate path (`ogiZ0b` into the body slot) has not
   run live yet.
 
+### Flow's chat moved to a WebChannel; the quote is read from the page (2026-11-11, no credits spent)
+
+- **Report.** Profile `second`, `flow video -m omni-1.2-flash --duration 6 --count 1 --aspect
+  16:9 --max-credits 18` with two ingredients. It worked at 01:45; from about 04:00 every run (4)
+  failed with `TIMEOUT`: "Flow's agent had not finished replying when aistudio stopped
+  waiting: Generating the Video arrow_forward_ios I'll generate 1 6-second video using Omni 1.2
+  Flash in 16:9 aspect ratio based on your prompt and attached reference images. Would you like
+  me to kick off this 1 video generation, costing 18 credits? check Approve check Always approve
+  in project close Reject". Nothing was approved, charged or made.
+- **Root cause (traced with `-vv`, free quote-only run, credits unchanged at 1014).** The chat
+  **moved to a Google WebChannel**: there is no `FlowCreationAgentService/StreamChat` request any
+  more. The page sends its messages as POSTs to
+  `aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/streamCreationAgentChat/channel`
+  (resource type `xhr`), first a 7-byte one (`count=0`, the opening) and then, right after the
+  message was sent, one of 4668 bytes that carries the prompt and the attachments. Flow's reply
+  comes down the same long-lived channel and never ends. aistudio waited for a StreamChat
+  response that no longer exists, so `answered` stayed false and the run said "had not finished
+  replying", while the page showed the card. (The earlier guess, a StreamChat reply held open
+  until the card is answered, was wrong; the page and its options were fine.)
+- **The channel's body.** The WebChannel form is `count=1&ofs=N&req0___data__=<url-encoded
+  JSON>`. The JSON's inner layout is **not confirmed** (it may be the old StreamChat message
+  `[session, [[[[prompt]]], media, None, characters], …]`, possibly inside a string). aistudio
+  reads it two ways: the old slots, and plain text, where each attached media and character id
+  must appear verbatim and in the order attached. An id not found is reported as not sent, so
+  the run is refused (`PLAN_MISMATCH`). With no attachments the body is not checked for extras.
+  The channel's reply is never routed or read: routing a never-ending reply would stall the page,
+  and the structured quote it carries cannot be read before the channel closes, so the page is
+  the way to read the quote.
+- **The card (all read from the page, live).** The newest agent message ends with the question
+  and the options; the permission card shows "check Approve", "check Always approve in project",
+  "close Reject". "Always approve" became "Always approve in project". The options are
+  `role=radio`, with accessible names "Approve", "Always approve in project" and "Reject" (read
+  with `-vv`): the exact lookup was right, and the lookup now also takes one lower-case icon word
+  before the label (`^(?:[a-z_]+\s+)?Approve$`) in case a name starts with its icon, as other
+  Flow controls do (see "Create body"). "Always approve in project" never matches. aistudio never
+  presses it: it would approve every later request in the project with no quote.
+- **Fix.** `submit_for_quote` reads the quote from the page when no structured reply was read,
+  with these guards (`FlowPage._quote_on_page`, each logged with `-vv`):
+  - a chat message was sent in this run: a StreamChat request (the old path) or a WebChannel
+    POST that carries a message (not the opening `count=0`). The page's requests are logged as
+    they leave, so this holds while the reply is open;
+  - the chat holds more Approve options than before the message was sent, and exactly one is
+    enabled, the newest (what `approve_and_follow` needs);
+  - the newest `.agent-message-content` holds exactly one sentence of Flow's shape, "kick off
+    this N video|image generation(s), costing C credits", and the newest permission card shows
+    the same credits. The prompt box, the user's bubble and older messages are never read;
+  - the card must stay up for 8 s with no structured reply read, because a StreamChat reply that
+    ends normally brings the structured request first;
+  - the attached media and character ids are found in the chat request's body as above.
+
+  The result is the same `Quote`, so kind, count, model, length, `--max-credits`, the
+  attachments and the cost re-read just before Approve all still run. The result gets
+  `"quote_source": "page"` and a warning. A structured StreamChat reply, if one ever arrives,
+  wins.
+- **Following the job does not use the chat.** After Approve, `_follow` polls `jwpduf`, `as29s`
+  and `bOKtO` (batchexecute calls that end at once) and the chat's "Failed" cards. **Known cost:**
+  `reject()` still waits up to 60 s per Reject for a StreamChat reply, which cannot arrive on the
+  channel, so each rejected request adds up to a minute.
+- **What `-vv` shows** (loggers `aistudio._flow.page` and `aistudio._browser.ui`): every guard
+  with PASS or FAIL and what it saw, the option controls by role and label, every request of the
+  chat window (the channel's POSTs with their decoded, token-shortened bodies, every other POST
+  by host and path, websockets), route fetches and response events. No query string or token is
+  logged.
+- **Still to check live.** An approved run through the channel: that the verbatim ids check
+  passes with two ingredients (the first quote-only check had its other guards passing), and
+  that the follow finds the job as before.
+
+### Omni Extend: Flow's current Extend (2026-11-11, free exploration, no credits spent)
+
+- **Report.** `flow extend` failed with "Flow offered no Extend for this clip" for an Omni 1.2
+  Flash clip and for a Veo 3.1 Fast clip. Cause: the Add clip menu item now reads just "Extend",
+  and aistudio's reader wanted "Extend (<model>)".
+- **Where it is.** The clip's editor (`/project/<id>/edit/<workflow>`) is the Scenebuilder: a
+  timeline, "Done editing scene" at the top, a prompt box ("Describe how to edit this video…" =
+  Omni edit). The "+" at the clip's tail is the button "Add clip". It opens a menu with two
+  items: "Add clip" (opens "Select media": appends an existing project clip) and "Extend"
+  (`keyboard_double_arrow_right Extend`, no model in the name). The same two items showed on a
+  middle clip of a 3-clip scene (`/scene/<id>`), on an Omni clip (8 s) and on a Veo 3.1 Fast clip
+  (8 s, first/last-frame): Extend is not limited to Omni clips.
+- **The Extend box.** Choosing Extend puts a grey "Extend" block after the clip on the timeline
+  and changes the prompt box: placeholder "What happens next?", a length chip (button
+  `Settings trigger`, text `4s`; `3s` on the Veo clip), a model chip (`pen_magic Omni 1.2 Flash`;
+  no picker, same for Veo and Omni sources), a chip "Extend ×" (button "Exit extend mode") and
+  "Start generation". The model is not chosen by the person.
+- **The quote.** The length chip opens a pop-up (`.settings-content-overlay`, a CDK overlay):
+  "Extend Length", the value ("4 Sec"), a slider (`input[type=range]`, aria-label "Extend Length",
+  min 3, max 10, step 1), and Flow's own cost line "Generating will use <a
+  class=credit-cost-link>12 credits</a>". Keys on the slider (Home, ArrowRight) change it and the
+  cost live: 3 s = 9, 4 s = 12, 5 s = 15, 6 s = 18, 7 s = 21, 10 s = 30 credits, so **3 credits a
+  second**, for both the Omni and the Veo source. Escape closes the pop-up.
+- **What was not seen.** Start was never pressed (a free exploration; the auto-mode classifier
+  refused a guarded Start, and nothing was retried). So the following is unconfirmed: whether
+  Start asks a permission card or the rights question, which RPC it sends (the old Extend sent
+  `fZytfe`), and how long the clip is in the end. `FlowPage.extend_omni` therefore (1) re-reads
+  length and cost just before Start and stops if they differ, (2) never clicks "I agree", (3)
+  waits 8 s for an `fZytfe` start reply and otherwise follows media created after Start that
+  were not in the project before.
+- **Old path.** A clip whose menu reads "Extend (Veo 3.1 - Lite)" is still handled as before
+  (direct spend, 10 credits from the table). No such clip was seen today.
+- **Jump to.** Not found. The clip editor's menus show no "Jump to": the "⋮" menu has only
+  Download project, help and about items; the Add clip menu has Add clip and Extend; a
+  right-click on a timeline clip offers Copy, Paste, Save to Project, Download, Delete. The
+  project page shows no Scenebuilder entry besides "Scenes". So there is no `flow jump-to`.
+- **Old extensions.** In a scene made by the old Extend, an extension clip shows a "Redo Extend"
+  button.
+
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 
 Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard

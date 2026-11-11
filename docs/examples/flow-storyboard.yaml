@@ -3,7 +3,7 @@
 #
 #   aistudio flow storyboard flow-storyboard.yaml                  # plan + quotes, spends nothing
 #   aistudio flow storyboard flow-storyboard.yaml --keyframes      # + the free keyframes, to review
-#   aistudio flow storyboard flow-storyboard.yaml --max-credits 40 -o scene.mp4
+#   aistudio flow storyboard flow-storyboard.yaml --max-credits 42 -o scene.mp4
 
 project: 11111111-2222-4333-8444-555555555555   # optional: the default 'aistudio' project
 
@@ -36,7 +36,8 @@ shots:
     characters: [Mai]            # attached to the clip, with its saved voice
     location: gym                # the plate shapes the keyframe
   - id: lift
-    join: extend                 # the same moment goes on: 10 credits, no Flow quote
+    join: extend                 # the same moment goes on: Omni Extend, 3 credits a second
+    duration: 4                  # 3 to 10 s (default 4: 12 credits)
     prompt: "She picks up a dumbbell and smiles at the camera."
   - id: hands
     join: frame                  # a frame saved from the clip before is this clip's first frame

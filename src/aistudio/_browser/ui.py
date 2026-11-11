@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from aistudio._auth.login import default_playwright_factory, launch_persistent
 from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
@@ -32,6 +32,7 @@ from aistudio.exceptions import (
 from aistudio.paths import Profile
 
 log = logging.getLogger(__name__)
+log_debug = log.debug  # for code where a local ``log`` (a ResponseLog) shadows the module's
 SESSION_SAVE_TIMEOUT_S = 10.0  # reading the cookies at close; never hang the run
 
 TYPE_LIMIT = 200  # longer text is inserted at once (typing 2 KB at 10 ms/key is slow)
@@ -62,6 +63,12 @@ class CapturedResponse:
 
 class ResponseLog(Protocol):
     async def next(self, method: str, *, timeout_s: float) -> CapturedResponse | None: ...
+
+    def requests(self, method: str) -> list[str]:
+        """Bodies of the requests the page has sent for ``method`` so far, in send order. Unlike
+        a response, a request is known the moment it leaves, so it exists while a streamed reply
+        is still open."""
+        ...
 
 
 class Ui(Protocol):
@@ -94,7 +101,8 @@ class Ui(Protocol):
 
     async def pause(self, ms: int) -> None: ...
 
-    def responses(self, marker: str = ..., *, fetch_bodies: bool = False
+    def responses(self, marker: str = ..., *, fetch_bodies: bool = False,
+                  watch: tuple[str, ...] = ()
                   ) -> contextlib.AbstractAsyncContextManager[ResponseLog]:
         ...
 
@@ -196,6 +204,40 @@ _BATCH_RPC_JS = """async ([rpcid, args]) => {
 }"""
 
 
+def _where(url: str) -> str:
+    """A URL for the debug log: host and path, and batchexecute's rpcids; no query or token."""
+    parsed = urlparse(url)
+    rpc = parse_qs(parsed.query).get("rpcids")
+    return f"{parsed.netloc}{parsed.path}" + (f" rpcids={rpc[0]}" if rpc else "")
+
+
+def _body_sizes(request: Any) -> str:
+    """How much body a request carries, as text and as bytes (a binary body has no text)."""
+    try:
+        text = len(request.post_data or "")
+    except Exception:  # noqa: BLE001 - a body that is not text
+        text = -1
+    try:
+        raw = len(request.post_data_buffer or b"")
+    except Exception:  # noqa: BLE001 - not every request has a buffer
+        raw = -1
+    return f"text={text} bytes={raw}"
+
+
+_LONG_TOKEN = re.compile(r"[A-Za-z0-9_\-+/=.]{100,}")
+
+
+def _body_snippet(request: Any, limit: int = 1500) -> str:
+    """A request body for the debug log: url-decoded, long tokens (reCAPTCHA, base64) replaced by
+    their length, cut at ``limit`` characters."""
+    try:
+        text = unquote_plus(request.post_data or "")
+    except Exception:  # noqa: BLE001 - a body that is not text
+        return "<not text>"
+    text = _LONG_TOKEN.sub(lambda m: f"<{len(m.group(0))} chars>", text)
+    return text if len(text) <= limit else text[:limit] + f"... <{len(text) - limit} more chars>"
+
+
 def _methods(url: str) -> list[str]:
     """The RPCs a response answers: batchexecute's ``rpcids`` (comma-separated when batched),
     else the URL's last segment."""
@@ -227,10 +269,17 @@ class _QueueLog:
         self._queues: defaultdict[str, asyncio.Queue[CapturedResponse]] = defaultdict(
             asyncio.Queue
         )
+        self._sent: defaultdict[str, list[str]] = defaultdict(list)
         self._closed = asyncio.Event()
 
     def put(self, response: CapturedResponse) -> None:
         self._queues[response.method].put_nowait(response)
+
+    def put_request(self, method: str, body: str) -> None:
+        self._sent[method].append(body)
+
+    def requests(self, method: str) -> list[str]:
+        return list(self._sent[method])
 
     def close(self) -> None:
         self._closed.set()
@@ -570,11 +619,15 @@ class PlaywrightUi:
         await self._act(role, name, run)
 
     @contextlib.asynccontextmanager
-    async def responses(self, marker: str = RPC_MARKER, *,
-                        fetch_bodies: bool = False) -> AsyncIterator[ResponseLog]:
+    async def responses(self, marker: str = RPC_MARKER, *, fetch_bodies: bool = False,
+                        watch: tuple[str, ...] = ()) -> AsyncIterator[ResponseLog]:
         """Log replies whose URL holds ``marker``. With ``fetch_bodies`` aistudio fetches them
         itself and fulfils the page with the same response: Chrome can hand a streamed reply's
-        body over empty (live, 2026-11-02: 3 of 4 StreamChat replies), which loses a quote."""
+        body over empty (live, 2026-11-02: 3 of 4 StreamChat replies), which loses a quote.
+
+        ``watch``: more URL markers whose *requests* are logged (``log.requests``), never routed
+        or read: a long-lived channel's reply would never end, and routing it would stall the
+        page."""
         log = _QueueLog()
         pending: set[asyncio.Task[None]] = set()
         fetched: set[Any] = set()  # requests already logged from their own fetch
@@ -584,13 +637,18 @@ class PlaywrightUi:
 
         async def fetch(route: Any) -> None:
             request = route.request
+            log_debug("route: fetching %s (%s)", _where(request.url), _body_sizes(request))
             try:
                 response = await route.fetch(timeout=0)  # a free image's reply can take minutes
                 text = await response.text()
-            except Exception:  # noqa: BLE001 - let the page send it; on_response logs it
+            except Exception as exc:  # noqa: BLE001 - let the page send it; on_response logs it
+                log_debug("route: fetch of %s failed (%s: %s); the page sends it itself",
+                          _where(request.url), type(exc).__name__, exc)
                 with contextlib.suppress(Exception):
                     await route.continue_()
                 return
+            log_debug("route: fetched %s, status %s, %d chars", _where(request.url),
+                      response.status, len(text))
             fetched.add(request)
             for method in _methods(request.url):
                 log.put(CapturedResponse(method, response.status, text, request.post_data or ""))
@@ -600,30 +658,67 @@ class PlaywrightUi:
         async def store(response: Any) -> None:
             try:
                 text = await response.text()  # a streamed response resolves when it ends
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - an unreadable body is logged as empty
+                log_debug("response: body of %s unreadable (%s: %s)", _where(response.url),
+                          type(exc).__name__, exc)
                 text = ""
+            log_debug("response: body of %s ended, %d chars", _where(response.url), len(text))
             for method in _methods(response.url):
                 log.put(CapturedResponse(method, response.status, text,
                                          response.request.post_data or ""))
 
+        def watched(url: str) -> bool:
+            return any(marker_ in url for marker_ in watch)
+
+        def on_request(request: Any) -> None:
+            if marker in request.url or watched(request.url):
+                log_debug("request: %s %s (%s) body: %s", request.method, _where(request.url),
+                          _body_sizes(request), _body_snippet(request))
+                try:
+                    body = request.post_data or ""
+                except Exception:  # noqa: BLE001 - a body that is not text; the check refuses
+                    body = ""
+                for method in _methods(request.url):
+                    log.put_request(method, body)
+            elif fetch_bodies and request.method != "GET":
+                # The chat's own window: every other POST, to see an endpoint that moved
+                log_debug("other request: %s %s %s (%s)", request.method, request.resource_type,
+                          _where(request.url), _body_sizes(request))
+
         def on_response(response: Any) -> None:
+            if marker in response.url or watched(response.url):
+                log_debug("response event: %s, status %s%s", _where(response.url),
+                          response.status,
+                          " (already fetched by the route)" if response.request in fetched
+                          else " (watched: its body is not read)" if watched(response.url)
+                          else "")
             if marker in response.url and response.request not in fetched:
                 task = asyncio.ensure_future(store(response))
                 pending.add(task)
                 task.add_done_callback(pending.discard)
 
+        def on_websocket(socket: Any) -> None:
+            log_debug("websocket opened: %s", _where(socket.url))
+
         def on_close(_page: Any) -> None:
             log.close()
 
+        log_debug("responses: logging %r, fetch_bodies=%s, watching requests of %s", marker,
+                  fetch_bodies, list(watch))
         if fetch_bodies:
             await self._page.route(matches, fetch)
+            self._page.on("websocket", on_websocket)
+        self._page.on("request", on_request)
         self._page.on("response", on_response)
         self._page.on("close", on_close)
         try:
             yield log
         finally:
+            self._page.remove_listener("request", on_request)
             self._page.remove_listener("response", on_response)
             self._page.remove_listener("close", on_close)
+            if fetch_bodies:
+                self._page.remove_listener("websocket", on_websocket)
             if fetch_bodies:
                 with contextlib.suppress(Exception):  # the page may be closed
                     await self._page.unroute(matches, fetch)

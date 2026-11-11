@@ -39,9 +39,10 @@ from aistudio._app.flow import (
 )
 from aistudio._browser.ui import open_browser
 from aistudio._flow.download import download_signed
-from aistudio._flow.models import PRICES
 from aistudio._flow.page import PROJECT_URL, FlowPage
 from aistudio._flow.storyboard import (
+    DEFAULT_EXTEND_DURATION,
+    EXTEND_CREDITS_PER_S,
     CharacterSpec,
     KeyframeSpec,
     LocationSpec,
@@ -70,9 +71,8 @@ from aistudio.paths import Profile
 
 STATE_VERSION = 1
 KEYFRAME_MODEL = "nano-banana-2.1"  # the only image model measured as free and unquoted
-EXTEND_LABEL = "Veo 3.1 - Lite"
 QUOTE_BASIS = ("Flow's quote per model, length and aspect; extensions from aistudio's "
-               "measured price table")
+               "per-second Extend price")
 # Errors that happen before Flow is asked to spend: a re-run is the user's call, nothing is
 # blocked. Anything else, or any error whose hint says credits may have gone, blocks the shot.
 # GenerationFailedError is a job Flow started and failed: failed jobs were refunded (live).
@@ -424,13 +424,10 @@ class _Run:
             for sid in ids:
                 self.price[sid] = int(result["credits"])
                 self.basis[sid] = "flow"
-        extend_price = PRICES.get(("extend", EXTEND_LABEL))
         for shot in self.pending():
             if shot.join == "extend":
-                if extend_price is None:
-                    raise ValidationError("aistudio has no measured extend price",
-                                          hint="nothing was run")
-                self.price[shot.id] = extend_price
+                seconds = shot.duration or DEFAULT_EXTEND_DURATION
+                self.price[shot.id] = seconds * EXTEND_CREDITS_PER_S
                 self.basis[shot.id] = "table"
 
     def remaining(self) -> int:
@@ -580,9 +577,9 @@ class _Run:
                 if previous is None:
                     raise ValidationError(f"shot {shot.id} extends nothing", hint="nothing sent")
                 result = await self.ops.extend(
-                    self.profile, previous, shot.prompt, max_credits=price,
-                    project=self.project, out=out, timeout_s=self.timeout_s, **self.base,
-                    **self.dl)
+                    self.profile, previous, shot.prompt, duration=shot.duration,
+                    max_credits=price, project=self.project, out=out,
+                    timeout_s=self.timeout_s, **self.base, **self.dl)
             else:
                 result = await self.ops.generate(
                     self.profile, "video", shot.prompt, **self.clip_args(shot, entry, frame),

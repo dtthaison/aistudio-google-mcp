@@ -11,10 +11,11 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import logging
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,10 @@ from aistudio._flow.rows import (
     ToolFile,
     agent_generated,
     agent_pending,
+    appear_in_order,
     body_request_target,
+    channel_ids,
+    channel_text,
     character_id,
     character_name,
     character_voice,
@@ -69,6 +73,9 @@ from aistudio.exceptions import (
     WindowClosedError,
 )
 
+_LOG = logging.getLogger(__name__)
+log_debug = _LOG.debug  # a local ``log`` (a ResponseLog) shadows the module's logger
+
 HOME_URL = "https://flow.google.com/"
 PROJECT_URL = "https://flow.google.com/project/{id}"
 CREATE_TOOL_URL = "https://flow.google.com/project/{id}/create-tool"
@@ -78,6 +85,17 @@ PROMPT_EDITOR = "flow-rich-text-editor.prompt-input .ProseMirror"
 AGENT_MESSAGE = ".agent-message-content"
 PERMISSION_LAST = "flow-permission-message >> nth=-1"  # the newest permission request
 _SHOWN_COST = re.compile(r"costing ([\d,]+) credits?")
+# The card's options by their accessible names. Flow's card page text now reads "check Approve
+# check Always approve in project close Reject" (live 2026-11-11): the icon's name can come
+# before the label (other Flow controls do, see CREATE_BODY), so an exact "Approve" may no longer
+# match. One lower-case icon word may precede the label; "Always approve in project" never
+# matches either name.
+APPROVE = re.compile(r"^(?:[a-z_]+\s+)?Approve$")
+REJECT = re.compile(r"^(?:[a-z_]+\s+)?Reject$")
+# Flow's own question in the permission card (live 2026-11-11: "Would you like me to kick off
+# this 1 video generation, costing 18 credits?"). The only sentence a page-read quote is taken from.
+_ASKED = re.compile(r"kick off this (\d+) (video|image) generations?, costing ([\d,]+) credits?\b")
+PAGE_QUOTE_GRACE_S = 8.0  # the card must stay up this long with no structured request read
 TITLE = "Editable text"
 TUNE = "Settings"
 # Live 2026-11-02: the top bar gained its own "Settings" (tooltip "View settings": grid size,
@@ -130,6 +148,19 @@ LAST_CLIP = ".clip.is-last .clip-body"
 LAST_CLIP_SELECTED = ".clip.is-last.selected"
 PANEL_PROMPT_CHARS = 40  # the side panel shows the selected clip's prompt, cut short
 EXTEND_PANEL = "What happens next?"  # the Extend box's placeholder (the edit box differs)
+# Omni Extend (live 2026-11-11, findings "Omni Extend"): the menu item reads just "Extend", and
+# the Extend box has a length chip ("4s", button "Settings trigger") whose pop-up holds a slider
+# and Flow's own cost line, "Generating will use 12 credits" (3 credits a second, 3 to 10 s).
+EXTEND_ITEM = re.compile(r"(?:^|\s)Extend$")
+EXTEND_SETTINGS = "Settings trigger"
+EXTEND_SLIDER = "Extend Length"
+EXTEND_EXIT = "Exit extend mode"  # the chip that marks the box as Extend
+EXTEND_POPUP = ".settings-content-overlay"
+EXTEND_MIN_S, EXTEND_MAX_S = 3, 10
+EXTEND_CLOSE_TRIES = 3
+FOLLOW_STARTED_S = 8.0  # how long a start reply (fZytfe) is waited for before following polls
+_EXTEND_POPUP = re.compile(r"Extend Length\s+(\d+)\s*Sec\b.*?use\s+([\d,]+)\s+credits")
+_EXTEND_CHIP = re.compile(r"\b(\d+)s\s+(?:pen_magic\s+)?(.+?)\s+Extend\s+close\b")
 # The player of a clip's editor or a scene (live, findings "Saving a frame"): a canvas, a
 # timecode MM:SS:FF at 24 fps, and a ruler row on the timeline that seeks where it is clicked
 CANVAS = "canvas.video-canvas"
@@ -152,6 +183,11 @@ GROUP = {"image": 0, "video": 1}  # tune panel: the image group comes first
 FLOW_RPC = "batchexecute"
 CHAT_RPC = "FlowCreationAgentService/StreamChat"
 CHAT_METHOD = "StreamChat"
+# Since 2026-11-11 the page sends its chat messages to a Google WebChannel instead (findings):
+# POSTs to aisandbox-pa-webchannel.clients6.google.com/v1/flowCreationAgent/
+# streamCreationAgentChat/channel, whose reply is a long-lived stream that is never routed.
+CHANNEL_RPC = "flowCreationAgent/streamCreationAgentChat/channel"
+CHANNEL_METHOD = "channel"
 ASKS_FIRST = re.compile(r"^Always\b.*ask for confirmation")  # "Confirm before generating"
 CREATED_SLACK_S = 120  # clock skew allowed when matching job records to this run
 REPLY_GRACE_S = 10.0  # after a reply without a permission request, wait this long for one
@@ -210,6 +246,17 @@ class AgentTurn:
     generating: bool = False  # a free generation was still running when the wait ended
     answered: bool = True  # a StreamChat reply ended; False: the stream was still open
     lost: bool = False  # a reply ended but its body never reached aistudio (Chrome dropped it)
+    # "stream": Flow's structured request; "page": no reply was read, so the quote is Flow's own
+    # question in the permission card (findings, "Flow's chat moved to a WebChannel")
+    quote_source: str = "stream"
+
+
+@dataclass(frozen=True)
+class ExtendQuote:
+    """What Omni Extend's box shows before Start: the length and Flow's own cost line."""
+    seconds: int
+    credits: int
+    model: str | None  # the box's model chip, e.g. "Omni 1.2 Flash"
 
 
 @dataclass(frozen=True)
@@ -256,6 +303,26 @@ def timecode_frame(text: str) -> int | None:
     return (minutes * 60 + seconds) * FPS + frames
 
 
+def _channel_attachments(body: str, slot: int, expected: Sequence[str]
+                         ) -> tuple[tuple[str, ...], str]:
+    """The ids a WebChannel body carries, as far as can be told (its shape is not confirmed):
+    ``expected`` when each appears verbatim in the message, in order; else what the old message
+    slots hold (usually nothing), so the caller's check sees a mismatch. Also says how."""
+    text = channel_text(body) or ""
+    slots = channel_ids(body, slot)
+    if appear_in_order(text, expected):
+        how = "none expected" if not expected else "each expected id appears verbatim, in order"
+        return tuple(expected), f"{how}; old slot {slot} read {slots}"
+    missing = [i for i in expected if i not in text]
+    return tuple(slots), (f"expected ids not found in order (missing {missing}); old slot "
+                          f"{slot} read {slots}")
+
+
+def _credits(text: str) -> int:
+    """'1,200' -> 1200."""
+    return int(text.replace(",", ""))
+
+
 def _label(text: str) -> str:
     """'🍌 Nano Banana 2.1 arrow_drop_down' -> 'Nano Banana 2.1'."""
     label = " ".join(w for w in text.split() if w != "arrow_drop_down")
@@ -271,6 +338,7 @@ class FlowPage:
         self._now = now
         self._clock = clock  # wall clock, compared with Flow's job creation times
         self._poll_s = poll_s
+        self._last_probe: list[str] | None = None  # the card probe last logged (-vv)
         self.paid_media: list[str] = []  # media ids of the approved job, as soon as seen
         self.started = False  # Start was pressed: from here on, failures may have spent
 
@@ -348,29 +416,53 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
 
     async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0,
-                               expect_generation: bool = False) -> AgentTurn:
+                               expect_generation: bool = False,
+                               attached: Sequence[str] = (),
+                               characters: Sequence[str] = ()) -> AgentTurn:
         """Send the instruction and read Flow's structured permission request for it.
 
-        The quote comes from the StreamChat response to this message, never from page text, so
-        an echoed prompt or an older message cannot fake a price.
+        The quote comes from the StreamChat response to this message. Page text is a fallback
+        for one case only: no reply was read (Flow can keep the stream open while its permission
+        card waits for a click, live 2026-11-11) and Flow's own card is up; see ``_quote_on_page``
+        for the guards that keep an echoed prompt or an older message from faking a price.
 
         ``expect_generation``: the model generates without asking (free images), so a reply
         without a quote is no answer yet. The agent can end one reply with "I will generate…"
         and send the generation in a later one, well after REPLY_GRACE_S (live, 2026-11-02):
         wait for it, and never call such a reply "nothing was made".
+
+        ``attached`` and ``characters``: the media and character ids attached to this message, in
+        order. A page-read quote verifies them in the chat request's body (``_quote_on_page``).
         """
-        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True) as log:
+        async with self._ui.responses(marker=CHAT_RPC, fetch_bodies=True,
+                                      watch=(CHANNEL_RPC,)) as log:
             await self._ui.type_text(PROMPT_EDITOR, text)
             await self._wait_for_prompt(PROMPT_EDITOR, text)
+            before = await self._approve_options()  # requests already in the chat
+            self._last_probe = None
             await self._ui.key("Enter")
+            log_debug("sent the message; waiting up to %.0f s for Flow's reply", timeout_s)
             deadline = self._now() + timeout_s
             seen: list[object] = []
             answered = lost = False
+            card_since: float | None = None  # when the page's card first showed a quote
             while self._now() < deadline:
                 response = await log.next(CHAT_METHOD, timeout_s=self._poll_s)
                 if response is None:
+                    # Nothing was read: the stream may still be open. A structured request would
+                    # end it, so the card must stay up for a grace period before it is trusted.
+                    if await self._quote_on_page(log, before, attached, characters) is None:
+                        card_since = None
+                        continue
+                    card_since = self._now() if card_since is None else card_since
+                    if self._now() - card_since >= PAGE_QUOTE_GRACE_S:
+                        log_debug("page quote: the card stayed up %.0f s with no reply read",
+                                  PAGE_QUOTE_GRACE_S)
+                        break
                     continue
                 answered = True
+                log_debug("StreamChat reply read: status %s, %d chars", response.status,
+                          len(response.text))
                 if response.status >= 400:
                     continue
                 lost = lost or not response.text  # live: Chrome can drop a reply body
@@ -392,9 +484,138 @@ class FlowPage:
                     deadline = min(deadline, self._now() + REPLY_GRACE_S)
         # A reply is captured only when its stream ends (live: ~47 s for free images): an open
         # stream at the deadline may still be generating, so it is never "nothing was spent"
+        on_page = await self._quote_on_page(log, before, attached, characters)
+        if on_page is not None:  # no structured request was read, but Flow's own card is up
+            log_debug("page quote: using %s", on_page.quote)
+            return on_page
+        log_debug("no quote: reply read=%s, lost=%s, generated=%s", answered, lost,
+                  bool(agent_generated(seen)))
         return AgentTurn(await self._ui.text_of(AGENT_MESSAGE), None,
                          generating=agent_pending(seen) or not answered or expect_generation,
                          answered=answered, lost=lost)
+
+    async def _approve_options(self) -> int | None:
+        """How many Approve options the chat holds (answered requests keep theirs, disabled);
+        None when the page cannot be read."""
+        try:
+            count = len(await self._ui.enabled("radio", APPROVE))
+        except BrowserError as exc:
+            log_debug("page quote: could not count the Approve options before sending: %s", exc)
+            return None
+        log_debug("page quote: the chat held %d Approve option(s) before the message", count)
+        return count
+
+    async def _quote_on_page(self, log: ResponseLog, before: int | None,
+                             attached: Sequence[str] = (),
+                             characters: Sequence[str] = ()) -> AgentTurn | None:
+        """Flow's request as the permission card shows it, for when no reply could be read.
+
+        Live (2026-11-11) Flow's chat reply never ended while its card waited, so no body was
+        read; then the chat moved to a WebChannel (findings). The price is then Flow's own
+        question in its newest agent message, and only when every guard holds, so the prompt (or
+        an older message) cannot fake it:
+
+        - a chat message was sent in this run (``log``): a StreamChat request, or a WebChannel
+          POST that carries a message (the opening ``count=0`` does not);
+        - the chat holds more Approve options than before the message (``before``), so the card
+          is new, not a request left waiting by an earlier run;
+        - exactly one Approve option is enabled, on the newest request (what
+          ``approve_and_follow`` needs, and the card is up);
+        - the newest agent message holds one question of Flow's exact shape, and the newest
+          permission card shows the same credits;
+        - the caller still runs every check on the Quote (kind, count, plan, ``--max-credits``)
+          and on the attachments the turn reports, and ``approve_and_follow`` reads the card's
+          cost again before it presses Approve.
+
+        The attachments come from the request body. A StreamChat body is read by its slots. A
+        WebChannel body's shape is not confirmed, so ``attached`` and ``characters`` must each
+        appear in it verbatim and in order (or be read by the old slots, exactly); what was not
+        found is reported as sent, so the caller's check refuses it.
+
+        Every guard is read before any is judged, and each is logged (``-vv``) when what was
+        seen changes, so a run that fell short says which guard and what it saw.
+        """
+        stream_sent = log.requests(CHAT_METHOD)
+        channel_posts = log.requests(CHANNEL_METHOD)
+        channel_sent = [body for body in channel_posts if channel_text(body) is not None]
+        sent = channel_sent or stream_sent
+        seen: list[str] = []  # one line per guard: PASS or FAIL, and what was observed
+        flags: list[bool] = []
+        message = card_text = ""
+        try:
+            flags = await self._ui.enabled("radio", APPROVE)
+            message = await self._ui.text_of(AGENT_MESSAGE)
+            card_text = await self._ui.text_of(PERMISSION_LAST)
+        except BrowserError as exc:  # a page that cannot be read now is no quote
+            seen.append(f"FAIL page read: {exc}")
+        waiting = [i for i, ok in enumerate(flags) if ok]
+        asked = {m.groups() for m in _ASKED.finditer(message)}
+        shown = _SHOWN_COST.search(card_text)
+        seen.append(f"{'PASS' if sent else 'FAIL'} chat request sent in this run: "
+                    f"{len(stream_sent)} StreamChat request(s), {len(channel_posts)} WebChannel "
+                    f"POST(s) of which {len(channel_sent)} carry a message, body lengths "
+                    f"{[len(body) for body in sent]}")
+        fresh = before is not None and len(flags) > before
+        seen.append(f"{'PASS' if fresh else 'FAIL'} a new Approve option showed: before="
+                    f"{before}, now={len(flags)}")
+        only = waiting == [len(flags) - 1]
+        seen.append(f"{'PASS' if only else 'FAIL'} exactly one Approve option enabled, the "
+                    f"newest: enabled at {waiting} of {len(flags)}")
+        seen.append(f"{'PASS' if len(asked) == 1 else 'FAIL'} one question of Flow's shape in "
+                    f"the newest agent message: {len(message)} chars, found {sorted(asked)}, "
+                    f"tail {message[-160:]!r}")
+        agree = (len(asked) == 1 and shown is not None
+                 and _credits(next(iter(asked))[2]) == _credits(shown.group(1)))
+        seen.append(f"{'PASS' if agree else 'FAIL'} the permission card shows the same credits: "
+                    f"{len(card_text)} chars, read {shown.group(1) if shown else None}, "
+                    f"tail {card_text[-120:]!r}")
+        verdict = bool(sent) and fresh and only and agree
+        media: tuple[str, ...] = ()
+        characters_sent: tuple[str, ...] = ()
+        if sent:
+            body = sent[-1]
+            if channel_sent:
+                media, how_media = _channel_attachments(body, 1, attached)
+                characters_sent, how_chars = _channel_attachments(body, 3, characters)
+                found = f"WebChannel body: media {how_media}; characters {how_chars}"
+            else:
+                media, characters_sent = tuple(sent_media(body)), tuple(sent_characters(body))
+                found = (f"StreamChat body slots: media {list(media)}, "
+                         f"characters {list(characters_sent)}")
+            right = (list(dict.fromkeys(media)) == list(dict.fromkeys(attached))
+                     and set(characters_sent) == set(characters))
+            seen.append(f"{'PASS' if right else 'FAIL'} the attachments are in the chat request "
+                        f"(the caller refuses a run if not): expected media {list(attached)}, "
+                        f"characters {list(characters)}; {found}")
+        await self._debug_card(seen, verdict)
+        if not verdict:
+            return None
+        count, kind, credits = next(iter(asked))
+        return AgentTurn(message, Quote(int(count), kind, _credits(credits)), characters_sent,
+                         media, quote_source="page")
+
+    async def _debug_card(self, seen: list[str], verdict: bool) -> None:
+        """Log what the card probe saw, once per change, with a look at the option controls'
+        roles and names (the cause if Approve is not found by its label)."""
+        if not _LOG.isEnabledFor(logging.DEBUG):
+            return
+        probe = [*seen, str(verdict)]
+        if probe == self._last_probe:
+            return
+        self._last_probe = probe
+        try:
+            roles = {
+                f"{role} {word}": await self._ui.enabled(role, re.compile(word, re.I))
+                for role in ("radio", "button") for word in ("approve", "reject")}
+            names = await self._ui.labels("radio", re.compile("approve|reject", re.I))
+            names += await self._ui.labels("button", re.compile("approve|reject", re.I))
+        except BrowserError as exc:
+            roles, names = {}, [f"unreadable: {exc}"]
+        log_debug("page quote probe (%s)", "QUOTE TAKEN" if verdict else "no quote")
+        for line in seen:  # one record per line, so each carries the logger's name
+            log_debug("page quote: %s", line)
+        log_debug("page quote: options by role, enabled flags: %s", roles)
+        log_debug("page quote: option labels the page shows: %s", names)
 
     async def _wait_for_prompt(self, editor: str, text: str) -> None:
         """Send only once the editor shows the prompt: a long prompt is inserted at once, and an
@@ -415,7 +636,7 @@ class FlowPage:
         one (live). With ``expect`` (a quote was just read) the request may render a moment
         after the stream, so wait for it before concluding there is nothing to reject."""
         for _ in range(REJECT_WAIT_POLLS if expect else 0):
-            if any(await self._ui.enabled("radio", "Reject")):
+            if any(await self._ui.enabled("radio", REJECT)):
                 break
             await self._ui.pause(500)
         pressed = 0
@@ -423,11 +644,11 @@ class FlowPage:
         # left unfinished, Flow gave it as the answer to the next run's prompt (2026-11-02).
         async with self._ui.responses(marker=CHAT_RPC) as log:
             for _ in range(REJECT_ROUNDS):
-                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", "Reject"))
+                waiting = [i for i, ok in enumerate(await self._ui.enabled("radio", REJECT))
                            if ok]
                 if not waiting:
                     break
-                await self._ui.activate("radio", "Reject", exact=True, nth=waiting[0])
+                await self._ui.activate("radio", REJECT, exact=True, nth=waiting[0])
                 await self._ui.pause(1000)
                 pressed += 1
             else:
@@ -441,7 +662,7 @@ class FlowPage:
                                  kind: str, known: set[str] | frozenset[str] = frozenset()
                                  ) -> FlowOutcome:
         """Approve the one waiting request, only if it shows the cost that was checked."""
-        flags = await self._ui.enabled("radio", "Approve")
+        flags = await self._ui.enabled("radio", APPROVE)
         waiting = [i for i, ok in enumerate(flags) if ok]
         # The quote just read must be the only request that can be approved, and the newest one:
         # its cost is read from the newest permission message below.
@@ -460,7 +681,7 @@ class FlowPage:
         async with self._ui.responses(marker=FLOW_RPC) as log:
             since = self._clock()
             self.started = True
-            await self._ui.activate("radio", "Approve", exact=True, nth=waiting[0])
+            await self._ui.activate("radio", APPROVE, exact=True, nth=waiting[0])
             # ``known``: media that existed before the run, which a back-to-back run's clip
             # (inside the creation-time slack) would otherwise be taken for.
             return await self._follow(log, count, timeout_s, kind, since, exclude=known,
@@ -910,8 +1131,9 @@ class FlowPage:
                                hint="check the project's Characters in Flow")
         return CharacterOutcome(cid, media)
 
-    async def extend_label(self, project_id: str, workflow_id: str) -> str:
-        """Open the clip's editor by its workflow id and read the model "Extend (…)" will use."""
+    async def extend_label(self, project_id: str, workflow_id: str) -> str | None:
+        """Open the clip's editor by its workflow id and read the model "Extend (…)" will use
+        (None: Omni Extend, which names no model in its menu; see ``_extend_menu_label``)."""
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/edit/{workflow_id}")
         try:
             await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
@@ -928,7 +1150,7 @@ class FlowPage:
         return await self._extend_menu_label()
 
     async def extend_label_in_scene(self, project_id: str, scene_id: str,
-                                    last_prompt: str | None, *, clips: int) -> str:
+                                    last_prompt: str | None, *, clips: int) -> str | None:
         """Open a scene with its LAST clip selected, then read Extend's model (live: an extension
         has no editor of its own; its scene opens with the first clip selected, and Extend
         continues the selected clip). Every check runs before anything is sent."""
@@ -964,16 +1186,65 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
         return await self._extend_menu_label()
 
-    async def _extend_menu_label(self) -> str:
-        """Open the selected clip's "Add clip" menu and read the model "Extend (…)" will use."""
+    async def _extend_menu_label(self) -> str | None:
+        """Open the selected clip's "Add clip" menu and read how "Extend" is offered: the model
+        in "Extend (Veo 3.1 - Lite)" (the old Veo Extend, priced from aistudio's table), or None
+        for a bare "Extend" (Omni Extend: the model and the cost show in its own box)."""
         await self._ui.dispatch_click("button", ADD_CLIP)
         await self._ui.pause(1200)
-        text = await self._ui.inner_text("menuitem", EXTEND)
+        text = " ".join((await self._ui.inner_text("menuitem", EXTEND)).split())
         match = re.search(r"Extend \((.+)\)", text)
+        if match is not None:
+            return match.group(1).strip()
+        if EXTEND_ITEM.search(text):
+            return None
+        raise BrowserError("Flow offered no Extend for this clip",
+                           hint="re-run with --visible to see the clip's Add clip menu; the "
+                                "Flow UI may have changed")
+
+    async def extend_quote(self, seconds: int | None) -> ExtendQuote:
+        """Call after extend_label returned None (the Add clip menu is open). Opens Omni Extend's
+        box, sets its length to ``seconds`` (None keeps Flow's own) and reads what Flow says
+        it will use. Free: nothing is sent."""
+        await self._ui.dispatch_click("menuitem", EXTEND)
+        await self._ui.pause(1500)
+        if EXTEND_PANEL not in await self._ui.text_of("body"):
+            raise BrowserError("Flow's Extend box did not open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return await self._read_extend_settings(seconds)
+
+    async def _read_extend_settings(self, seconds: int | None) -> ExtendQuote:
+        """Open the length pop-up, optionally set the slider, read the length and the cost Flow
+        shows, close it. The slider takes keys: Home is the shortest, each Right one second."""
+        await self._ui.dispatch_click("button", EXTEND_SETTINGS)
+        await self._ui.pause(900)
+        if seconds is not None:
+            await self._ui.press("slider", EXTEND_SLIDER, "Home")
+            for _ in range(seconds - EXTEND_MIN_S):
+                await self._ui.press("slider", EXTEND_SLIDER, "ArrowRight")
+            await self._ui.pause(600)
+        shown = await self._ui.text_of(EXTEND_POPUP)
+        match = _EXTEND_POPUP.search(shown)
         if match is None:
-            raise BrowserError("Flow offered no Extend for this clip",
-                               hint="only Veo clips can be extended")
-        return match.group(1).strip()
+            raise BrowserError("Flow's Extend length box showed no cost; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        length, credits = int(match.group(1)), int(match.group(2).replace(",", ""))
+        if seconds is not None and length != seconds:
+            raise BrowserError(f"Flow's Extend length reads {length} s, not {seconds} s; "
+                               "nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        for _ in range(EXTEND_CLOSE_TRIES):  # Escape closes it; the chip toggles it otherwise
+            await self._ui.key("Escape")
+            await self._ui.pause(500)
+            if not await self._ui.count(EXTEND_POPUP):
+                break
+            await self._ui.dispatch_click("button", EXTEND_SETTINGS)
+            await self._ui.pause(500)
+        else:
+            raise BrowserError("Flow's Extend length box would not close; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        chip = _EXTEND_CHIP.search(" ".join((await self._ui.text_of("body")).split()))
+        return ExtendQuote(length, credits, _label(chip.group(2)) if chip else None)
 
     async def extend(self, prompt: str, *, timeout_s: float) -> FlowOutcome:
         """Call after extend_label (the Add clip menu is open). Spends credits."""
@@ -1000,6 +1271,56 @@ class FlowPage:
                                          only=set(self.paid_media))
         return FlowOutcome(outcome.media, credits if outcome.credits_left is None
                            else outcome.credits_left, outcome.timed_out)
+
+    async def extend_omni(self, prompt: str, quote: ExtendQuote, *, timeout_s: float,
+                          known: set[str]) -> FlowOutcome:
+        """Call after extend_quote (its box is open). Types the prompt, reads the length and the
+        cost again (they must still be the quote that was approved), presses Start and follows
+        the new clip. Spends credits. Flow's own start reply (fZytfe) names the clip when it is
+        still sent; otherwise the media created after Start and not in ``known`` (the source
+        and the project's media before Start) are followed, as for an edit."""
+        await self._ui.type_text(EDITOR_LAST, prompt)
+        await self._wait_for_prompt(EDITOR_LAST, prompt)
+        if not await self._ui.visible("button", EXTEND_EXIT, exact=True):  # not the edit box
+            raise BrowserError("Flow's Extend box is not the one open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        again = await self._read_extend_settings(None)
+        if (again.seconds, again.credits) != (quote.seconds, quote.credits):
+            raise BrowserError(f"Flow's Extend now reads {again.seconds} s for {again.credits} "
+                               f"credits, not the {quote.seconds} s for {quote.credits} aistudio "
+                               "checked; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            since = self._clock()
+            self.started = True
+            await self._ui.click("button", START, exact=True, nth=-1)
+            await self._ui.pause(1000)
+            await self._refuse_rights()
+            started = await log.next("fZytfe", timeout_s=FOLLOW_STARTED_S)
+            if started is None:
+                await self._refuse_rights()
+            only: set[str] | None = None
+            credits = None
+            if started is not None:
+                if started.status >= 400:
+                    raise BrowserError("Flow did not start the extension",
+                                       hint="it may still be charged: check the project in Flow "
+                                            "before re-running")
+                credits, media = extend_started(decode_batch(started.text).get("fZytfe"))
+                if media:
+                    only = {m.media_id for m in media}
+                    self.paid_media = [m.media_id for m in media]
+            outcome = await self._follow(log, 1, timeout_s, "video", since, only=only,
+                                         exclude=known)
+        return FlowOutcome(outcome.media, credits if outcome.credits_left is None
+                           else outcome.credits_left, outcome.timed_out, outcome.failed)
+
+    async def _refuse_rights(self) -> None:
+        """Flow's rights question is the person's to answer: never click it from here."""
+        if await self._ui.visible("button", AGREE, exact=True):
+            raise BrowserError("Flow asked its rights question and aistudio does not answer it",
+                               hint="check the clip's page in Flow before re-running; "
+                                    "nothing was confirmed")
 
     async def open_frames(self, project_id: str, where: str, *, clips: int) -> None:
         """Open a player with Save frame: ``edit/<workflow>`` (a clip's editor) or

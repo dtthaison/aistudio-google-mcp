@@ -31,7 +31,13 @@ from aistudio._flow.models import (
     label_to_id,
     model_by_label,
 )
-from aistudio._flow.page import PROJECT_URL, Defaults, FlowPage
+from aistudio._flow.page import (
+    EXTEND_MAX_S,
+    EXTEND_MIN_S,
+    PROJECT_URL,
+    Defaults,
+    FlowPage,
+)
 from aistudio._flow.rows import (
     FlowCharacter,
     FlowScene,
@@ -68,6 +74,11 @@ DEFAULT_PROJECT_TITLE = "aistudio"
 _PROJECT = re.compile(r"(?:project/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
                       r"[0-9a-f]{12})/?$")
 QUOTE_TIMEOUT_S = 90.0  # a paid run: Flow's agent replies with its quote
+# Said when the quote was read from Flow's permission card, not from its structured request
+# (findings, "Flow's chat moved to a WebChannel"): the same checks ran on it.
+PAGE_QUOTE_NOTE = ("no structured reply from Flow was read (its chat is a WebChannel whose reply "
+                   "never ends), so the price was read from its permission card on the page; its "
+                   "count, kind, cost and attachments were checked the same way")
 # A free image run: the reply carrying the generation ends only once the image is made; with a
 # character attached it ended past 90 s (live, 2026-11-02; about 75 s to the image)
 FREE_REPLY_TIMEOUT_S = 240.0
@@ -166,6 +177,7 @@ async def flow_generate(
         uploads: list[dict[str, str]] = []
         attached_ids: list[str] = []  # in attach order: frames are named "in order"
         quoted: dict[str, Any] | None = None  # built here, returned after the restore
+        source: dict[str, str] = {}  # "quote_source": "page" when the quote came from the page
         failure: AIStudioError | None = None
         try:
             if wanted != previous:
@@ -205,7 +217,8 @@ async def flow_generate(
                 kind, prompt, count=wanted.count,
                 model_label=flow_model.label if flow_model else None, seconds=duration,
                 aspect=aspect), expect_generation=kind == "image",  # images: free models only
-                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S)
+                timeout_s=FREE_REPLY_TIMEOUT_S if kind == "image" else QUOTE_TIMEOUT_S,
+                attached=attached_ids, characters=[c.id for c in chosen])
             if (turn.quote is None and not turn.generated and turn.generating
                     and kind == "image"):
                 found = await _made_in_project(page, project_id, existing | set(attached_ids),
@@ -278,6 +291,9 @@ async def flow_generate(
                                         "Flow, then re-run", waiting))
                 expect = Expect(kind, wanted.count, flow_model.label if flow_model else None,
                                 duration)
+                if turn.quote_source == "page":  # same checks below; only the source differs
+                    source = {"quote_source": "page"}
+                    warnings.append(PAGE_QUOTE_NOTE)
                 decision, wrong = decide(turn.quote, parse_plan(turn.text), expect, max_credits)
                 if decision is Decision.QUOTE_ONLY:
                     # Declined in Flow too: a waiting request could later be approved there with
@@ -292,7 +308,7 @@ async def flow_generate(
                     warnings += wrong
                     quoted = {"status": "quoted", "declined": declined,
                               "credits": turn.quote.credits, "count": turn.quote.count,
-                              "plan": turn.text, "project": project_id,
+                              "plan": turn.text, "project": project_id, **source,
                               **({"uploads": uploads} if uploads else {})}
                 elif decision is Decision.REJECT_MISMATCH:
                     waiting = await _reject_noting(page)
@@ -373,7 +389,7 @@ async def flow_generate(
                                 f"Flow before re-running")
         return {"status": "timeout", "media_ids": [m.media_id for m in outcome.media],
                 "project_url": project_url, "credits_spent": spent, "credits_left": after,
-                **({"warnings": warnings} if warnings else {})}
+                **source, **({"warnings": warnings} if warnings else {})}
     expected_id = flow_model.id if flow_model else label_to_id(wanted.model)
     made = {MODEL_KEYS[m.model_key] for m in outcome.media if m.model_key in MODEL_KEYS}
     warnings += [f"Flow made the {kind} with {got}, not {expected_id}"
@@ -388,7 +404,7 @@ async def flow_generate(
     warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": turn.quote.credits,
             "credits_left": outcome.credits_left,
-            "model": expected_id, "project": project_id,
+            "model": expected_id, "project": project_id, **source,
             **({"warnings": warnings} if warnings else {})}
 
 
@@ -713,12 +729,16 @@ async def flow_download(profile: Profile, media_id: str, *, project: str | None 
     return {"files": files, "project": project_id, **({"warnings": warnings} if warnings else {})}
 
 
-def _cost_warning(before: int | None, after: int | None, price: int) -> tuple[int, list[str]]:
+def _cost_warning(before: int | None, after: int | None, price: int,
+                  source: str | None = None) -> tuple[int, list[str]]:
+    """The charge and a note when it cannot be checked or is not the price. ``source`` names
+    where the price came from (default: aistudio's table)."""
+    where = source or "aistudio's table"
     if before is None or after is None:
-        return price, [f"could not read Flow credits around the run; the charge (table price "
+        return price, [f"could not read Flow credits around the run; the charge ({where} "
                        f"{price}) was not verified"]
     spent = before - after
-    note = ([f"credits fell by {spent} during this run; aistudio's table says {price}"]
+    note = ([f"credits fell by {spent} during this run; {where} says {price}"]
             if spent != price else [])
     return spent, note
 
@@ -770,15 +790,22 @@ async def _credits_after(page: Any, fallback: int | None) -> tuple[int | None, l
 
 async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
                       max_credits: int | None = None, project: str | None = None,
+                      duration: int | None = None,
                       out: Path | None = None, overwrite: bool = False, timeout_s: float = 600.0,
                       visible: bool = False, browser: Callable[..., Any] = open_browser,
                       downloader: Callable[[str], Any] = download_signed,
                       now: Callable[[], datetime] = datetime.now,
                       page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
-    """Extend a Veo clip by one clip (direct spend: priced from aistudio's table)."""
+    """Extend a clip by one clip. Flow's current Extend (Omni, from the clip's "+") shows its own
+    cost before Start: that quote is read from the page and checked against ``max_credits``; a
+    run without a budget only quotes. The old Veo Extend ("Extend (Veo 3.1 - Lite)" in the menu)
+    is still handled as a direct spend, priced from aistudio's table."""
     prompt = " ".join(prompt.split())
     if not prompt:
         raise ValidationError("nothing to extend with: the prompt is empty")
+    if duration is not None and not EXTEND_MIN_S <= duration <= EXTEND_MAX_S:
+        raise ValidationError(f"--duration {duration} is outside Flow's Extend range "
+                              f"({EXTEND_MIN_S} to {EXTEND_MAX_S} seconds)")
     project_id = _project_id(project) if project else None
     _check_output(out, 1, overwrite)
     async with browser(profile, window="visible" if visible else "minimized") as ui:
@@ -800,9 +827,32 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         else:
             workflow_id = await _workflow_of(page, contents, media_id)
             label = await page.extend_label(project_id, workflow_id)  # opens that exact clip
-        price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
+        quote = None
+        if label is None:  # Omni Extend: Flow shows the length and the cost before Start
+            quote = await page.extend_quote(duration)
+            label = quote.model
+            price = quote.credits
+            if max_credits is None:
+                return {"status": "quoted", "credits": quote.credits, "seconds": quote.seconds,
+                        "model": label_to_id(label) if label else None,
+                        "quote_source": "page", "source": media_id, "project": project_id}
+            if price > max_credits:
+                raise OverBudgetError(f"Flow quotes {price} credits for a {quote.seconds}-second "
+                                      f"extension, over --max-credits {max_credits}",
+                                      hint="nothing was spent; raise --max-credits or pass a "
+                                           "shorter --duration")
+        else:
+            if duration is not None:
+                raise ValidationError(f"this clip offers the old Extend ({label}), which has no "
+                                      "length to choose; nothing was sent",
+                                      hint="drop --duration")
+            price = check_direct_spend("extend", label, max_credits)  # refuses before any spend
+        known = {m.media_id for m in contents.media} | set(contents.titles) | {media_id}
         try:
-            outcome = await page.extend(prompt, timeout_s=timeout_s)
+            if quote is not None:
+                outcome = await page.extend_omni(prompt, quote, timeout_s=timeout_s, known=known)
+            else:
+                outcome = await page.extend(prompt, timeout_s=timeout_s)
         except Exception as exc:
             if not page.started:  # a check before Start: its own "nothing was spent" stands
                 raise
@@ -812,7 +862,7 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
         scene_id = await _scene_holding(page, project_id, new_ids)
     if outcome.failed and not outcome.media:
         raise _failed(outcome.failed, before, after)
-    spent, warnings = _cost_warning(before, after, price)
+    spent, warnings = _cost_warning(before, after, price, "Flow's quote" if quote else None)
     warnings = read_notes + warnings
     if scene_id is None:
         warnings.append('Flow had not listed the extension\'s scene yet; find it with '
@@ -828,8 +878,10 @@ async def flow_extend(profile: Profile, media_id: str, prompt: str, *,
                                          project_url=project_url)
     warnings += saved_notes
     return {"status": "done", "files": files, "credits_spent": spent, "credits_left": after,
-            "model": label_to_id(label), "scene_id": scene_id, "source": media_id,
-            "project": project_id,
+            "model": label_to_id(label) if label else None, "scene_id": scene_id,
+            "source": media_id, "project": project_id,
+            **({"seconds": quote.seconds, "quote_credits": quote.credits,
+                "quote_source": "page"} if quote else {}),
             **({"warnings": warnings} if warnings else {})}
 
 

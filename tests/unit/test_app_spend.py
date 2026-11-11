@@ -227,3 +227,11 @@ def test_report_of_nothing_is_empty_not_an_error(aistudio_home):
     assert report["entries"] == [] and report["count"] == 0
     assert report["totals"]["flow_credits"] == {"runs": 0, "credits_spent": 0,
                                                 "unverified_runs": 0}
+
+
+def test_an_extend_without_a_budget_only_quotes_and_is_not_logged():
+    quoted = {"status": "quoted", "credits": 12, "seconds": 4, "quote_source": "page"}
+    assert entry("flow extend", params={"max_credits": None}, result=quoted) is None
+    assert entry("flow extend", params={"max_credits": None}, error_code="BROWSER_ERROR") is None
+    paid = entry("flow extend", params={"max_credits": 12}, error_code="SERVER_ERROR")
+    assert paid is not None and paid["status"] == "failed"
