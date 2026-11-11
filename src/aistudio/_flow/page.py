@@ -148,6 +148,19 @@ LAST_CLIP = ".clip.is-last .clip-body"
 LAST_CLIP_SELECTED = ".clip.is-last.selected"
 PANEL_PROMPT_CHARS = 40  # the side panel shows the selected clip's prompt, cut short
 EXTEND_PANEL = "What happens next?"  # the Extend box's placeholder (the edit box differs)
+# Omni Extend (live 2026-11-11, findings "Omni Extend"): the menu item reads just "Extend", and
+# the Extend box has a length chip ("4s", button "Settings trigger") whose pop-up holds a slider
+# and Flow's own cost line, "Generating will use 12 credits" (3 credits a second, 3 to 10 s).
+EXTEND_ITEM = re.compile(r"(?:^|\s)Extend$")
+EXTEND_SETTINGS = "Settings trigger"
+EXTEND_SLIDER = "Extend Length"
+EXTEND_EXIT = "Exit extend mode"  # the chip that marks the box as Extend
+EXTEND_POPUP = ".settings-content-overlay"
+EXTEND_MIN_S, EXTEND_MAX_S = 3, 10
+EXTEND_CLOSE_TRIES = 3
+FOLLOW_STARTED_S = 8.0  # how long a start reply (fZytfe) is waited for before following polls
+_EXTEND_POPUP = re.compile(r"Extend Length\s+(\d+)\s*Sec\b.*?use\s+([\d,]+)\s+credits")
+_EXTEND_CHIP = re.compile(r"\b(\d+)s\s+(?:pen_magic\s+)?(.+?)\s+Extend\s+close\b")
 # The player of a clip's editor or a scene (live, findings "Saving a frame"): a canvas, a
 # timecode MM:SS:FF at 24 fps, and a ruler row on the timeline that seeks where it is clicked
 CANVAS = "canvas.video-canvas"
@@ -236,6 +249,14 @@ class AgentTurn:
     # "stream": Flow's structured request; "page": no reply was read, so the quote is Flow's own
     # question in the permission card (findings, "Flow's chat moved to a WebChannel")
     quote_source: str = "stream"
+
+
+@dataclass(frozen=True)
+class ExtendQuote:
+    """What Omni Extend's box shows before Start: the length and Flow's own cost line."""
+    seconds: int
+    credits: int
+    model: str | None  # the box's model chip, e.g. "Omni 1.2 Flash"
 
 
 @dataclass(frozen=True)
@@ -1110,8 +1131,9 @@ class FlowPage:
                                hint="check the project's Characters in Flow")
         return CharacterOutcome(cid, media)
 
-    async def extend_label(self, project_id: str, workflow_id: str) -> str:
-        """Open the clip's editor by its workflow id and read the model "Extend (…)" will use."""
+    async def extend_label(self, project_id: str, workflow_id: str) -> str | None:
+        """Open the clip's editor by its workflow id and read the model "Extend (…)" will use
+        (None: Omni Extend, which names no model in its menu; see ``_extend_menu_label``)."""
         await self._ui.goto(f"{PROJECT_URL.format(id=project_id)}/edit/{workflow_id}")
         try:
             await self._ui.wait_for(EDITOR_ANY, timeout_s=30.0)
@@ -1128,7 +1150,7 @@ class FlowPage:
         return await self._extend_menu_label()
 
     async def extend_label_in_scene(self, project_id: str, scene_id: str,
-                                    last_prompt: str | None, *, clips: int) -> str:
+                                    last_prompt: str | None, *, clips: int) -> str | None:
         """Open a scene with its LAST clip selected, then read Extend's model (live: an extension
         has no editor of its own; its scene opens with the first clip selected, and Extend
         continues the selected clip). Every check runs before anything is sent."""
@@ -1164,16 +1186,65 @@ class FlowPage:
                                hint="re-run; if it persists, the Flow UI changed")
         return await self._extend_menu_label()
 
-    async def _extend_menu_label(self) -> str:
-        """Open the selected clip's "Add clip" menu and read the model "Extend (…)" will use."""
+    async def _extend_menu_label(self) -> str | None:
+        """Open the selected clip's "Add clip" menu and read how "Extend" is offered: the model
+        in "Extend (Veo 3.1 - Lite)" (the old Veo Extend, priced from aistudio's table), or None
+        for a bare "Extend" (Omni Extend: the model and the cost show in its own box)."""
         await self._ui.dispatch_click("button", ADD_CLIP)
         await self._ui.pause(1200)
-        text = await self._ui.inner_text("menuitem", EXTEND)
+        text = " ".join((await self._ui.inner_text("menuitem", EXTEND)).split())
         match = re.search(r"Extend \((.+)\)", text)
+        if match is not None:
+            return match.group(1).strip()
+        if EXTEND_ITEM.search(text):
+            return None
+        raise BrowserError("Flow offered no Extend for this clip",
+                           hint="re-run with --visible to see the clip's Add clip menu; the "
+                                "Flow UI may have changed")
+
+    async def extend_quote(self, seconds: int | None) -> ExtendQuote:
+        """Call after extend_label returned None (the Add clip menu is open). Opens Omni Extend's
+        box, sets its length to ``seconds`` (None keeps Flow's own) and reads what Flow says
+        it will use. Free: nothing is sent."""
+        await self._ui.dispatch_click("menuitem", EXTEND)
+        await self._ui.pause(1500)
+        if EXTEND_PANEL not in await self._ui.text_of("body"):
+            raise BrowserError("Flow's Extend box did not open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        return await self._read_extend_settings(seconds)
+
+    async def _read_extend_settings(self, seconds: int | None) -> ExtendQuote:
+        """Open the length pop-up, optionally set the slider, read the length and the cost Flow
+        shows, close it. The slider takes keys: Home is the shortest, each Right one second."""
+        await self._ui.dispatch_click("button", EXTEND_SETTINGS)
+        await self._ui.pause(900)
+        if seconds is not None:
+            await self._ui.press("slider", EXTEND_SLIDER, "Home")
+            for _ in range(seconds - EXTEND_MIN_S):
+                await self._ui.press("slider", EXTEND_SLIDER, "ArrowRight")
+            await self._ui.pause(600)
+        shown = await self._ui.text_of(EXTEND_POPUP)
+        match = _EXTEND_POPUP.search(shown)
         if match is None:
-            raise BrowserError("Flow offered no Extend for this clip",
-                               hint="only Veo clips can be extended")
-        return match.group(1).strip()
+            raise BrowserError("Flow's Extend length box showed no cost; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        length, credits = int(match.group(1)), int(match.group(2).replace(",", ""))
+        if seconds is not None and length != seconds:
+            raise BrowserError(f"Flow's Extend length reads {length} s, not {seconds} s; "
+                               "nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        for _ in range(EXTEND_CLOSE_TRIES):  # Escape closes it; the chip toggles it otherwise
+            await self._ui.key("Escape")
+            await self._ui.pause(500)
+            if not await self._ui.count(EXTEND_POPUP):
+                break
+            await self._ui.dispatch_click("button", EXTEND_SETTINGS)
+            await self._ui.pause(500)
+        else:
+            raise BrowserError("Flow's Extend length box would not close; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        chip = _EXTEND_CHIP.search(" ".join((await self._ui.text_of("body")).split()))
+        return ExtendQuote(length, credits, _label(chip.group(2)) if chip else None)
 
     async def extend(self, prompt: str, *, timeout_s: float) -> FlowOutcome:
         """Call after extend_label (the Add clip menu is open). Spends credits."""
@@ -1200,6 +1271,56 @@ class FlowPage:
                                          only=set(self.paid_media))
         return FlowOutcome(outcome.media, credits if outcome.credits_left is None
                            else outcome.credits_left, outcome.timed_out)
+
+    async def extend_omni(self, prompt: str, quote: ExtendQuote, *, timeout_s: float,
+                          known: set[str]) -> FlowOutcome:
+        """Call after extend_quote (its box is open). Types the prompt, reads the length and the
+        cost again (they must still be the quote that was approved), presses Start and follows
+        the new clip. Spends credits. Flow's own start reply (fZytfe) names the clip when it is
+        still sent; otherwise the media created after Start and not in ``known`` (the source
+        and the project's media before Start) are followed, as for an edit."""
+        await self._ui.type_text(EDITOR_LAST, prompt)
+        await self._wait_for_prompt(EDITOR_LAST, prompt)
+        if not await self._ui.visible("button", EXTEND_EXIT, exact=True):  # not the edit box
+            raise BrowserError("Flow's Extend box is not the one open; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        again = await self._read_extend_settings(None)
+        if (again.seconds, again.credits) != (quote.seconds, quote.credits):
+            raise BrowserError(f"Flow's Extend now reads {again.seconds} s for {again.credits} "
+                               f"credits, not the {quote.seconds} s for {quote.credits} aistudio "
+                               "checked; nothing was spent",
+                               hint="re-run; if it persists, the Flow UI changed")
+        async with self._ui.responses(marker=FLOW_RPC) as log:
+            since = self._clock()
+            self.started = True
+            await self._ui.click("button", START, exact=True, nth=-1)
+            await self._ui.pause(1000)
+            await self._refuse_rights()
+            started = await log.next("fZytfe", timeout_s=FOLLOW_STARTED_S)
+            if started is None:
+                await self._refuse_rights()
+            only: set[str] | None = None
+            credits = None
+            if started is not None:
+                if started.status >= 400:
+                    raise BrowserError("Flow did not start the extension",
+                                       hint="it may still be charged: check the project in Flow "
+                                            "before re-running")
+                credits, media = extend_started(decode_batch(started.text).get("fZytfe"))
+                if media:
+                    only = {m.media_id for m in media}
+                    self.paid_media = [m.media_id for m in media]
+            outcome = await self._follow(log, 1, timeout_s, "video", since, only=only,
+                                         exclude=known)
+        return FlowOutcome(outcome.media, credits if outcome.credits_left is None
+                           else outcome.credits_left, outcome.timed_out, outcome.failed)
+
+    async def _refuse_rights(self) -> None:
+        """Flow's rights question is the person's to answer: never click it from here."""
+        if await self._ui.visible("button", AGREE, exact=True):
+            raise BrowserError("Flow asked its rights question and aistudio does not answer it",
+                               hint="check the clip's page in Flow before re-running; "
+                                    "nothing was confirmed")
 
     async def open_frames(self, project_id: str, where: str, *, clips: int) -> None:
         """Open a player with Save frame: ``edit/<workflow>`` (a clip's editor) or

@@ -1347,6 +1347,45 @@ holds one song, so paging, other statuses and the model field are not seen live.
   passes with two ingredients (the first quote-only check had its other guards passing), and
   that the follow finds the job as before.
 
+### Omni Extend: Flow's current Extend (2026-11-11, free exploration, no credits spent)
+
+- **Report.** `flow extend` failed with "Flow offered no Extend for this clip" for an Omni 1.2
+  Flash clip and for a Veo 3.1 Fast clip. Cause: the Add clip menu item now reads just "Extend",
+  and aistudio's reader wanted "Extend (<model>)".
+- **Where it is.** The clip's editor (`/project/<id>/edit/<workflow>`) is the Scenebuilder: a
+  timeline, "Done editing scene" at the top, a prompt box ("Describe how to edit this video…" =
+  Omni edit). The "+" at the clip's tail is the button "Add clip". It opens a menu with two
+  items: "Add clip" (opens "Select media": appends an existing project clip) and "Extend"
+  (`keyboard_double_arrow_right Extend`, no model in the name). The same two items showed on a
+  middle clip of a 3-clip scene (`/scene/<id>`), on an Omni clip (8 s) and on a Veo 3.1 Fast clip
+  (8 s, first/last-frame): Extend is not limited to Omni clips.
+- **The Extend box.** Choosing Extend puts a grey "Extend" block after the clip on the timeline
+  and changes the prompt box: placeholder "What happens next?", a length chip (button
+  `Settings trigger`, text `4s`; `3s` on the Veo clip), a model chip (`pen_magic Omni 1.2 Flash`;
+  no picker, same for Veo and Omni sources), a chip "Extend ×" (button "Exit extend mode") and
+  "Start generation". The model is not chosen by the person.
+- **The quote.** The length chip opens a pop-up (`.settings-content-overlay`, a CDK overlay):
+  "Extend Length", the value ("4 Sec"), a slider (`input[type=range]`, aria-label "Extend Length",
+  min 3, max 10, step 1), and Flow's own cost line "Generating will use <a
+  class=credit-cost-link>12 credits</a>". Keys on the slider (Home, ArrowRight) change it and the
+  cost live: 3 s = 9, 4 s = 12, 5 s = 15, 6 s = 18, 7 s = 21, 10 s = 30 credits, so **3 credits a
+  second**, for both the Omni and the Veo source. Escape closes the pop-up.
+- **What was not seen.** Start was never pressed (a free exploration; the auto-mode classifier
+  refused a guarded Start, and nothing was retried). So the following is unconfirmed: whether
+  Start asks a permission card or the rights question, which RPC it sends (the old Extend sent
+  `fZytfe`), and how long the clip is in the end. `FlowPage.extend_omni` therefore (1) re-reads
+  length and cost just before Start and stops if they differ, (2) never clicks "I agree", (3)
+  waits 8 s for an `fZytfe` start reply and otherwise follows media created after Start that
+  were not in the project before.
+- **Old path.** A clip whose menu reads "Extend (Veo 3.1 - Lite)" is still handled as before
+  (direct spend, 10 credits from the table). No such clip was seen today.
+- **Jump to.** Not found. The clip editor's menus show no "Jump to": the "⋮" menu has only
+  Download project, help and about items; the Add clip menu has Add clip and Extend; a
+  right-click on a timeline clip offers Copy, Paste, Save to Project, Download, Delete. The
+  project page shows no Scenebuilder entry besides "Scenes". So there is no `flow jump-to`.
+- **Old extensions.** In a scene made by the old Extend, an extension clip shows a "Redo Extend"
+  button.
+
 ## Reading one saved prompt: `GetPrompt` (2026-11)
 
 Found by probing the guessed name with the `ListPrompts` id; read-only, plain HTTP, no BotGuard

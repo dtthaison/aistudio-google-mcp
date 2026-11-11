@@ -435,6 +435,10 @@ def _render_music(data: dict[str, Any]) -> None:
 
 
 def _render_files(data: dict[str, Any]) -> None:
+    if data.get("status") == "quoted":
+        stdout.print(f"Flow quotes {data['credits']} credits for a {data['seconds']}-second "
+                     f"extension. Nothing was sent. Re-run with --max-credits {data['credits']} "
+                     "to extend.", markup=False)
     if data.get("status") == "timeout":
         stdout.print(f"Still running in Flow ({data['credits_spent']} credits spent): "
                      f"{data['project_url']}", markup=False)
@@ -787,8 +791,12 @@ def edit_cmd(state: CliState, media_id: str, instruction: str, project: str | No
 @click.argument("media_id")
 @click.argument("prompt")
 @click.option("--project", help="Flow project id or link (default: the 'aistudio' project).")
+@click.option("--duration", type=click.IntRange(3, 10),
+              help="Seconds to add, 3 to 10 (Flow's default is its own; Omni Extend only).")
 @click.option("--max-credits", type=click.IntRange(0),
-              help="Spend at most this many credits (extend with Veo 3.1 Lite costs 10).")
+              help="Spend at most this many credits; Flow's own quote is checked against it "
+                   "(Omni Extend costs 3 credits a second). Without it nothing is sent: the "
+                   "quote is printed.")
 @click.option("-o", "--out", type=click.Path(path_type=Path), help="Output file for the new clip.")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
 @click.option("--timeout", type=click.IntRange(30), default=1200, show_default=True)
@@ -797,14 +805,15 @@ def edit_cmd(state: CliState, media_id: str, instruction: str, project: str | No
 @click.pass_obj
 @handle_errors
 def extend_cmd(state: CliState, media_id: str, prompt: str, project: str | None,
-               max_credits: int | None, out: Path | None, force: bool, timeout: int,
-               visible: bool, json_output: bool) -> None:
-    """Extend a Veo clip with PROMPT (Flow charges without a quote; priced from aistudio's
-    measured table)."""
+               duration: int | None, max_credits: int | None, out: Path | None, force: bool,
+               timeout: int, visible: bool, json_output: bool) -> None:
+    """Extend a clip with PROMPT: Flow's Extend (Omni, 3 to 10 s from the clip's "+") shows its
+    cost before it starts, and aistudio checks that quote against --max-credits."""
     state.require_browser()
     _finish(asyncio.run(flow_extend(state.profile(), media_id, prompt, max_credits=max_credits,
-                                    project=project, out=out, overwrite=force,
-                                    timeout_s=float(timeout), visible=visible)), json_output)
+                                    project=project, duration=duration, out=out,
+                                    overwrite=force, timeout_s=float(timeout), visible=visible)),
+            json_output)
 
 
 def _warn(data: dict[str, Any]) -> None:

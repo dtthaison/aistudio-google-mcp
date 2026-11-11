@@ -48,7 +48,7 @@ USD_PRICES: dict[str, float] = {
 NOTHING_SPENT = frozenset({"VALIDATION_ERROR", "OVER_BUDGET", "PLAN_MISMATCH", "AUTH_ERROR",
                            "NOT_FOUND", "RATE_LIMITED"})
 # Commands whose run without --max-credits only quotes: no spend, so nothing to log.
-QUOTE_FIRST = frozenset({"flow video", "flow storyboard", "flow music generate"})
+QUOTE_FIRST = frozenset({"flow video", "flow extend", "flow storyboard", "flow music generate"})
 
 _TS = "%Y-%m-%dT%H:%M:%SZ"
 _SPAN = re.compile(r"^([1-9]\d*)([mhdw])$")

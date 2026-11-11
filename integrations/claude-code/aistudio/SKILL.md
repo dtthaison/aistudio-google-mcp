@@ -90,7 +90,7 @@ quotes and write each `'` as `'\''`.
 | Character voices: list, set, remove (free) | `aistudio flow character voices [--search TEXT] --json` (Flow's 30 presets and the project's custom voices), `aistudio flow character voice <id> <preset or custom voice name or media id> --json`, `aistudio flow character voice <id> --clear --json`; `flow character list` shows each character's `voice` |
 | New custom voice for a character (0 credits measured) | `aistudio flow character voice <id> <preset> --style '<performance style>' [--voice-name '<Name>'] --json`: Flow saves a sample of the preset spoken in that style as a project voice, then gives it to the character |
 | Edit a Flow clip (Omni 1.1 Flash, 8-second clips: **20 credits, no quote from Flow**) | `aistudio flow edit <media-id> '<instruction>' --max-credits 20 -o out.mp4 --json` |
-| Extend a Flow video (Veo 3.1 Lite: 10 credits, **no quote from Flow**) | `aistudio flow extend <media-id> '<what happens next>' --max-credits 10 -o next.mp4 --json` |
+| Extend a Flow video (Omni Extend: 3 credits a second, 3 to 10 s; quote shown by Flow's own box) | `aistudio flow extend <media-id> '<what happens next>' --duration 4 --json` (quote only), then the same with `--max-credits <quote> -o next.mp4` |
 | Flow Tools: list, read, save the code (free) | `aistudio flow tool list [--kind mine\|template\|community] [--search TEXT] --json`, `aistudio flow tool get <id> --json`, `aistudio flow tool export <id> <empty folder> --json` |
 | Build or change a Flow Tool (no credits; a daily limit on builds) | `aistudio flow tool create --prompt-file <file> --json`, `aistudio flow tool edit <id> --prompt-file <file> --json` |
 | Use a Flow Tool: list its controls, then run steps and save what it downloads (free unless its code calls `Flow.generate`) | `aistudio flow tool use <id> --json` lists `controls` (n, kind, label, value, min/max); `aistudio flow tool use <id> '<N or label>=<value>' '<N or label>' … -o <folder> --json` runs them in order: `=VALUE` sets a box, slider, checkbox or file upload (a local path), no value presses a button, `'@<label>'` waits until that control is there and enabled, `'?<text>'` waits until the tool's screen shows the text (each up to `--step-timeout` seconds). The result has `steps`, `files` (saved downloads) and `text` (the tool's screen) |
@@ -156,8 +156,9 @@ quotes and write each `'` as `'\''`.
   `download` needs `flow music generate` in front.
 
   For `flow video`/`flow image`, `OVER_BUDGET` and `PLAN_MISMATCH` mean Flow's offer was rejected
-  and nothing was spent. For `flow extend`, `flow edit`, `flow character create` and
-  `flow character body`, `OVER_BUDGET` is aistudio's own refusal before anything was sent.
+  and nothing was spent. For `flow edit`, `flow character create` and `flow character body`, `OVER_BUDGET` is
+  aistudio's own refusal before anything was sent; so is it for `flow extend`, against Flow's
+  quote.
   A quote-only run with a local file (`--i-have-rights`) still uploads the file. Pass the reported
   `uploads[].media_id` in the paid run, because the same file name cannot be uploaded twice.
   `"quote_source": "page"` (with a warning) means Flow's chat reply could not be read (its chat
@@ -205,15 +206,21 @@ quotes and write each `'` as `'\''`.
 - After `flow extend`, `flow scene download <scene_id>` gives the source and the extension joined.
   `scene_id` can be null when Flow had not listed the scene yet: find it with `flow scene list`.
   To make it longer, run `flow extend` again on the newest clip (the scene's last clip); each
-  extension adds 7–8 s. Only the last clip of a scene can be extended.
+  extension adds the length you asked for (`--duration 3..10`; the old Veo Extend added 7–8 s).
+  Only the last clip of a scene can be extended.
 - Stitch trims are whole seconds (`<id>@2-5`).
 - `flow edit` costs 20 credits with no quote: ask the user before passing `--max-credits 20`.
-  Only 8-second Veo 3.1 Lite clips have a measured price. Flow always extends with Veo 3.1 Lite
-  (also for Fast clips), so there is no Fast/Quality extend.
-- `flow extend` and `flow character create` are charged without a quote. aistudio checks its own
-  measured price table. Ask the user before passing `--max-credits` for an extend, and relay any
-  warning that Flow charged a different amount. "no measured price" is final: do not retry with a
-  higher `--max-credits`.
+  Only 8-second Veo 3.1 Lite clips have a measured price.
+- Since 2026-11-11 Flow's Extend is Omni Extend (Omni 1.2 Flash, from the "+" on a clip's tail,
+  for Omni and Veo clips alike). Its box shows "Generating will use N credits" before Start; `flow
+  extend` reads that number (`"quote_source": "page"`). Without `--max-credits` it sends nothing
+  and returns `status: quoted` with `credits` and `seconds`; with it, a quote above the budget
+  is `OVER_BUDGET` before anything is sent. Ask the user before passing `--max-credits`. If a
+  clip still offers the old "Extend (Veo 3.1 - Lite)", it is charged without a quote and priced
+  from the measured table (10 credits).
+- `flow character create` is charged without a quote. aistudio checks its own measured price
+  table. Ask the user before passing `--max-credits`, and relay any warning that Flow charged a
+  different amount. "no measured price" is final: do not retry with a higher `--max-credits`.
 - `flow music list` has no `model` yet (`null`: Flow Music's song records do not name it).
 - Image and music results: `files[]` holds `path`, `mime_type` and `bytes`. Music `text` is the
   lyrics, or `<instrumental>`. Relay any `warnings` (e.g. the file's extension does not match its
@@ -346,7 +353,8 @@ fixed inputs, not from Flow remembering.
 
    Quote first and ask (the rules above). Draft on Veo 3.1 Lite (10 credits a clip, measured for
    both); Fast is about 20 and Quality about 100, so upgrade only approved shots.
-   - Same shot continuing: `flow extend <last clip>` (10 credits, no quote: ask first).
+   - Same shot continuing: `flow extend <last clip> '<prompt>' --duration 4` (quote first: 3
+     credits a second; ask before passing `--max-credits`).
    - New angle in the same moment: `flow frame save <clip>` and pass the frame as
      `--start-frame` or `--ingredient` of the next clip.
    - Hard cut: a new keyframe from step 3.

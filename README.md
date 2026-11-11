@@ -132,7 +132,8 @@ aistudio flow media --type video               # media ids in the "aistudio" Flo
 aistudio flow image --prompts-file prompts.jsonl -o shots/   # one prompt per line; the free model makes ALL of them at once
 aistudio flow image --prompts-file prompts.jsonl -o shots/ --start-at 3   # resume a stopped batch at prompt 3
 aistudio flow video "the apple starts rolling" --start-frame apple.jpg --i-have-rights --max-credits 10
-aistudio flow extend <media-id> "the apple rolls off the table" --max-credits 10 -o next.mp4
+aistudio flow extend <media-id> "the apple rolls off the table"          # Omni Extend: shows Flow's quote, sends nothing
+aistudio flow extend <media-id> "the apple rolls off the table" --duration 4 --max-credits 12 -o next.mp4   # 3 credits a second, 3 to 10 s
 aistudio flow edit <media-id> "make it black and white" --max-credits 20 -o bw.mp4
 aistudio flow character create Robo "a friendly cartoon robot with round blue eyes" -o robot.png
 aistudio flow character create Apple --photo <image-media-id>   # free: the photo becomes the character
