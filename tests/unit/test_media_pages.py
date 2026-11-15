@@ -8,6 +8,7 @@ from aistudio._browser.media_pages import (
     MUSIC_EDITOR,
     MUSIC_PROMPT,
     REMOVE_MEDIA,
+    RIGHTS_AGREE,
     RUN,
     TRANSCRIBE,
     ImagePage,
@@ -15,7 +16,7 @@ from aistudio._browser.media_pages import (
     TranscribePage,
 )
 from aistudio._browser.ui import CapturedResponse
-from aistudio.exceptions import BrowserError
+from aistudio.exceptions import BrowserError, ValidationError
 
 RESPONSE = CapturedResponse("GenerateContent", 200, "[1]", "[2]")
 
@@ -129,3 +130,31 @@ async def test_attach_waits_until_the_upload_lets_the_page_run(fake_ui):
     ui = fake_ui(labels={("button", REMOVE_MEDIA): [[REMOVE_MEDIA]]})
     await TranscribePage(ui, now=Clock()).attach(["/a.wav"])
     assert ("wait_enabled", "button", TRANSCRIBE) in ui.ops
+
+
+async def test_the_rights_dialog_stops_the_run_without_i_have_rights(fake_ui):
+    # Live 2026-11-15: setting a file opens AI Studio's rights dialog ("Acknowledge"); only the
+    # person answers it, so without --i-have-rights the run stops at once.
+    ui = fake_ui(visible={("button", RIGHTS_AGREE.pattern): [True]})
+    for page in (TranscribePage(ui, now=Clock()), ImagePage(ui, now=Clock())):
+        with pytest.raises(ValidationError) as info:
+            await page.attach(["/talk.wav"])
+        assert "--i-have-rights" in info.value.hint
+        assert "nothing was generated" in info.value.hint
+    assert not any(op[0] == "click" for op in ui.ops)
+
+
+async def test_i_have_rights_acknowledges_the_dialog(fake_ui):
+    ui = fake_ui(visible={("button", RIGHTS_AGREE.pattern): [True, False]},
+                 labels={("button", REMOVE_MEDIA): [[], [REMOVE_MEDIA]]})
+    await TranscribePage(ui, now=Clock()).attach(["/talk.wav"], rights=True)
+    assert ("click", "button", RIGHTS_AGREE.pattern, 0) in ui.ops
+    assert [op[0] for op in ui.ops].count("set_files") == 1
+    assert ("wait_enabled", "button", TRANSCRIBE) in ui.ops
+
+
+async def test_a_file_the_dialog_dropped_is_set_again_once(fake_ui):
+    ui = fake_ui(visible={("button", RIGHTS_AGREE.pattern): [True, False]},
+                 labels={("button", REMOVE_MEDIA): [[]] * 15 + [[REMOVE_MEDIA]]})
+    await ImagePage(ui, now=Clock()).attach(["/a.png"], rights=True)
+    assert [op[0] for op in ui.ops].count("set_files") == 2

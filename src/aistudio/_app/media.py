@@ -190,6 +190,7 @@ async def transcribe(
     overwrite: bool = False,
     visible: bool = False,
     timeout_s: float = 600.0,
+    i_have_rights: bool = False,
     client_factory: Callable[[Profile], AIStudioClient] = AIStudioClient.from_profile,
     browser: Callable[..., Any] = open_browser,
     on_start: Callable[[], None] | None = None,
@@ -220,7 +221,7 @@ async def transcribe(
     async with browser(profile, window="visible" if visible else "minimized") as ui:
         page = TranscribePage(ui)
         await page.open(model_id)
-        await page.attach([str(path)])
+        await page.attach([str(path)], rights=i_have_rights)
         await page.options(timestamps=timestamps, speakers=diarize, smart=smart)
         await page.vocabulary(vocabulary)
         captured = await page.run(timeout_s=timeout_s)
@@ -352,6 +353,7 @@ async def _generate_media(
     now: Callable[[], datetime] = datetime.now,
     on_start: Callable[[], None] | None = None,
     images: list[Path | str] | None = None,
+    i_have_rights: bool = False,
 ) -> dict[str, Any]:
     prompt = prompt.strip()  # e.g. a --prompt-file's trailing newline
     if not prompt:
@@ -369,7 +371,7 @@ async def _generate_media(
         page = page_class(ui)
         await page.open(model_id)
         if inputs:  # edits: every input is attached (uploaded to Drive) before the prompt runs
-            await page.attach([str(path) for path in inputs])
+            await page.attach([str(path) for path in inputs], rights=i_have_rights)
         await page.set_prompt(prompt)
         captured = await page.run()
     if captured.status >= 400:

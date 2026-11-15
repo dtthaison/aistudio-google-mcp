@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import quote
 
 from aistudio._browser.ui import CapturedResponse, ResponseLog, Ui
-from aistudio.exceptions import BrowserError
+from aistudio.exceptions import BrowserError, ValidationError
 
 CHAT_URL = "https://aistudio.google.com/prompts/new_chat?model={model}"
 GENERATE_METHOD = "GenerateContent"
@@ -28,6 +28,12 @@ MUSIC_PROMPT = "Prompt input"
 GENERATE = "Generate"
 FILE_INPUT = "input[type=file]"
 REMOVE_MEDIA = "Remove media"  # one chip per attached file
+# Live 2026-11-15: setting a file opens "Start creating with media in Google AI Studio", which
+# asks the person to confirm their rights to the upload (Cancel / Acknowledge). Only
+# --i-have-rights answers it. The button is named by its aria-label; its text is "Acknowledge".
+RIGHTS_AGREE = re.compile(r"^(Agree to the copyright acknowledgement|Acknowledge)$")
+RIGHTS_HINT = ("pass --i-have-rights if you have the necessary rights to the file, or answer "
+               "AI Studio once yourself with --visible; nothing was generated")
 TRANSCRIBE = "Transcribe"
 # Sent with these types (live: as video/* the page took neither; as audio both transcribed)
 AUDIO_TYPES = {".mp4": "audio/mp4", ".webm": "audio/webm"}
@@ -37,6 +43,7 @@ VOCABULARY = "Custom vocabulary"
 SWITCHES = {"timestamps": "Word timestamps", "speakers": "Speaker labels",
             "smart": "Smart transcription"}
 ATTACH_TIMEOUT_S = 60.0
+ACK_RESEND_S = 10.0  # no chip this long after acknowledging: set the files again, once
 RUN = re.compile(r"^Run\b")  # the image page's Run ("Run keyboard_command_key …")
 UPLOAD_S_PER_MB = 5.0  # the action button stays disabled until the Drive upload ends (live)
 
@@ -55,13 +62,32 @@ async def _await_generation(log: ResponseLog, kind: str, timeout_s: float) -> Ca
 
 
 async def _attach(ui: Ui, paths: list[str], now: Callable[[], float],
-                  ready: tuple[str, Any], types: dict[str, str] | None = None) -> None:
+                  ready: tuple[str, Any], types: dict[str, str] | None = None, *,
+                  rights: bool = False) -> None:
     """Give the page's file input these files, wait for each chip, then for the page's action
     button: the chip shows at once, but the button stays disabled until the Drive upload ends
-    (live), and pressing earlier would send the request without the files."""
+    (live), and pressing earlier would send the request without the files.
+
+    AI Studio's rights dialog is acknowledged only when the person passed --i-have-rights
+    (``rights``); without it the command stops at once instead of waiting out the chip."""
     await ui.set_files(FILE_INPUT, paths, types)
     deadline = now() + ATTACH_TIMEOUT_S
-    while len(await ui.labels("button", REMOVE_MEDIA)) < len(paths):
+    acknowledged_at: float | None = None
+    resent = False
+    while (chips := len(await ui.labels("button", REMOVE_MEDIA))) < len(paths):
+        if await ui.visible("button", RIGHTS_AGREE):
+            if not rights:
+                raise ValidationError("AI Studio asks you to confirm you have the rights to "
+                                      "the files you upload", hint=RIGHTS_HINT)
+            await ui.click("button", RIGHTS_AGREE)
+            acknowledged_at = now()
+            await ui.pause(500)
+            continue
+        # The dialog may have dropped the file (not yet seen live): set it once more.
+        if (acknowledged_at is not None and not resent and chips == 0
+                and now() - acknowledged_at >= ACK_RESEND_S):
+            await ui.set_files(FILE_INPUT, paths, types)
+            resent = True
         if now() >= deadline:
             raise BrowserError(f"AI Studio did not take {len(paths)} file(s); nothing was "
                                "generated",
@@ -79,8 +105,8 @@ class ImagePage:
     async def open(self, model_id: str) -> None:
         await self._ui.goto(_url(model_id))
 
-    async def attach(self, paths: list[str]) -> None:
-        await _attach(self._ui, paths, self._now, ("button", RUN))
+    async def attach(self, paths: list[str], *, rights: bool = False) -> None:
+        await _attach(self._ui, paths, self._now, ("button", RUN), rights=rights)
 
     async def set_prompt(self, text: str) -> None:
         await self._ui.fill("textbox", IMAGE_PROMPT, text)
@@ -120,8 +146,9 @@ class TranscribePage:
     async def open(self, model_id: str) -> None:
         await self._ui.goto(_url(model_id))
 
-    async def attach(self, paths: list[str]) -> None:
-        await _attach(self._ui, paths, self._now, ("button", TRANSCRIBE), AUDIO_TYPES)
+    async def attach(self, paths: list[str], *, rights: bool = False) -> None:
+        await _attach(self._ui, paths, self._now, ("button", TRANSCRIBE), AUDIO_TYPES,
+                      rights=rights)
 
     async def options(self, **wanted: bool | None) -> None:
         """Set each run-settings switch that was asked for; press it only when it differs."""

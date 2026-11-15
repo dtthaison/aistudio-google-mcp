@@ -26,6 +26,9 @@ from aistudio.cli.inputs import read_text
 from aistudio.cli.output import emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
 
+RIGHTS_HELP = ("Confirm you have the rights to the files you upload; AI Studio asks this before "
+               "an upload, and aistudio never answers it for you.")
+
 
 @click.group()
 def generate() -> None:
@@ -104,13 +107,15 @@ def _media_command(name: str, category: str, default_model: str, help_text: str,
         state.require_browser()
         content = read_text(prompt, prompt_file, arg="PROMPT", option="--prompt-file")
         run = generate_image if name == "image" else generate_music
-        inputs = {"images": list(extra["images"])} if extra.get("images") else {}
+        inputs = ({"images": list(extra["images"]), "i_have_rights": extra["i_have_rights"]}
+                  if extra.get("images") else {})
         result = asyncio.run(run(state.profile(), content, model=model, out=out,
                                  overwrite=force, visible=visible,
                                  on_start=_notice_for(name, visible, json_output), **inputs))
         emit(result, json_output=json_output, render=_render_media)
 
     if name == "image":  # an input image to edit or combine (uploaded to your Drive by AI Studio)
+        command = click.option("--i-have-rights", is_flag=True, help=RIGHTS_HELP)(command)
         command = click.option(
             "--image", "images", multiple=True,
             type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -166,19 +171,22 @@ def voices_list(state: CliState, search: str | None, json_output: bool) -> None:
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
 @click.option("--timeout", type=click.IntRange(30), default=600, show_default=True,
               help="Seconds to wait for the transcript (raise it for long recordings).")
+@click.option("--i-have-rights", is_flag=True, help=RIGHTS_HELP)
 @click.option("--visible", is_flag=True, help="Show the browser window instead of minimizing it.")
 @json_option
 @click.pass_obj
 @handle_errors
 def transcribe_cmd(state: CliState, audio: Path, model: str, timestamps: bool | None,
                    diarize: bool | None, smart: bool | None, vocabulary: str, out: Path | None,
-                   force: bool, timeout: int, visible: bool, json_output: bool) -> None:
+                   force: bool, timeout: int, i_have_rights: bool, visible: bool,
+                   json_output: bool) -> None:
     """Turn the speech in AUDIO into text (uses quota; AI Studio uploads the audio to your
     Google Drive)."""
     state.require_browser()
     result = asyncio.run(transcribe(state.profile(), audio, model=model, timestamps=timestamps,
                                     diarize=diarize, smart=smart, vocabulary=vocabulary, out=out,
                                     overwrite=force, visible=visible, timeout_s=float(timeout),
+                                    i_have_rights=i_have_rights,
                                     on_start=_notice_for("transcription", visible,
                                                          json_output)))
 

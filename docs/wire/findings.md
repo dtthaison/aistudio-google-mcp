@@ -781,6 +781,23 @@ blocked; the RPCs that went through are free.
     against Drive. The session's permission check refused that, so the copies stay (README).
   - Runs did not appear in `aistudio prompt list`: these copies belong to no saved prompt.
 
+## AI Studio's upload rights notice (2026-11-15, free probe, no run)
+
+- `aistudio transcribe` failed with "AI Studio did not take 1 file(s)" on a 3 s AIFF that worked
+  in October. The page, its file input and its accepted types were unchanged.
+- Setting the file now opens a modal, "Start creating with media in Google AI Studio": confirm
+  the rights to anything uploaded (including images of minors), follow the Prohibited Use
+  Policy, and uploads "may be used to develop and improve Google products". Buttons: "Cancel"
+  and "Acknowledge" (accessible name `Agree to the copyright acknowledgement`). While it shows,
+  they are the only buttons in the accessibility tree, so the "Remove media" chip never appears.
+- aistudio treats it like Flow's rights question: `--i-have-rights` presses Acknowledge;
+  without it the command stops at once ("nothing was generated").
+- Not yet seen: whether Acknowledge is remembered for the account, and whether the file goes
+  through after it or must be set again. aistudio sets the file once more when no chip shows
+  10 s after acknowledging.
+- Image editing (`generate image --image`) uses the same file input and is assumed to get the
+  same notice; it was not probed.
+
 ## Session cookies go stale after browser runs (2026-10-09)
 
 - HTTP commands read `storage_state.json`, which only `aistudio login` wrote. Chrome rotates the
