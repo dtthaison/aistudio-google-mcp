@@ -192,7 +192,11 @@ quotes and write each `'` as `'\''`.
   so a re-run is safe. The log holds no prompt text or error messages: those are in the error
   output. If `aistudio spend` cannot read the log, treat the run as possibly paid.
 - **Never pass `--i-have-rights`** unless the user confirmed they have the rights to that exact
-  file. It answers Flow's "Rights to use this image" question for them.
+  file. It answers Flow's "Rights to use this image" question for them, and AI Studio's upload
+  notice ("Start creating with media", Acknowledge) for `transcribe` and `generate image
+  --image`. When `transcribe` or `--image` fails with "AI Studio asks you to confirm you have the
+  rights", nothing was generated: ask the user, then re-run with `--i-have-rights` or let them
+  answer it once themselves with `--visible`.
 - Flow character names are unique per project (Flow attaches characters by name). If
   `--character` says several characters share a name, show the user `flow character list` and ask
   which one to rename; never pick one yourself. A `PLAN_MISMATCH` about characters or media means

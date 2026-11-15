@@ -182,6 +182,11 @@ def test_generate_image_passes_input_images(logged_in_profile, monkeypatch, tmp_
                                    "--image", str(second), "--json"])
     assert res.exit_code == 0, res.output
     assert calls[0][2]["images"] == [first, second]
+    assert calls[0][2]["i_have_rights"] is False  # never answered for the person
+    res = CliRunner().invoke(cli, ["generate", "image", "make it blue", "--image", str(first),
+                                   "--i-have-rights", "--json"])
+    assert res.exit_code == 0, res.output
+    assert calls[1][2]["i_have_rights"] is True
 
 
 def test_transcribe_command(logged_in_profile, monkeypatch, tmp_path):
@@ -199,10 +204,13 @@ def test_transcribe_command(logged_in_profile, monkeypatch, tmp_path):
     assert calls[0][1] == (audio,)
     assert calls[0][2] == {"model": "gemini-3.5-transcribe", "timestamps": True, "diarize": True,
                            "smart": False, "vocabulary": "Yuri Handmade", "out": out,
-                           "overwrite": False, "visible": False, "timeout_s": 600.0}
+                           "overwrite": False, "visible": False, "timeout_s": 600.0,
+                           "i_have_rights": False}
     res = CliRunner().invoke(cli, ["transcribe", str(audio)])
     assert "Xin chào Yuri Handmade." in res.stdout
     assert calls[1][2]["timestamps"] is None  # the page's own setting stays when not asked
+    CliRunner().invoke(cli, ["transcribe", str(audio), "--i-have-rights"])
+    assert calls[2][2]["i_have_rights"] is True
 
 
 

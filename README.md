@@ -263,7 +263,10 @@ takes no extra ingredients (not measured). New characters have no voice: set one
   instead (`"quote_source": "page"` in the JSON, and a warning); every check and the
   `--max-credits` limit apply the same way.
 - **`--i-have-rights`** answers Flow's "Rights to use this image: I agree" for a start frame or
-  photo you upload. aistudio never answers it for you. Pass it only when it's true.
+  photo you upload, and AI Studio's "Start creating with media" notice (Acknowledge) that can
+  show when `transcribe` or `generate image --image` uploads a file. aistudio never answers
+  either for you: without the flag the command stops before anything is generated. Pass it only
+  when it's true, or answer AI Studio's notice once yourself with `--visible`.
 - A run that times out may still finish, and be charged, on Google's side. Check AI Studio or
   Flow before you run it again.
 - **The spend log.** Every run that spent, or may have spent, is added to a local file
