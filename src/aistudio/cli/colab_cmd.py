@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404: runs the user's own Colab CLI with an argument list
-
 import click
 
-from aistudio._app.colab import build_command, colab_account, find_colab_python, needs_spend_ack
+from aistudio._app.colab import colab_account, needs_spend_ack, run_colab
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.state import CliState
 from aistudio.exceptions import ValidationError
@@ -40,7 +38,6 @@ def colab(state: CliState, account: str | None, allow_spend: bool, args: tuple[s
             hint="add --allow-spend before the Colab command, e.g. "
                  "`aistudio colab --allow-spend new`",
         )
-    command = build_command(find_colab_python(), name, args)
-    returncode = subprocess.call(command)  # noqa: S603 (argument list, the user's own Colab CLI)
+    returncode = run_colab(name, args)
     if returncode:
         raise click.exceptions.Exit(returncode)

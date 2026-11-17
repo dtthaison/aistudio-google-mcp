@@ -1,4 +1,4 @@
-"""``aistudio colab``: run Google's Colab CLI (google-colab-cli) as one named Google account.
+"""``aistudio colab``: run Google's Colab CLI (the google-colab-cli library) as one named account.
 
 The Colab CLI signs in with OAuth and keeps one token and one session list. To keep several
 accounts apart, each account gets its own keychain entry (``google-colab-cli`` /
@@ -6,43 +6,29 @@ accounts apart, each account gets its own keychain entry (``google-colab-cli`` /
 (``~/.config/colab-cli/sessions-<account>.json``), the same layout as the ``colab-acc``
 wrapper, so a sign-in made with either tool works for both.
 
-The Colab CLI runs in its own Python (it may live in another virtualenv), so this module only
-builds the command line; the CLI layer runs it.
+google-colab-cli needs Python 3.12 or newer; on older Pythons it is not installed and the
+command says so.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import os
+import logging
 import re
-import shutil
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from aistudio.exceptions import NotFoundError, ValidationError
 
-PYTHON_ENV = "AISTUDIO_COLAB_PYTHON"
 _ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # Subcommands that start a Colab VM. A VM uses compute units while it runs (a GPU or TPU fast),
 # so these need --allow-spend, the same rule as every other paid command here.
 SPENDING_SUBCOMMANDS = frozenset({"new", "run"})
 
-# Runs inside the Colab CLI's Python: point its token and session list at one account, then
-# hand over to its own entry point. argv: -c ACCOUNT CONFIG_DIR [colab args...]
-BOOTSTRAP = """\
-import os, sys
-account, config_dir = sys.argv[1], sys.argv[2]
-del sys.argv[1:3]
-import colab_cli.auth as auth
-auth.KEYRING_USERNAME = "oauth_token:" + account
-auth.LEGACY_TOKEN_PATH = os.path.join(config_dir, "token-" + account + ".json.unused")
-os.makedirs(config_dir, exist_ok=True)
-sys.argv[1:1] = ["--config", os.path.join(config_dir, "sessions-" + account + ".json")]
-sys.argv[0] = "colab"
-from colab_cli.cli import main
-sys.exit(main())
-"""
+# Global options of the Colab CLI that take a value as the next word.
+_VALUE_OPTIONS = frozenset({"-c", "--client-oauth-config", "--config", "--auth"})
 
 
 def colab_account(profile_name: str, override: str | None = None) -> str:
@@ -60,68 +46,73 @@ def config_dir() -> Path:
     return Path.home() / ".config" / "colab-cli"
 
 
-def subcommand(args: list[str] | tuple[str, ...]) -> str | None:
-    """The Colab subcommand in ARGS: the first word that is not an option. Every global option
-    of the Colab CLI that takes a value is written ``--opt=value`` or comes before it as a pair,
-    so skip those pairs too."""
-    takes_value = {"-c", "--client-oauth-config", "--config", "--auth"}
+def subcommand(args: Sequence[str]) -> str | None:
+    """The Colab subcommand in ARGS: the first word that is not an option or an option's value."""
     skip = False
     for arg in args:
         if skip:
             skip = False
-            continue
-        if arg in takes_value:
+        elif arg in _VALUE_OPTIONS:
             skip = True
-            continue
-        if arg.startswith("-"):
-            continue
-        return arg
+        elif not arg.startswith("-"):
+            return arg
     return None
 
 
-def needs_spend_ack(args: list[str] | tuple[str, ...]) -> bool:
+def needs_spend_ack(args: Sequence[str]) -> bool:
     if any(a in ("-h", "--help") for a in args):
         return False
     return subcommand(args) in SPENDING_SUBCOMMANDS
 
 
-def _shebang_python(script: Path) -> str | None:
+def _load_colab() -> tuple[Any, Any]:
     try:
-        with script.open("rb") as fh:
-            first = fh.readline(512).decode("utf-8", "replace").strip()
-    except OSError:
-        return None
-    if not first.startswith("#!"):
-        return None
-    parts = first[2:].split()
-    if not parts:
-        return None
-    if Path(parts[0]).name == "env":  # "#!/usr/bin/env python3": not a fixed interpreter
-        return shutil.which(parts[-1]) if len(parts) > 1 else None
-    return parts[0]
+        import colab_cli.auth as auth
+        import colab_cli.cli as colab_cli
+    except ImportError as exc:
+        hint = ("google-colab-cli needs Python 3.12 or newer; reinstall aistudio with one"
+                if sys.version_info < (3, 12) else "reinstall aistudio to get google-colab-cli")
+        raise NotFoundError("the Colab CLI (google-colab-cli) is not installed",
+                            hint=hint) from exc
+    return auth, colab_cli
 
 
-def find_colab_python() -> str:
-    """The Python that has ``colab_cli`` installed: $AISTUDIO_COLAB_PYTHON, else this one, else
-    the interpreter of the ``colab`` command on PATH or in ~/.local/bin (pipx and uv put it
-    there, and that folder is not always on PATH)."""
-    explicit = os.environ.get(PYTHON_ENV)
-    if explicit:
-        return explicit
-    if importlib.util.find_spec("colab_cli") is not None:
-        return sys.executable
-    local = Path.home() / ".local" / "bin" / "colab"
-    colab = shutil.which("colab") or (str(local) if local.exists() else None)
-    if colab:
-        python = _shebang_python(Path(colab).resolve())
-        if python:
-            return python
-    raise NotFoundError(
-        "the Colab CLI (google-colab-cli) is not installed",
-        hint=("install it (https://github.com/googlecolab/google-colab-cli) so `colab` is on "
-              f"PATH, or set ${PYTHON_ENV} to the Python that has it"),
-    )
-
-
-def build_command(python: str, account: str, args: list[str] | tuple[str, ...]) -> list[str]:
-    return [python, "-c", BOOTSTRAP, account, str(config_dir()), *args]
+def run_colab(account: str, args: Sequence[str]) -> int:
+    """Run the Colab CLI with ARGS as ACCOUNT and return its exit code."""
+    auth, colab_cli = _load_colab()
+    folder = config_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    saved = auth.KEYRING_USERNAME, auth.LEGACY_TOKEN_PATH
+    auth.KEYRING_USERNAME = f"oauth_token:{account}"
+    # The library would also read (and then delete) its single legacy token file; point that
+    # at a per-account name nothing writes, so one account never picks up another's token.
+    auth.LEGACY_TOKEN_PATH = str(folder / f"token-{account}.json.unused")
+    argv = ["--config", str(folder / f"sessions-{account}.json"), *args]
+    # The library sets the root logger to DEBUG and adds its own handlers (a log file that
+    # redacts secrets; stderr only with --logtostderr). aistudio's own root handlers would then
+    # print every DEBUG record, request headers with the bearer token among them, so take them
+    # off for the run and put everything back afterwards.
+    root = logging.getLogger()
+    saved_level, saved_handlers = root.level, list(root.handlers)
+    for handler in saved_handlers:
+        root.removeHandler(handler)
+    try:
+        colab_cli.app(args=argv, prog_name="colab")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        print(code, file=sys.stderr)
+        return 1
+    finally:
+        auth.KEYRING_USERNAME, auth.LEGACY_TOKEN_PATH = saved
+        for handler in list(root.handlers):
+            if handler not in saved_handlers:
+                root.removeHandler(handler)
+                handler.close()
+        for handler in saved_handlers:
+            root.addHandler(handler)
+        root.setLevel(saved_level)
+    return 0

@@ -214,7 +214,7 @@ A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one
 ### Google Colab, one account per profile
 
 `aistudio colab` runs Google's [Colab CLI](https://github.com/googlecolab/google-colab-cli)
-(install it first, so `colab` is on PATH) as the profile's Google account. Everything after
+(installed with aistudio; it needs Python 3.12 or newer) as the profile's Google account. Everything after
 `colab` goes to the Colab CLI:
 
 ```sh
@@ -230,8 +230,7 @@ The Colab account is the profile's name unless `--account NAME` says otherwise. 
 keeps its own sign-in (macOS keychain, `google-colab-cli` / `oauth_token:<account>`) and its own
 session list (`~/.config/colab-cli/sessions-<account>.json`), the same layout as a `colab-acc`
 wrapper. `new` and `run` start a VM that uses compute units, so they need `--allow-spend`
-before the Colab command. If the Colab CLI lives in another virtualenv and `colab` is not on
-PATH, set `$AISTUDIO_COLAB_PYTHON` to that virtualenv's Python.
+before the Colab command.
 
 ### A whole scene from one file
 
