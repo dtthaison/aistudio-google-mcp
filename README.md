@@ -96,6 +96,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
 | Spend log | `spend` | free (reads a local file) |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
+| Google Colab | `colab ...` (Google's Colab CLI, one account per profile) | free; `new` and `run` start a VM that uses compute units, only with `--allow-spend` |
 
 ```sh
 aistudio models list --category images
@@ -209,6 +210,27 @@ aistudio profile list                      # * marks the active profile
 
 A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one chosen with
 `profile switch`, else `default`.
+
+### Google Colab, one account per profile
+
+`aistudio colab` runs Google's [Colab CLI](https://github.com/googlecolab/google-colab-cli)
+(installed with aistudio; it needs Python 3.12 or newer) as the profile's Google account. Everything after
+`colab` goes to the Colab CLI:
+
+```sh
+aistudio -p work colab usage               # signs in as "work" the first time
+aistudio -p personal colab sessions
+aistudio -p work colab --allow-spend new --gpu T4
+aistudio -p work colab exec 'print(1)'
+aistudio colab --account lab sessions      # a Colab account that has no aistudio profile
+aistudio colab help                        # the Colab CLI's own commands
+```
+
+The Colab account is the profile's name unless `--account NAME` says otherwise. Each account
+keeps its own sign-in (macOS keychain, `google-colab-cli` / `oauth_token:<account>`) and its own
+session list (`~/.config/colab-cli/sessions-<account>.json`), the same layout as a `colab-acc`
+wrapper. `new` and `run` start a VM that uses compute units, so they need `--allow-spend`
+before the Colab command.
 
 ### A whole scene from one file
 

@@ -14,6 +14,7 @@ reviewer corrects the same mistake twice, add a check for it and a row here, in 
 | No credential, session cookie, token or real person's email in a committed file | `tests/unit/test_no_secrets.py`, gitleaks (CI job `security`, pre-commit) |
 | Captured wire data goes through `aistudio dev redact` before it is committed | the same secret checks; judgment for anything they cannot recognise |
 | A command spends credits only when the user passes `--max-credits` (never a default) | `tests/cli/test_spend_guard.py` |
+| `aistudio colab new/run` (a Colab VM uses compute units) run only with `--allow-spend` | `tests/cli/test_colab_cmd.py` |
 | Live tests never run in CI or by default | `addopts` in `pyproject.toml` deselects `live` and `live_slow` |
 | Lint, bandit security rules, and types pass | `ruff check src tests`, `mypy` (CI job `test`, pre-commit for ruff) |
 | A security-rule exception sits on its own line with a reason: `# noqa: S110 (why)` | ruff `S` rules in `pyproject.toml` |
