@@ -224,7 +224,12 @@ aistudio -p work colab --allow-spend new --gpu T4
 aistudio -p work colab exec 'print(1)'
 aistudio colab --account lab sessions      # a Colab account that has no aistudio profile
 aistudio colab help                        # the Colab CLI's own commands
+aistudio colab accounts [--json]           # every Colab account here, signed in or not
 ```
+
+`aistudio colab accounts` lists the aistudio profiles plus any account that has a Colab session
+list, with whether its keychain holds a sign-in (the token is never read out) and how many
+sessions it has saved; `*` marks the current one.
 
 The Colab account is the profile's name unless `--account NAME` says otherwise. Each account
 keeps its own sign-in (macOS keychain, `google-colab-cli` / `oauth_token:<account>`) and its own

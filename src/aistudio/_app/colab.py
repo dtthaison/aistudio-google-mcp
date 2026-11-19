@@ -12,6 +12,7 @@ command says so.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from aistudio.exceptions import NotFoundError, ValidationError
+from aistudio.paths import list_profiles
 
 _ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -44,6 +46,49 @@ def colab_account(profile_name: str, override: str | None = None) -> str:
 
 def config_dir() -> Path:
     return Path.home() / ".config" / "colab-cli"
+
+
+_SESSION_FILE = re.compile(r"^sessions-(.+)\.json(?:\.lock)?$")
+
+
+def _signed_in(account: str) -> bool | None:
+    """Whether the keychain holds ACCOUNT's Colab token; None when the keychain can't be read."""
+    try:
+        import keyring
+
+        return keyring.get_password("google-colab-cli", f"oauth_token:{account}") is not None
+    except Exception:  # noqa: BLE001 (any keyring backend failure means "unknown", not a crash)
+        return None
+
+
+def _session_count(path: Path) -> int:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return 0
+    return len(data) if isinstance(data, (dict, list)) else 0
+
+
+def list_accounts(current: str) -> dict[str, Any]:
+    """Every Colab account known here: the aistudio profiles plus any account with a session list.
+
+    The token itself is never read out, only whether the keychain has one.
+    """
+    folder = config_dir()
+    names = set(list_profiles())
+    if folder.is_dir():
+        for path in folder.iterdir():
+            match = _SESSION_FILE.match(path.name)
+            if match and _ACCOUNT.match(match.group(1)):
+                names.add(match.group(1))
+    profiles = set(list_profiles())
+    accounts = [
+        {"name": name, "current": name == current, "profile": name in profiles,
+         "signed_in": _signed_in(name),
+         "sessions": _session_count(folder / f"sessions-{name}.json")}
+        for name in sorted(names)
+    ]
+    return {"accounts": accounts, "count": len(accounts), "current": current}
 
 
 def subcommand(args: Sequence[str]) -> str | None:
