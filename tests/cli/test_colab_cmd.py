@@ -1,3 +1,4 @@
+import json
 import logging
 import sys
 import types
@@ -145,3 +146,58 @@ def test_debug_logs_of_the_library_never_reach_aistudio_s_handlers(fake):
         assert root.handlers == before
     finally:
         root.removeHandler(mine)
+
+
+@pytest.fixture
+def keychain(monkeypatch):
+    """A fake keyring module: the accounts in the set have a stored token."""
+    tokens = set()
+    module = types.ModuleType("keyring")
+    module.get_password = lambda service, user: (
+        "token" if service == "google-colab-cli" and user.removeprefix("oauth_token:") in tokens
+        else None)
+    monkeypatch.setitem(sys.modules, "keyring", module)
+    return tokens
+
+
+def test_accounts_lists_profiles_and_session_only_accounts(fake, keychain, aistudio_home,
+                                                           tmp_path):
+    for name in ("work", "personal"):
+        (aistudio_home / "profiles" / name).mkdir(parents=True)
+    folder = tmp_path / "colab-cli"
+    folder.mkdir()
+    (folder / "sessions-lab.json").write_text('{"a": {}, "b": {}}')
+    (folder / "sessions-default.json.lock").write_text("")
+    (folder / "sessions.json.lock").write_text("")
+    keychain.update({"work", "lab"})
+
+    result = run("-p", "work", "colab", "accounts", "--json")
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["current"] == "work"
+    assert data["accounts"] == [
+        {"name": "default", "current": False, "profile": False, "signed_in": False,
+         "sessions": 0},
+        {"name": "lab", "current": False, "profile": False, "signed_in": True, "sessions": 2},
+        {"name": "personal", "current": False, "profile": True, "signed_in": False,
+         "sessions": 0},
+        {"name": "work", "current": True, "profile": True, "signed_in": True, "sessions": 0},
+    ]
+    assert fake.runs == []  # never handed to the Colab CLI
+
+    text = run("-p", "work", "colab", "accounts").output
+    assert "* work  (signed in, 0 sessions, profile)" in text
+    assert "  lab  (signed in, 2 sessions, --account only)" in text
+
+
+def test_accounts_with_no_keyring_says_unknown(fake, monkeypatch, aistudio_home):
+    (aistudio_home / "profiles" / "work").mkdir(parents=True)
+    monkeypatch.setitem(sys.modules, "keyring", None)  # makes the import fail
+    data = json.loads(run("colab", "accounts", "--json").output)
+    assert data["accounts"][0]["signed_in"] is None
+
+
+def test_accounts_refuses_other_arguments(fake):
+    result = run("colab", "accounts", "rm")
+    assert result.exit_code == 1
+    assert fake.runs == []

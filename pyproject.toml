@@ -72,6 +72,7 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [[tool.mypy.overrides]]
-# google-colab-cli ships no type hints, and is not installed below Python 3.12
-module = ["colab_cli", "colab_cli.*"]
+# google-colab-cli ships no type hints, and it and its keyring dependency are not installed
+# below Python 3.12
+module = ["colab_cli", "colab_cli.*", "keyring", "keyring.*"]
 ignore_missing_imports = true

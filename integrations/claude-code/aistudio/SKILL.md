@@ -413,3 +413,5 @@ account has its own sign-in and session list. Everything after `colab` goes to t
 (`usage`, `sessions`, `status`, `exec`, `upload`, `download`, `ls`, `stop`, ...;
 `aistudio colab help` lists them). `new` and `run` start a VM and are refused without
 `--allow-spend`: ask the user first. The first command for an account opens a browser sign-in.
+`aistudio colab accounts [--json]` lists every Colab account (the profiles plus any account with a
+session list), whether it is signed in, and its saved session count; it starts no sign-in.
