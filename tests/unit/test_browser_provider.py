@@ -34,7 +34,8 @@ PROVIDER_SCRIPT = """#!{python}
 import os, sys, time
 mode = sys.argv[2]
 marker = os.environ.get("FAKE_MARKER")
-if mode not in ("fail", "badurl", "silent", "orphan", "stubborn", "longfail"):
+if mode not in ("fail", "badurl", "silent", "orphan", "stubborn", "longfail",
+                "longsecret"):
     print("{url}", flush=True)
     sys.stdin.read()  # stays up until stdin closes
     if marker:
@@ -62,6 +63,10 @@ elif mode == "stubborn":  # ignores stdin EOF and SIGTERM
 elif mode == "longfail":
     sys.stderr.write("x" * 200000 + "\\n")  # over asyncio's 64 KiB line limit
     sys.stderr.write("boom api_token=zzz\\n")
+    sys.exit(2)
+elif mode == "longsecret":  # a secret behind its prefix, on a line longer than one read
+    sys.stderr.write("Authorization: Bearer " + "S" * 3000 + " " + "x" * 9000 + "\\n")
+    sys.stderr.write("after\\n")
     sys.exit(2)
 """
 
@@ -494,6 +499,14 @@ async def test_a_stderr_line_over_64k_does_not_stop_the_draining(aistudio_home, 
                               parse_spec("fake:longfail"))
     assert "boom" in str(err.value) and "zzz" not in str(err.value)
     assert len(str(err.value)) < 2000
+
+
+async def test_a_long_line_keeps_its_head_so_a_secret_stays_redacted(aistudio_home,
+                                                                     fake_provider):
+    with pytest.raises(BrowserError) as err:
+        await connect_browser(FakePlaywright(FakeBrowser([])), get_profile("default"),
+                              parse_spec("fake:longsecret"))
+    assert "SSSS" not in str(err.value) and "after" in str(err.value)
 
 
 async def test_close_runs_every_step_even_when_cancelled(aistudio_home, fake_provider):

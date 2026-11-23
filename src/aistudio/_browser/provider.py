@@ -261,11 +261,23 @@ class ProviderProcess:
         if stream is None:
             return
         buf = ""
+        limit = 4 * _STDERR_LINE_CHARS
+        skipping = False  # past the kept head of an over-long line, until its newline
         with contextlib.suppress(Exception):
             while chunk := await stream.read(4096):
-                buf += chunk.decode("utf-8", "replace")
+                text_in = chunk.decode("utf-8", "replace")
+                if skipping:
+                    if "\n" not in text_in:
+                        continue
+                    text_in = text_in.split("\n", 1)[1]
+                    skipping = False
+                buf += text_in
                 *lines, buf = buf.split("\n")
-                buf = buf[-4 * _STDERR_LINE_CHARS:]
+                if len(buf) > limit:
+                    # Keep the head, not the tail: a cut-off "Bearer "/"token=" prefix would
+                    # leave a bare secret that redact() cannot recognise.
+                    lines.append(buf[:limit])
+                    buf, skipping = "", True
                 for line in lines:
                     if text := _clean(line):
                         self.stderr_tail.append(text)

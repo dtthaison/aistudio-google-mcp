@@ -68,3 +68,14 @@ def test_reset_forgets_the_login_of_the_attached_browser(aistudio_home, logged_i
     logged_in_profile("work")
     result = run("-p", "work", "profile", "browser", "--reset")
     assert "Forgot the saved login" in result.output and not profile.storage_state.exists()
+
+
+def test_a_broken_browser_json_can_still_be_reset_or_replaced(aistudio_home):
+    profile = get_profile("work").ensure()
+    profile.browser_json.write_text("{not json")
+    assert run("-p", "work", "profile", "browser").exit_code != 0
+    assert run("-p", "work", "profile", "browser", "--reset").exit_code == 0
+    profile.browser_json.write_text("{not json")
+    result = run("-p", "work", "profile", "browser", "shardx:acct1", "--json")
+    assert result.exit_code == 0, result.output
+    assert json.loads(profile.browser_json.read_text()) == {"browser": "shardx:acct1"}

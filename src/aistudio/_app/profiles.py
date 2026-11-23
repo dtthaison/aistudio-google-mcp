@@ -45,7 +45,12 @@ def profile_browser(profile: Profile, spec: str | None = None, *, reset: bool = 
     Google account; run ``aistudio login`` after."""
     if spec and reset:
         raise ValidationError("give a browser or --reset, not both")
-    before = str(load_spec(profile))
+    try:
+        before: str | None = str(load_spec(profile))
+    except ValidationError:
+        if not (spec or reset):
+            raise
+        before = None  # a broken browser.json must not block replacing or resetting it
     if reset:
         removed = reset_spec(profile)
         after = str(load_spec(profile))
