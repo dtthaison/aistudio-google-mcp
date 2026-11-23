@@ -402,7 +402,8 @@ def test_flow_project_create_prints_the_id_title_and_link(logged_in_profile, mon
     assert json.loads(res.stdout) == PROJECT
     assert calls == [(("My film",), {"visible": True})]
     res = CliRunner().invoke(cli, ["flow", "project", "create", "My film"])
-    assert res.exit_code == 0 and PROJECT["id"] in res.stdout and PROJECT["url"] in res.stdout
+    assert res.exit_code == 0
+    assert all(PROJECT[k] in res.stdout for k in ("id", "title", "url"))
 
 
 def test_flow_project_create_needs_a_title(logged_in_profile):

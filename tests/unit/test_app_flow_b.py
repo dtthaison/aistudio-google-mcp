@@ -59,6 +59,7 @@ class FakePage:
 
     async def create_project(self, title):
         self.calls.append(("create", title))
+        self.created_title = title
         return PID
 
     async def media_details(self, media_id):
@@ -68,7 +69,10 @@ class FakePage:
         return media(media_id, video=media_id != IMG)
 
     async def projects(self):
-        return [FlowProject(PID, "aistudio", 1791371089)]
+        title = getattr(self, "created_title", "aistudio")
+        if self.label == "drops the title":  # Flow kept its default name
+            title = "Nov 23 - 22:50"
+        return [FlowProject(PID, title, 1791371089)]
 
     async def contents(self, pid):
         self.calls.append(("contents", pid))
@@ -188,10 +192,22 @@ async def test_create_project_passes_the_title_and_returns_id_and_link(logged_in
     profile = logged_in_profile()
     kw, pages, _ = harness()
     kw.pop("downloader"), kw.pop("now")
-    result = await flow_create_project(profile, "  My film ", **kw)
+    result = await flow_create_project(profile, "  My\nfilm ", settle_s=0, **kw)
     assert result == {"id": PID, "title": "My film",
                       "url": f"https://flow.google.com/project/{PID}"}
     assert ("create", "My film") in pages[0].calls
+
+
+async def test_create_project_names_the_project_when_flow_did_not_keep_the_title(
+        logged_in_profile):
+    from aistudio.exceptions import BrowserError
+
+    profile = logged_in_profile()
+    kw, _, _ = harness(label="drops the title")
+    kw.pop("downloader"), kw.pop("now")
+    with pytest.raises(BrowserError) as err:
+        await flow_create_project(profile, "My film", settle_s=0, **kw)
+    assert PID in str(err.value) and "makes another project" in (err.value.hint or "")
 
 
 @pytest.mark.parametrize("title", ["", "   ", "\n\t"])

@@ -390,8 +390,15 @@ class FlowPage:
         if project_id is None:
             raise BrowserError("Flow did not open the new project",
                                hint="re-run; if it persists, the Flow UI changed")
-        await self._ui.fill("textbox", TITLE, title)
-        await self._ui.press("textbox", TITLE, "Enter")
+        try:
+            await self._ui.fill("textbox", TITLE, title)
+            await self._ui.press("textbox", TITLE, "Enter")
+        except BrowserError as exc:
+            # The project exists already: say which, so a second run does not make another.
+            raise BrowserError(
+                f"Flow made project {project_id} but aistudio could not name it: {exc}",
+                hint=f"rename it in Flow ({PROJECT_URL.format(id=project_id)}); running the "
+                     "command again makes another project") from exc
         return project_id
 
     async def new_session(self) -> None:

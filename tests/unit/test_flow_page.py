@@ -60,6 +60,20 @@ async def test_create_project_names_it_and_returns_its_id(fake_ui):
     assert ("press", "textbox", "Editable text", "Enter") in ui.ops
 
 
+async def test_create_project_names_the_made_project_when_naming_fails(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(url=f"https://flow.google.com/project/{PID}")
+
+    async def fail(*_args):
+        raise BrowserError("textbox 'Editable text' not found")
+
+    ui.fill = fail
+    with pytest.raises(BrowserError) as err:
+        await FlowPage(ui).create_project("My film")
+    assert PID in str(err.value) and "makes another project" in (err.value.hint or "")
+
+
 async def test_read_defaults_for_video(fake_ui):
     ui = fake_ui(inner={("button", "Video generation default model"): ["Omni 1.1 Flash "
                                                                        "arrow_drop_down"]},
