@@ -1,7 +1,7 @@
 """Drive Google Flow's project page and agent (docs/wire/findings.md, "Google Flow").
 
 The project page is agent-only. The prompt is a ProseMirror editor (keyboard typing only), the
-tune panel holds the defaults, and permission questions are radios inside
+agent settings hold the defaults, and permission questions are radios inside
 ``flow-permission-message``. Keyboard activation is used throughout because pointer clicks time
 out in a minimized window.
 """
@@ -101,8 +101,22 @@ TUNE = "Settings"
 # Live 2026-11-02: the top bar gained its own "Settings" (tooltip "View settings": grid size,
 # sound on hover), which comes first; the agent's settings are the prompt box's button, the last.
 TUNE_NTH = -1
+# Live 2026-11-23 (a ShardX profile; findings "A ShardX browser"): the agent panel's gear is a
+# button named "Agent settings" and the only exact "Settings" left is the top bar's. It opens a
+# list: "Back", the Always/Never radios, one row per kind ("Image defaults 🍌 Nano Banana 2.1,
+# 16:9, 2 outputs") and "Add new". A row opens that kind's page (model, aspect and count radios,
+# no Save: each choice is saved at once). The older layout is still tried when no gear is there.
+AGENT_SETTINGS = "Agent settings"
+AGENT_SETTINGS_POLLS = 6  # x 500 ms for the gear before the older layout is assumed
+DEFAULTS_ROW = {"image": re.compile(r"^Image defaults\b"),
+                "video": re.compile(r"^Video defaults\b")}
+# The row's text: "image Image defaults 🍌 Nano Banana 2.1, 16:9, 2 outputs arrow_forward"
+_DEFAULTS_ROW = re.compile(r"\bdefaults\s+(.+?),\s*(\d+:\d+),\s*(\d+)\s+outputs?\b")
+_LEAVING = re.compile(r"\s+Leaving\b.*$")  # a model radio's note: "Omni 1.1 Flash Leaving Dec 5"
 NEW_PROJECT = re.compile(r"New project")
 NEW_SESSION = "Start new session"
+SESSION_HISTORY = "Open session history"  # 2026-11-23 header: history, Agent settings, Close
+CREATE_SESSION = "Create new session"  # the history list's button (after "Back")
 EXPAND = "Expand"  # a collapsed prompt box hides "Start new session" (live)
 ACCOUNT = "Account details"
 INGREDIENTS = "Add ingredients to the prompt box"
@@ -331,6 +345,15 @@ def _label(text: str) -> str:
     return label
 
 
+def _defaults_row(text: str) -> tuple[str, str, int] | None:
+    """'image Image defaults 🍌 Nano Banana 2.1, 16:9, 2 outputs arrow_forward' ->
+    ('Nano Banana 2.1', '16:9', 2); None when the row reads otherwise."""
+    match = _DEFAULTS_ROW.search(text)
+    if match is None:
+        return None
+    return _LEAVING.sub("", _label(match.group(1))), match.group(2), int(match.group(3))
+
+
 class FlowPage:
     def __init__(self, ui: Ui, *, now: Callable[[], float] = time.monotonic,
                  clock: Callable[[], float] = time.time, poll_s: float = 1.0) -> None:
@@ -376,16 +399,29 @@ class FlowPage:
                 and await self._ui.visible("button", EXPAND, exact=True)):
             await self._ui.activate("button", EXPAND, exact=True)
             await self._ui.pause(1000)
+        if (not await self._ui.visible("button", NEW_SESSION, exact=True)
+                and await self._ui.visible("button", SESSION_HISTORY, exact=True)):
+            # Live 2026-11-23: the chat header has no "Start new session"; "Open session history"
+            # opens a list whose "Create new session" starts one.
+            await self._ui.activate("button", SESSION_HISTORY, exact=True)
+            await self._ui.pause(1000)
+            await self._ui.activate("button", CREATE_SESSION, exact=True)
+            await self._ui.pause(1000)
+            return
         await self._ui.activate("button", NEW_SESSION, exact=True)
         await self._ui.pause(1000)
 
     async def read_defaults(self, kind: str) -> Defaults:
-        await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
-        await self._ui.pause(1200)
-        model = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
-        aspect = await self._checked_one(kind, ASPECTS[kind], _aspect_name, aspect=True)
-        count = await self._checked_one(kind, (1, 2, 3, 4), _count_name, aspect=False)
-        asks = await self._ui.checked("radio", ASKS_FIRST)
+        listed = await self._open_settings()
+        if listed:
+            asks = await self._ui.checked("radio", ASKS_FIRST)
+            shown = _defaults_row(await self._ui.inner_text("button", DEFAULTS_ROW[kind]))
+            model, aspect, count = shown if shown else ("", None, None)
+        else:
+            model = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
+            aspect = await self._checked_one(kind, ASPECTS[kind], _aspect_name, aspect=True)
+            count = await self._checked_one(kind, (1, 2, 3, 4), _count_name, aspect=False)
+            asks = await self._ui.checked("radio", ASKS_FIRST)
         await self._close_tune()
         if not model or aspect is None or count is None:
             raise BrowserError(f"could not read Flow's {kind} defaults",
@@ -393,8 +429,51 @@ class FlowPage:
         return Defaults(model, str(aspect), int(count), asks=asks)
 
     async def apply_defaults(self, kind: str, wanted: Defaults) -> None:
+        if await self._open_settings():
+            await self._choose_defaults(kind, wanted)
+        else:
+            await self._choose_tune(kind, wanted)
+        await self._close_tune()
+        if await self.read_defaults(kind) != wanted:
+            raise BrowserError(f"Flow's {kind} settings did not take effect",
+                               hint="re-run; if it persists, the Flow UI changed")
+
+    async def _open_settings(self) -> bool:
+        """Open the agent's settings. True: the list with a row per kind (Agent settings); False:
+        the older tune panel, opened by the prompt box's "Settings"."""
+        for _ in range(AGENT_SETTINGS_POLLS):
+            if await self._ui.visible("button", AGENT_SETTINGS, exact=True):
+                await self._ui.activate("button", AGENT_SETTINGS, exact=True)
+                await self._ui.pause(1200)
+                return True
+            await self._ui.pause(500)
         await self._ui.activate("button", TUNE, exact=True, nth=TUNE_NTH)
         await self._ui.pause(1200)
+        return False
+
+    async def _choose_defaults(self, kind: str, wanted: Defaults) -> None:
+        """Agent settings list: open the kind's page and pick what differs. Flow saves each
+        choice at once (a Kcr7Ub call, live 2026-11-23), so there is no Save to press. The model
+        radios ignore Enter and need a click event; the aspect and count radios take Enter."""
+        await self._ui.activate("button", DEFAULTS_ROW[kind])
+        await self._ui.pause(1000)
+        model = re.compile(rf"(?:^|\s){re.escape(wanted.model)}(?:\s+Leaving\b.*)?$")
+        for name, by_event in ((model, True), (_aspect_name(wanted.aspect), False),
+                               (_count_name(wanted.count), False)):
+            if await self._ui.checked("radio", name):
+                continue
+            async with self._ui.responses(marker=FLOW_RPC) as log:
+                if by_event:
+                    await self._ui.dispatch_click("radio", name)
+                else:
+                    await self._ui.activate("radio", name)
+                saved = await log.next(SAVE_METHOD, timeout_s=SAVE_TIMEOUT_S)
+            if saved is None or saved.status >= 400:
+                raise BrowserError(f"Flow did not save the {kind} settings",
+                                   hint="re-run; if it persists, the Flow UI changed")
+
+    async def _choose_tune(self, kind: str, wanted: Defaults) -> None:
+        """The older tune panel (open): pick everything, then Save."""
         current = _label(await self._ui.inner_text("button", MODEL_BUTTON[kind], exact=True))
         if current != wanted.model:
             await self._ui.activate("button", MODEL_BUTTON[kind], exact=True)
@@ -409,10 +488,6 @@ class FlowPage:
             saved = await log.next(SAVE_METHOD, timeout_s=SAVE_TIMEOUT_S)
         if saved is None or saved.status >= 400:
             raise BrowserError(f"Flow did not save the {kind} settings",
-                               hint="re-run; if it persists, the Flow UI changed")
-        await self._close_tune()
-        if await self.read_defaults(kind) != wanted:
-            raise BrowserError(f"Flow's {kind} settings did not take effect",
                                hint="re-run; if it persists, the Flow UI changed")
 
     async def submit_for_quote(self, text: str, *, timeout_s: float = 90.0,

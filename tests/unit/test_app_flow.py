@@ -694,6 +694,31 @@ async def test_a_lost_free_reply_finds_the_new_image_in_the_project(logged_in_pr
     assert ("details", "n1") in pages[0].calls
 
 
+async def test_a_listed_image_with_no_status_but_a_size_counts_as_finished(logged_in_profile,
+                                                                         tmp_path):
+    # Live 2026-11-23 (ShardX profile): the project list gave the finished image no status
+    new = dataclasses.replace(image("n1", created=SENT + 90, status=None), size=822427)
+    after = ProjectContents({"old1": "x", "n1": "a lemon"}, [OLD, new])
+    kw, pages, _ = harness(turn=AgentTurn("I will generate 1 image", None, generating=True),
+                           credit_values=(5, 5),
+                           project=[ProjectContents({"old1": "x"}, [OLD]), after])
+    result = await flow_generate(logged_in_profile(), "image", "a lemon", count=1,
+                                 out=tmp_path / "x.png", **kw)
+    assert [f["media_id"] for f in result["files"]] == ["n1"]
+
+
+async def test_a_listed_image_with_no_status_and_no_size_is_still_running(logged_in_profile,
+                                                                         tmp_path):
+    from aistudio.exceptions import WaitTimeoutError
+
+    waiting = dataclasses.replace(image("n1", created=SENT + 90, status=None), size=None)
+    kw, pages, _ = harness(turn=AgentTurn("Generating", None, generating=True),
+                           project=[ProjectContents({"old1": "x"}, [OLD]),
+                                    ProjectContents({"old1": "x", "n1": "y"}, [OLD, waiting])])
+    with pytest.raises(WaitTimeoutError):
+        await flow_generate(logged_in_profile(), "image", "a lemon", out=tmp_path / "x.png", **kw)
+
+
 async def test_a_lost_free_reply_with_the_image_still_running_is_a_timeout(logged_in_profile,
                                                                          tmp_path):
     from aistudio.exceptions import WaitTimeoutError

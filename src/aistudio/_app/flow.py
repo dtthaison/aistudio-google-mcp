@@ -408,6 +408,12 @@ async def flow_generate(
             **({"warnings": warnings} if warnings else {})}
 
 
+def _listed_done(media: Any) -> bool:
+    """A finished image in the project list: status 3, or (live 2026-11-23, a ShardX profile) a
+    record with no status at all but a size. A running image's record carries 1 or 2."""
+    return media.status == 3 or (media.status is None and bool(media.size))
+
+
 async def _made_in_project(page: Any, project_id: str, known: set[str],
                            since: float) -> list[Generated]:
     """Images that appeared in the project during a free run, all finished: what it made when
@@ -418,7 +424,7 @@ async def _made_in_project(page: Any, project_id: str, known: set[str],
         new = [m for m in contents.media
                if m.media_id not in known and _media_kind(m) == "image"
                and m.created is not None and m.created >= since - FOUND_SLACK_S]
-        if new and all(m.status == 3 for m in new):
+        if new and all(_listed_done(m) for m in new):
             return [Generated(m.media_id, "success", "image", None, None) for m in new]
     return []
 
