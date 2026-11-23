@@ -511,3 +511,27 @@ async def test_a_watched_channel_logs_its_requests_but_is_never_routed_or_read(c
     assert 'body: count=1&ofs=0&req0___data__=["hello world","<300 chars>"]' in text
     assert "response event: " in text and "(watched: its body is not read)" in text
     assert "SECRET" not in text and token not in text
+
+
+class _PlatformPage:
+    def __init__(self, platform):
+        self.platform = platform
+        self.evaluated = 0
+
+    async def evaluate(self, script):
+        self.evaluated += 1
+        return self.platform
+
+
+@pytest.mark.parametrize(("platform", "expected"), [
+    ("MacIntel", "Meta+Enter"), ("Linux x86_64", "Control+Enter"), ("Win32", "Control+Enter")])
+async def test_the_run_shortcut_follows_the_pages_platform(platform, expected):
+    # Live 2026-11-23: a ShardX browser on a Linux server ignored Cmd+Enter sent from a Mac.
+    from aistudio._browser.ui import RUN_SHORTCUT
+
+    page = _PlatformPage(platform)
+    ui = PlaywrightUi(page)
+    assert await ui._resolve_keys(RUN_SHORTCUT) == expected
+    assert await ui._resolve_keys(RUN_SHORTCUT) == expected
+    assert page.evaluated == 1  # asked once per page
+    assert await ui._resolve_keys("Escape") == "Escape"

@@ -1441,3 +1441,17 @@ made-up bodies of the same shape (`prompt_wire` in `tests/conftest.py`).
   modified time, so `prompt get` shows no "created"); attachment names (Drive files carry only
   an id, and their mime type is not in the reply); audio/video/PDF inline attachments.
 - **Pending inputs** (`[13][1]`) held one empty user chunk in every chat: the unsent draft box.
+
+## A ShardX browser on a remote server (2026-11-23; free runs, one 1-second TTS)
+
+- The ShardX profile runs on a Linux server (reached over SSH by `muse-browser-shardx`) and
+  reports `navigator.platform` "Linux x86_64". AI Studio's speech page then runs on Ctrl+Enter
+  only: Cmd+Enter sent from a Mac did nothing, and no `MakerSuiteService/` request followed.
+  `PlaywrightUi` now picks the modifier from the page's platform.
+- Over that slower link, reading an element's text after checking it is visible (two round
+  trips) can wait out the timeout while Flow re-renders the node; `text_of` reads in one step.
+- The same account's Flow project (2026-11-23) shows the agent panel's gear as "Agent settings",
+  opening a list ("Image defaults 🍌 Nano Banana 2.1, 16:9, 2 outputs", "Video defaults Omni 1.2
+  Flash, 16:9, 1 output", "Add new") instead of the model/aspect/count controls aistudio reads
+  after "Settings". `flow image`/`flow video` defaults reading fails there until aistudio learns
+  this layout. Not yet checked whether aistudio's own Chrome gets the same layout.
