@@ -685,6 +685,37 @@ async def flow_projects(profile: Profile, *, visible: bool = False,
                          for p in projects], "count": len(projects)}
 
 
+TITLE_CHECKS = 3  # reads of the project list before a new project's title counts as lost
+
+
+async def flow_create_project(profile: Profile, title: str, *, visible: bool = False,
+                              browser: Callable[..., Any] = open_browser,
+                              page_factory: Callable[[Any], Any] = FlowPage,
+                              settle_s: float = 2.0) -> dict[str, Any]:
+    """Make a new Flow project called TITLE (always a new one; free). The title is read back
+    from Flow's project list before the tab closes: closing right after Enter could drop the
+    rename, most likely over a remote browser's slower link."""
+    title = " ".join(title.split())  # Flow's title box is one line
+    if not title:
+        raise ValidationError("a project title cannot be empty",
+                              hint="pass a title, e.g. aistudio flow project create 'My film'")
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        page = page_factory(ui)
+        project_id = await page.create_project(title)
+        url = PROJECT_URL.format(id=project_id)
+        for _ in range(TITLE_CHECKS):
+            await asyncio.sleep(settle_s)
+            shown = {p.id: p.title for p in await page.projects()}
+            if shown.get(project_id) == title:
+                break
+        else:
+            raise BrowserError(
+                f"Flow made project {project_id} but did not keep the title {title!r}",
+                hint=f"rename it in Flow ({url}); running the command again makes another "
+                     "project")
+    return {"id": project_id, "title": title, "url": url}
+
+
 async def flow_media(profile: Profile, *, project: str | None = None, kind: str | None = None,
                      visible: bool = False, browser: Callable[..., Any] = open_browser,
                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:

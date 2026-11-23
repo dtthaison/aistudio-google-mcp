@@ -14,6 +14,7 @@ from aistudio._app.flow import (
     flow_character_body,
     flow_character_voice,
     flow_characters,
+    flow_create_project,
     flow_credits,
     flow_download,
     flow_edit,
@@ -467,6 +468,27 @@ def projects_cmd(state: CliState, visible: bool, json_output: bool) -> None:
     result = asyncio.run(flow_projects(state.profile(), visible=visible))
     emit(result, json_output=json_output, render=lambda d: _print_lines(
         f"{p['id']}  {p['title'] or '(untitled)'}" for p in d["projects"]))
+
+
+@flow.group("project")
+def project() -> None:
+    """Flow projects: make a new one (list them with `flow projects`)."""
+
+
+@project.command("create")
+@click.argument("title")
+@click.option("--visible", is_flag=True, help="Show the browser window.")
+@json_option
+@click.pass_obj
+@handle_errors
+def project_create(state: CliState, title: str, visible: bool, json_output: bool) -> None:
+    """Create a new Flow project called TITLE and print its id (free).
+
+    Always makes a new project; it does not look for one with the same title."""
+    state.require_browser()
+    result = asyncio.run(flow_create_project(state.profile(), title, visible=visible))
+    emit(result, json_output=json_output,
+         render=lambda d: stdout.print(f"{d['id']}  {d['title']}\n{d['url']}", markup=False))
 
 
 @flow.command("media")
