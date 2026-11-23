@@ -10,6 +10,7 @@ from aistudio import __version__
 from aistudio.cli import (
     app_cmd,
     chat_cmd,
+    colab_cmd,
     dev_cmd,
     flow_cmd,
     generate_cmd,
@@ -59,6 +60,7 @@ cli.add_command(generate_cmd.voices)
 cli.add_command(generate_cmd.transcribe_cmd)
 cli.add_command(flow_cmd.flow)
 cli.add_command(spend_cmd.spend)
+cli.add_command(colab_cmd.colab)
 
 
 def main() -> None:

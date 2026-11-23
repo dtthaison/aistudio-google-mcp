@@ -400,8 +400,22 @@ Get the user's explicit OK before:
 - any `aistudio dev …` command, which opens a browser and records traffic.
 - `--force` on `aistudio app export`, which overwrites files in the target folder.
 
+- `aistudio colab --allow-spend new|run ...`, which starts a Colab VM that uses compute units
+  (say which GPU or TPU, if any).
+
 `--profile NAME` selects another signed-in Google account (`aistudio profile list --json`).
 A profile can drive a ShardX browser profile instead of its own Chrome (`aistudio profile browser`
 shows which); browser commands then run in that ShardX profile and never stop it. Do not change
 it (`profile browser SPEC`, `login --browser shardx:…`) unless the user asks: changing it forgets
 the profile's saved sign-in, so the user must run `aistudio -p NAME login` again.
+
+## Google Colab (`aistudio colab`)
+
+`aistudio [-p PROFILE] colab [--account NAME] [--allow-spend] <colab args...>` runs Google's Colab
+CLI (google-colab-cli) as one Google account: the profile's name, or `--account NAME`. Each
+account has its own sign-in and session list. Everything after `colab` goes to the Colab CLI
+(`usage`, `sessions`, `status`, `exec`, `upload`, `download`, `ls`, `stop`, ...;
+`aistudio colab help` lists them). `new` and `run` start a VM and are refused without
+`--allow-spend`: ask the user first. The first command for an account opens a browser sign-in.
+`aistudio colab accounts [--json]` lists every Colab account (the profiles plus any account with a
+session list), whether it is signed in, and its saved session count; it starts no sign-in.

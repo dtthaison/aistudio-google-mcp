@@ -96,6 +96,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Google Flow | `flow tool create/edit` | no credits; a daily limit on tool builds |
 | Spend log | `spend` | free (reads a local file) |
 | Accounts | `login`, `auth check/logout`, `profile create/list/switch/delete` | free |
+| Google Colab | `colab ...` (Google's Colab CLI, one account per profile) | free; `new` and `run` start a VM that uses compute units, only with `--allow-spend` |
 
 ```sh
 aistudio models list --category images
@@ -243,6 +244,32 @@ starts the ShardX profile through the provider and attaches to it over Chrome De
   browser's downloads to this machine do not work there. Use ShardX on this machine for them.
 - The attach and file lock need macOS or Linux.
 - `profile browser` also takes `cdp:http://127.0.0.1:PORT` for a browser that is already running.
+
+### Google Colab, one account per profile
+
+`aistudio colab` runs Google's [Colab CLI](https://github.com/googlecolab/google-colab-cli)
+(installed with aistudio; it needs Python 3.12 or newer) as the profile's Google account. Everything after
+`colab` goes to the Colab CLI:
+
+```sh
+aistudio -p work colab usage               # signs in as "work" the first time
+aistudio -p personal colab sessions
+aistudio -p work colab --allow-spend new --gpu T4
+aistudio -p work colab exec 'print(1)'
+aistudio colab --account lab sessions      # a Colab account that has no aistudio profile
+aistudio colab help                        # the Colab CLI's own commands
+aistudio colab accounts [--json]           # every Colab account here, signed in or not
+```
+
+`aistudio colab accounts` lists the aistudio profiles plus any account that has a Colab session
+list, with whether its keychain holds a sign-in (the token is never read out) and how many
+sessions it has saved; `*` marks the current one.
+
+The Colab account is the profile's name unless `--account NAME` says otherwise. Each account
+keeps its own sign-in (macOS keychain, `google-colab-cli` / `oauth_token:<account>`) and its own
+session list (`~/.config/colab-cli/sessions-<account>.json`), the same layout as a `colab-acc`
+wrapper. `new` and `run` start a VM that uses compute units, so they need `--allow-spend`
+before the Colab command.
 
 ### A whole scene from one file
 

@@ -13,6 +13,8 @@ dependencies = [
   "rich>=13",
   "filelock>=3.13",
   "pyyaml>=6",
+  # aistudio colab; the library needs Python 3.12+
+  "google-colab-cli>=0.8; python_version >= '3.12'",
 ]
 
 [project.urls]
@@ -68,3 +70,9 @@ python_version = "3.10"
 files = ["src"]
 warn_unused_ignores = true
 warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# google-colab-cli ships no type hints, and it and its keyring dependency are not installed
+# below Python 3.12
+module = ["colab_cli", "colab_cli.*", "keyring", "keyring.*"]
+ignore_missing_imports = true
