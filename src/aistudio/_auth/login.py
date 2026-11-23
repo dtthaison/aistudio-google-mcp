@@ -12,7 +12,14 @@ from urllib.parse import parse_qs, urlparse
 
 from aistudio._auth.signer import API_HOST
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
-from aistudio.exceptions import AIStudioError, BrowserError, WaitTimeoutError
+from aistudio._browser.provider import (
+    BrowserSpec,
+    connect_browser,
+    page_to_drive,
+    resolve_spec,
+    save_spec,
+)
+from aistudio.exceptions import AIStudioError, BrowserError, ValidationError, WaitTimeoutError
 from aistudio.paths import Profile
 
 APP_URL = "https://aistudio.google.com/"
@@ -93,6 +100,18 @@ async def launch_persistent(playwright: Any, profile: Profile, *, browser: str, 
         raise BrowserError(f"could not launch {browser}: {exc}", hint=hint) from exc
 
 
+async def launch_browser(playwright: Any, profile: Profile, spec: BrowserSpec, *,
+                         headless: bool, viewport: dict[str, int] | None = None,
+                         args: Sequence[str] = ()) -> Any:
+    """The profile's browser: its own persistent Chrome, or an attached one (ShardX). For an
+    attached browser the window, viewport and launch arguments are the user's, so they are
+    ignored."""
+    if spec.attached:
+        return await connect_browser(playwright, profile, spec)
+    return await launch_persistent(playwright, profile, browser=spec.browser, headless=headless,
+                                   viewport=viewport, args=args)
+
+
 @dataclass(frozen=True)
 class LoginResult:
     profile: str
@@ -103,20 +122,29 @@ class LoginResult:
 async def run_login(
     profile: Profile,
     *,
-    browser: str = "chrome",
+    browser: str | None = None,
     fresh: bool = False,
     timeout: float = 300.0,
     key_wait: float = 20.0,
     poll: float = 1.0,
     playwright_factory: Callable[[], Any] | None = None,
 ) -> LoginResult:
+    """Sign in; ``browser`` (a spec such as ``chrome`` or ``shardx:work``) is saved to the
+    profile once sign-in works, else the profile's saved browser is used."""
+    spec = resolve_spec(profile, browser)
+    if fresh and spec.attached:
+        raise ValidationError(
+            "--fresh only resets aistudio's own Chrome profile; it never touches an attached "
+            f"browser ({spec})",
+            hint="drop --fresh, or sign out in that browser yourself",
+        )
     factory = playwright_factory or default_playwright_factory()
     profile.ensure()
     if fresh and profile.chrome_dir.exists():
         shutil.rmtree(profile.chrome_dir)
     loop = asyncio.get_running_loop()
     async with factory() as playwright:
-        context = await launch_persistent(playwright, profile, browser=browser, headless=False)
+        context = await launch_browser(playwright, profile, spec, headless=False)
         try:
             keys: list[str] = []
 
@@ -126,7 +154,7 @@ async def run_login(
                     keys.append(key)
 
             context.on("request", on_request)
-            page = context.pages[0] if context.pages else await context.new_page()
+            page = await page_to_drive(context)
             await page.goto(APP_URL, wait_until="commit")
             deadline = loop.time() + timeout
             while not is_logged_in(page.url, {c["name"] for c in await context.cookies()}):
@@ -143,6 +171,8 @@ async def run_login(
             account = AccountInfo(email=None, authuser=authuser_from_url(page.url))
             save_state(profile, await context.storage_state(), account)
             save_session_info(profile, api_key)
+            if browser:
+                save_spec(profile, spec)
             return LoginResult(profile.name, account, api_key is not None)
         except AIStudioError:
             raise

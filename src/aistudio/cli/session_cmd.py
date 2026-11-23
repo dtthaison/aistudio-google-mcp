@@ -10,6 +10,7 @@ import click
 from aistudio._app.auth import auth_status, http_probe
 from aistudio._auth.login import run_login
 from aistudio._auth.storage import delete_credentials
+from aistudio._browser.provider import resolve_spec
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import confirm_or_fail, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
@@ -82,19 +83,23 @@ def logout(state: CliState, yes: bool, json_output: bool) -> None:
 
 
 @click.command()
-@click.option("--browser", type=click.Choice(["chrome", "chromium", "msedge"]), default="chrome",
-              show_default=True, help="Browser to sign in with.")
-@click.option("--fresh", is_flag=True, help="Delete the cached browser profile first.")
+@click.option("--browser", default=None, metavar="SPEC",
+              help="Browser to sign in with and keep for this profile: chrome (default), "
+                   "chromium, msedge, or shardx:PROFILE to use a ShardX browser profile.")
+@click.option("--fresh", is_flag=True,
+              help="Delete aistudio's cached Chrome profile first (never a ShardX profile).")
 @click.option("--timeout", type=click.IntRange(min=1), default=300, show_default=True,
               help="Seconds to wait for sign-in.")
 @json_option
 @click.pass_obj
 @handle_errors
-def login(state: CliState, browser: str, fresh: bool, timeout: int, json_output: bool) -> None:
+def login(state: CliState, browser: str | None, fresh: bool, timeout: int,
+          json_output: bool) -> None:
     """Sign in to AI Studio in a browser window and save the session."""
     profile = state.profile()
     if not json_output:
-        stderr.print(f"Opening {browser}. Sign in to AI Studio in the window that appears.")
+        stderr.print(f"Opening {resolve_spec(profile, browser)}. "
+                     "Sign in to AI Studio in the window that appears.")
     result = asyncio.run(run_login(profile, browser=browser, fresh=fresh, timeout=timeout))
     data = {
         "profile": result.profile,

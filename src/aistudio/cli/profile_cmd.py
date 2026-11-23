@@ -6,7 +6,13 @@ from typing import Any
 
 import click
 
-from aistudio._app.profiles import profile_create, profile_delete, profile_list, profile_switch
+from aistudio._app.profiles import (
+    profile_browser,
+    profile_create,
+    profile_delete,
+    profile_list,
+    profile_switch,
+)
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import confirm_or_fail, emit, json_option, stdout
 from aistudio.cli.state import CliState
@@ -69,3 +75,28 @@ def delete_cmd(name: str, yes: bool, json_output: bool) -> None:
                     json_output=json_output)
     emit(profile_delete(name), json_output=json_output,
          render=lambda d: stdout.print(f"Deleted profile {d['profile']}"))
+
+
+def _render_browser(data: dict[str, Any]) -> None:
+    if data.get("saved"):
+        stdout.print(f"Profile {data['profile']} now uses {data['browser']}")
+    elif "reset" in data:
+        stdout.print(f"Profile {data['profile']} uses {data['browser']} again")
+    else:
+        stdout.print(f"Profile {data['profile']} uses {data['browser']}")
+
+
+@profile.command("browser")
+@click.argument("spec", required=False)
+@click.option("--reset", is_flag=True, help="Go back to aistudio's own Chrome.")
+@json_option
+@click.pass_obj
+@handle_errors
+def browser_cmd(state: CliState, spec: str | None, reset: bool, json_output: bool) -> None:
+    """Show or set the browser the active profile drives.
+
+    SPEC is chrome, chromium, msedge, or shardx:PROFILE to attach to a ShardX browser profile
+    through the muse-browser-shardx provider (ShardX is never stopped by aistudio).
+    """
+    emit(profile_browser(state.profile(), spec, reset=reset), json_output=json_output,
+         render=_render_browser)

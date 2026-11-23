@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any, Protocol, TypeVar
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from aistudio._auth.login import default_playwright_factory, launch_persistent
+from aistudio._auth.login import default_playwright_factory, launch_browser
 from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
+from aistudio._browser.provider import has_browser_session, load_spec, page_to_drive
 from aistudio.exceptions import (
     AIStudioError,
     AuthError,
@@ -802,9 +803,12 @@ async def open_browser(
     window: str = "minimized",
     playwright_factory: Callable[[], Any] | None = None,
 ) -> AsyncIterator[Ui]:
-    """The profile's Chrome; ``window`` is minimized or headless (desktop viewport) or visible
-    (maximized, page sized by the window)."""
-    if not profile.chrome_dir.exists():
+    """The profile's browser (its own Chrome, or an attached one such as ShardX, see
+    ``aistudio profile browser``); ``window`` is minimized or headless (desktop viewport) or
+    visible (maximized, page sized by the window). An attached browser keeps its own window:
+    ``window`` is ignored and only the tab aistudio opens is touched."""
+    spec = load_spec(profile)
+    if not has_browser_session(profile, spec):
         raise BrowserError(
             f"profile {profile.name!r} has no browser session", hint='run "aistudio login" first'
         )
@@ -814,14 +818,16 @@ async def open_browser(
         # (a fixed 1600x1000 page cut off pop-ups on smaller screens). Hidden runs keep the
         # desktop viewport that page driving relies on; a minimized one sets it on the page,
         # since a launch viewport would grow the window to fit it.
-        minimized = window == "minimized"
-        context = await launch_persistent(playwright, profile, browser="chrome",
-                                          headless=window == "headless",
-                                          viewport=VIEWPORT if window == "headless" else None,
-                                          args=SMALL_WINDOW_ARGS if minimized else ())
+        minimized = window == "minimized" and not spec.attached
+        context = await launch_browser(playwright, profile, spec,
+                                       headless=window == "headless",
+                                       viewport=VIEWPORT if window == "headless" else None,
+                                       args=SMALL_WINDOW_ARGS if minimized else ())
         try:
-            page = context.pages[0] if context.pages else await context.new_page()
-            if minimized:
+            page = await page_to_drive(context)
+            if spec.attached:
+                pass  # the window and its fingerprint are the user's
+            elif minimized:
                 await _minimize(context, page)
                 await page.set_viewport_size(VIEWPORT)
             elif window == "visible":

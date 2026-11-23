@@ -401,3 +401,6 @@ Get the user's explicit OK before:
 - `--force` on `aistudio app export`, which overwrites files in the target folder.
 
 `--profile NAME` selects another signed-in Google account (`aistudio profile list --json`).
+A profile can drive a ShardX browser profile instead of its own Chrome (`aistudio profile browser`
+shows which); browser commands then run in that ShardX profile and never stop it. Do not change
+it (`profile browser SPEC`, `login --browser shardx:…`) unless the user asks.
