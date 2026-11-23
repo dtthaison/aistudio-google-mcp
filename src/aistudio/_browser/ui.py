@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any, Protocol, TypeVar
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from aistudio._auth.login import default_playwright_factory, launch_persistent
+from aistudio._auth.login import default_playwright_factory, launch_browser
 from aistudio._auth.storage import account_info, load_state, missing_cookies, save_state
+from aistudio._browser.provider import has_browser_session, load_spec, page_to_drive
 from aistudio.exceptions import (
     AIStudioError,
     AuthError,
@@ -41,7 +42,11 @@ VIEWPORT = {"width": 1600, "height": 1000}  # narrower hides parts of AI Studio'
 # Chrome's smallest size in a bottom corner (Chrome keeps windows on a display, so off-screen
 # positions land on another monitor instead).
 SMALL_WINDOW_ARGS = ("--window-size=500,375", "--window-position=0,10000")
-RUN_SHORTCUT = "Meta+Enter" if sys.platform == "darwin" else "Control+Enter"
+# "Mod" is Cmd where the page runs on macOS, else Ctrl. The page decides by the platform it
+# reports, which for an attached browser (ShardX on a Linux server, or a spoofed
+# fingerprint) need not be this machine's; PlaywrightUi resolves it per page.
+MOD_KEY = "Mod"
+RUN_SHORTCUT = f"{MOD_KEY}+Enter"
 RPC_MARKER = "MakerSuiteService/"
 CONTROL_TIMEOUT_MS = 30_000
 Name = str | re.Pattern[str]
@@ -190,6 +195,11 @@ _VISIBLE_LABELS_JS = """els => els.filter(e => {
   return box.width > 0 && box.height > 0 && getComputedStyle(e).visibility !== 'hidden';
 }).map(e => e.getAttribute('aria-label') || e.innerText || '')"""
 
+_VISIBLE_TEXTS_JS = """els => els.filter(e => {
+  const box = e.getBoundingClientRect();
+  return box.width > 0 && box.height > 0 && getComputedStyle(e).visibility !== 'hidden';
+}).map(e => e.innerText || '')"""
+
 _BATCH_RPC_JS = """async ([rpcid, args]) => {
   const g = window.WIZ_global_data || {};
   const params = new URLSearchParams({
@@ -310,6 +320,18 @@ class _QueueLog:
 class PlaywrightUi:
     def __init__(self, page: Any) -> None:
         self._page = page
+        self._mod: str | None = None
+
+    async def _resolve_keys(self, key: str) -> str:
+        if MOD_KEY + "+" not in key:
+            return key
+        if self._mod is None:
+            try:
+                platform = str(await self._page.evaluate("navigator.platform"))
+            except Exception:  # the page cannot tell: fall back to this machine
+                platform = "Mac" if sys.platform == "darwin" else ""
+            self._mod = "Meta" if platform.startswith("Mac") else "Control"
+        return key.replace(MOD_KEY + "+", self._mod + "+")
 
     def raw_page(self) -> Any:
         """The Playwright page, for work on frames and downloads (Flow Tools)."""
@@ -354,6 +376,7 @@ class PlaywrightUi:
 
     async def press_first(self, selector: str, key: str) -> None:
         element = await self._first_visible(selector, 5.0)
+        key = await self._resolve_keys(key)
         try:
             await element.press(key)
         except Exception as exc:
@@ -399,6 +422,7 @@ class PlaywrightUi:
         await self._act(role, name, lambda: locator.fill(text, timeout=CONTROL_TIMEOUT_MS))
 
     async def press(self, role: str, name: Name, key: str) -> None:
+        key = await self._resolve_keys(key)
         locator = self._role(role, name).first
         await self._act(role, name, lambda: locator.press(key, timeout=CONTROL_TIMEOUT_MS))
 
@@ -408,6 +432,7 @@ class PlaywrightUi:
         await self._act(role, name, lambda: locator.press("Enter", timeout=CONTROL_TIMEOUT_MS))
 
     async def key(self, key: str) -> None:
+        key = await self._resolve_keys(key)
         await self._read(lambda: self._page.keyboard.press(key))
 
     async def visible(self, role: str, name: Name, *, exact: bool = False) -> bool:
@@ -454,6 +479,8 @@ class PlaywrightUi:
         except Exception as exc:  # playwright errors: a closed window, or a slow page
             if "closed" in str(exc).lower():
                 raise _window_closed() from exc
+            log.debug("page read failed: %s", str(exc).splitlines()[0][:300] if str(exc) else
+                      type(exc).__name__)
             raise BrowserError("the page did not show what aistudio expected in time",
                                hint="re-run; if it persists, add --visible to watch it") from exc
 
@@ -473,13 +500,13 @@ class PlaywrightUi:
             raise BrowserError(f"could not type into {selector!r}: {exc}") from exc
 
     async def text_of(self, selector: str) -> str:
-        """The last visible match's text, collapsed; "" when nothing matches."""
+        """The last visible match's text, collapsed; "" when nothing matches. Read in one step
+        in the page: checking visibility, then reading the text, raced with Flow re-rendering
+        the element, and the read then waited out its timeout on a node that was gone (live,
+        over a remote browser's slower round trips)."""
         async def read() -> str:
-            found = ""
-            for element in await self._page.locator(selector).all():
-                if await element.is_visible():
-                    found = " ".join((await element.inner_text()).split())
-            return found
+            texts = await self._page.locator(selector).evaluate_all(_VISIBLE_TEXTS_JS)
+            return " ".join((texts[-1] or "").split()) if texts else ""
 
         return await self._read(read)
 
@@ -802,9 +829,12 @@ async def open_browser(
     window: str = "minimized",
     playwright_factory: Callable[[], Any] | None = None,
 ) -> AsyncIterator[Ui]:
-    """The profile's Chrome; ``window`` is minimized or headless (desktop viewport) or visible
-    (maximized, page sized by the window)."""
-    if not profile.chrome_dir.exists():
+    """The profile's browser (its own Chrome, or an attached one such as ShardX, see
+    ``aistudio profile browser``); ``window`` is minimized or headless (desktop viewport) or
+    visible (maximized, page sized by the window). An attached browser keeps its own window:
+    ``window`` is ignored and only the tab aistudio opens is touched."""
+    spec = load_spec(profile)
+    if not has_browser_session(profile, spec):
         raise BrowserError(
             f"profile {profile.name!r} has no browser session", hint='run "aistudio login" first'
         )
@@ -814,22 +844,26 @@ async def open_browser(
         # (a fixed 1600x1000 page cut off pop-ups on smaller screens). Hidden runs keep the
         # desktop viewport that page driving relies on; a minimized one sets it on the page,
         # since a launch viewport would grow the window to fit it.
-        minimized = window == "minimized"
-        context = await launch_persistent(playwright, profile, browser="chrome",
-                                          headless=window == "headless",
-                                          viewport=VIEWPORT if window == "headless" else None,
-                                          args=SMALL_WINDOW_ARGS if minimized else ())
+        minimized = window == "minimized" and not spec.attached
+        context = await launch_browser(playwright, profile, spec,
+                                       headless=window == "headless",
+                                       viewport=VIEWPORT if window == "headless" else None,
+                                       args=SMALL_WINDOW_ARGS if minimized else ())
         try:
-            page = context.pages[0] if context.pages else await context.new_page()
-            if minimized:
+            page = await page_to_drive(context)
+            if spec.attached:
+                pass  # the window and its fingerprint are the user's
+            elif minimized:
                 await _minimize(context, page)
                 await page.set_viewport_size(VIEWPORT)
             elif window == "visible":
                 await _maximize(context, page)
             yield PlaywrightUi(page)
         finally:
-            await _save_session(profile, context)
             try:
-                await context.close()
-            except Exception:  # noqa: S110 (the user may have closed the window already)
-                pass
+                await _save_session(profile, context)
+            finally:  # also when the save is cancelled: never leave the browser or provider
+                try:
+                    await context.close()
+                except Exception:  # noqa: S110 (the user may have closed the window already)
+                    pass

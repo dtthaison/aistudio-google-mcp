@@ -1441,3 +1441,74 @@ made-up bodies of the same shape (`prompt_wire` in `tests/conftest.py`).
   modified time, so `prompt get` shows no "created"); attachment names (Drive files carry only
   an id, and their mime type is not in the reply); audio/video/PDF inline attachments.
 - **Pending inputs** (`[13][1]`) held one empty user chunk in every chat: the unsent draft box.
+
+## A ShardX browser on a remote server (2026-11-23; free runs, one 1-second TTS)
+
+- The ShardX profile runs on a Linux server (reached over SSH by `muse-browser-shardx`) and
+  reports `navigator.platform` "Linux x86_64". AI Studio's speech page then runs on Ctrl+Enter
+  only: Cmd+Enter sent from a Mac did nothing, and no `MakerSuiteService/` request followed.
+  `PlaywrightUi` now picks the modifier from the page's platform.
+- Over that slower link, reading an element's text after checking it is visible (two round
+  trips) can wait out the timeout while Flow re-renders the node; `text_of` reads in one step.
+- **Flow's agent settings moved (2026-11-23, free probes; same account's project).** The prompt
+  box's gear is now a button named "Agent settings", and the only exact "Settings" left is the
+  top bar's (view settings), so the old path (last "Settings", then "Image generation default
+  model") waited 30 s and failed with "the page did not show what aistudio expected in time".
+  The new layout, read with free probes only:
+  - The gear opens a list in the agent panel: a "Back" button, the heading "Agent settings", the
+    **Confirm before generating** radiogroup (radios "Always Agent will ask for confirmation
+    before generating media." and "Never Agent will generate media and spend credits
+    automatically."; the old `ASKS_FIRST` pattern still matches the first), a "Defaults" block
+    with two buttons, **"Image defaults 🍌 Nano Banana 2.1, 16:9, 2 outputs"** and **"Video
+    defaults Omni 1.2 Flash, 16:9, 1 output"** (inner text starts with an icon word, ends with
+    `arrow_forward`), and "Memory" with "Add new". One read of a row gives model, aspect and
+    count, so reading the defaults needs no further click.
+  - A row opens that kind's page ("Back" returns to the list, a second "Back" to the chat; a
+    reload also closes it). The page has radiogroup **"Model"** (radios named by the model:
+    "🍌 Nano Banana Pro", "🍌 Nano Banana 2 Lite", "🍌 Nano Banana 2.1" for images; "Omni 1.2
+    Flash", "Omni 1.1 Flash Leaving Dec 5", "Veo 3.1 - Lite", "Veo 3.1 - Fast Leaving Dec 5",
+    "Veo 3.1 - Quality Leaving Dec 5" for video), **Aspect ratio** radios ("16:9", "4:3", "1:1",
+    "3:4", "9:16" for images; "16:9", "9:16" for video), **Number of outputs** radios ("x1" to
+    "x4"), and, for images only, **Thinking level** radios ("Low", "Medium", "High": here "High",
+    "Extra thorough"). Only one kind's radios are on the page at a time, so every group is the
+    first match (the old panel showed both kinds and needed an index).
+  - **No Save button.** Each choice is saved at once: one `batchexecute` `Kcr7Ub` call (status
+    200) per radio changed, and the value survives a reload. A model change also sent `WuwhI`
+    once. aistudio now waits for `Kcr7Ub` after each change instead of pressing Save.
+  - **Keys.** The aspect and count radios (Material button toggles) take Enter. The model radios
+    are visually hidden native inputs and **ignore Enter**; a click event on the input
+    (Playwright `dispatch_event("click")`) selects one. The probe changed image count x2 to
+    x3 and back, and the image model to Nano Banana Pro and back to 2.1, then confirmed the
+    defaults read "Nano Banana 2.1, 16:9, 2 outputs" after a reload.
+  - A model whose name is a prefix of another ("Nano Banana 2" and "Nano Banana 2 Lite" and
+    "Nano Banana 2.1") needs an anchored match; a note such as "Leaving Dec 5" follows the
+    label in a radio's name but not in the row's summary.
+  - **Not handled:** "Nano Banana 2 Lite" (new, price not measured; `flow image` still knows
+    only Nano Banana 2.1 and Pro) and the image Thinking level (aistudio leaves it as it is).
+  - `FlowPage.read_defaults`/`apply_defaults` use this layout when a button named "Agent
+    settings" is there (waited for up to 3 s) and otherwise the older tune panel. Not checked
+    whether aistudio's own Chrome profile gets the same layout.
+- **No "Start new session" (2026-11-23).** The chat header now holds "Open session history"
+  (icon `forum`), "Agent settings" and "Close", under the heading "Untitled session" (or the
+  session's title) and, in an empty session, the greeting "Hi ..." with suggestion cards. A
+  button named "Start new session" is not on the page, so `FlowPage.new_session` failed with
+  "button 'Start new session' not found". "Open session history" opens a list with "Back" and
+  **"Create new session"** (icon `edit_square`); `new_session` goes through it when the old
+  button is missing.
+- **A finished image has no status in the project list (2026-11-23).** In `Zzl0ze`, the image
+  made by the free run came as one row with `[5][8]` empty (the old status slot, so `status`
+  None) and `[5][13]` = 822427 (its size); the prompt sits at `[5][6][2][0][0]` and `[5][1]` is
+  empty, and the links are `lh3.googleusercontent.com/asb/...` (not the `flow-content` host the
+  parser looks for). The chat reply is never read on this profile (WebChannel), so the run waits
+  its 240 s, then looks the image up in the project; `_made_in_project` required status 3 and
+  reported "agent had not finished replying" although the image had existed for minutes (found
+  by listing the project afterwards: `flow media`). A row with no status and a size now counts
+  as finished.
+- **A free image on this profile, end to end (2026-11-23).** `flow image "a red fox in snow" -m
+  nano-banana-2.1 --count 1 -o fox-flow.png` wrote the image and spent 0 credits (25050 left):
+  the run set the project's image count from 2 to 1 (one `Kcr7Ub`), sent the message, waited
+  the full 240 s because no chat reply is read, found the image in the project, downloaded it
+  from `flow-content.google/image/...` and restored the count to 2 (one more `Kcr7Ub`). The
+  file is JPEG data (the `.png` name draws the existing extension warning). Without `--count`
+  the project's default of 2 outputs makes `-o FILE` an error ("2 outputs need -o to be an
+  existing folder") before anything is sent.

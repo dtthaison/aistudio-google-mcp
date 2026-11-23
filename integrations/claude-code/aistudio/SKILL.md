@@ -404,6 +404,10 @@ Get the user's explicit OK before:
   (say which GPU or TPU, if any).
 
 `--profile NAME` selects another signed-in Google account (`aistudio profile list --json`).
+A profile can drive a ShardX browser profile instead of its own Chrome (`aistudio profile browser`
+shows which); browser commands then run in that ShardX profile and never stop it. Do not change
+it (`profile browser SPEC`, `login --browser shardx:…`) unless the user asks: changing it forgets
+the profile's saved sign-in, so the user must run `aistudio -p NAME login` again.
 
 ## Google Colab (`aistudio colab`)
 

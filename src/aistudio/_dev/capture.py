@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from aistudio._auth.login import APP_URL, default_playwright_factory, launch_persistent
+from aistudio._auth.login import APP_URL, default_playwright_factory, launch_browser
+from aistudio._browser.provider import (
+    has_browser_session,
+    page_to_drive,
+    request_from_own_page,
+    resolve_spec,
+)
 from aistudio._dev.fixtures import FixtureWriter, rpc_method_name
 from aistudio._dev.redact import RawExchange, Redactor
 from aistudio.exceptions import BrowserError
@@ -105,23 +111,27 @@ async def run_capture(
     profile: Profile,
     recorder: CaptureRecorder,
     *,
-    browser: str = "chrome",
+    browser: str | None = None,
     playwright_factory: Callable[[], Any] | None = None,
 ) -> None:
-    """Open the profile's Chrome headed and record until the window is closed."""
-    if not profile.chrome_dir.exists():
+    """Open the profile's browser headed and record until the window is closed (for an attached
+    browser such as ShardX, until the tab opened for the capture is closed or you press Ctrl-C)."""
+    spec = resolve_spec(profile, browser)
+    if not has_browser_session(profile, spec):
         raise BrowserError(
             f"profile {profile.name!r} has no browser session", hint='run "aistudio login" first'
         )
     factory = playwright_factory or default_playwright_factory()
     async with factory() as playwright:
-        context = await launch_persistent(playwright, profile, browser=browser, headless=False)
+        context = await launch_browser(playwright, profile, spec, headless=False)
         done = asyncio.Event()
         context_closed = False
         open_pages: set[Any] = set()
         pending: set[asyncio.Task[Path | None]] = set()
 
         def on_finished(request: Any) -> None:
+            if not request_from_own_page(context, request):
+                return  # the user's other tabs in a shared browser are not ours to record
             task = asyncio.ensure_future(recorder.handle(request))
             pending.add(task)
             task.add_done_callback(pending.discard)
@@ -143,15 +153,18 @@ async def run_capture(
                 open_pages.add(page)
                 page.on("close", on_page_close)
 
-        context.on("close", on_context_close)
-        context.on("page", track)
-        context.on("requestfinished", on_finished)
-        for existing in context.pages:
-            track(existing)
-        page = context.pages[0] if context.pages else await context.new_page()
-        track(page)
-        await page.goto(APP_URL, wait_until="commit")
         try:
+            context.on("close", on_context_close)
+            if not spec.attached:
+                # An attached browser is shared with the user: its other tabs are neither
+                # recorded nor waited for, only the tab opened here.
+                context.on("page", track)
+                for existing in context.pages:
+                    track(existing)
+            context.on("requestfinished", on_finished)
+            page = await page_to_drive(context)
+            track(page)
+            await page.goto(APP_URL, wait_until="commit")
             await done.wait()
         finally:
             if pending:

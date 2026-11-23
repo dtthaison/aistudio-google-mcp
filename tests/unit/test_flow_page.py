@@ -5,6 +5,7 @@ import pytest
 from aistudio._browser.ui import CapturedResponse
 from aistudio._flow.page import (
     AGENT_MESSAGE,
+    AGENT_SETTINGS,
     NEW_SESSION,
     PERMISSION_LAST,
     PROMPT_EDITOR,
@@ -177,6 +178,114 @@ async def test_a_video_is_ready_only_with_its_video_link(fake_ui):
     assert outcome.timed_out
 
 
+# Live 2026-11-23: the agent panel's gear is "Agent settings" and opens a list, not the tune panel.
+IMAGE_ROW = ("button", r"^Image defaults\b")
+VIDEO_ROW = ("button", r"^Video defaults\b")
+GEAR = {("button", AGENT_SETTINGS): [True]}
+ALWAYS = ("radio", r"^Always\b.*ask for confirmation", 0)
+IMAGE_SHOWN = "image Image defaults \U0001f34c Nano Banana 2.1, 16:9, 2 outputs arrow_forward"
+
+
+def model_radio(label):
+    return ("radio", rf"(?:^|\s){re.escape(label)}(?:\s+Leaving\b.*)?$", 0)
+
+
+async def test_read_defaults_from_the_agent_settings_list(fake_ui):
+    ui = fake_ui(visible=GEAR, inner={IMAGE_ROW: [IMAGE_SHOWN]}, checks={ALWAYS: [True]},
+                 url=f"https://flow.google.com/project/{PID}")
+    defaults = await FlowPage(ui).read_defaults("image")
+    assert defaults == Defaults("Nano Banana 2.1", "16:9", 2)
+    assert defaults.asks is True
+    assert ui.ops[0] == ("activate", "button", AGENT_SETTINGS, 0)
+    assert not [op for op in ui.ops if op[:3] == ("activate", "button", TUNE)]
+    assert ui.ops[-2:] == [("goto", f"https://flow.google.com/project/{PID}"),
+                           ("wait_for", PROMPT_EDITOR)]  # a reload closes the list
+
+
+async def test_read_video_defaults_from_the_list_with_one_output(fake_ui):
+    ui = fake_ui(visible=GEAR,
+                 inner={VIDEO_ROW: ["videocam Video defaults Omni 1.2 Flash, 9:16, 1 output "
+                                    "arrow_forward"]},
+                 checks={ALWAYS: [False]},
+                 url=f"https://flow.google.com/project/{PID}")
+    defaults = await FlowPage(ui).read_defaults("video")
+    assert defaults == Defaults("Omni 1.2 Flash", "9:16", 1)
+    assert defaults.asks is False
+
+
+async def test_a_list_row_that_reads_otherwise_is_an_error(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(visible=GEAR, inner={IMAGE_ROW: ["image Image defaults arrow_forward"]},
+                 url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).read_defaults("image")
+    assert "defaults" in info.value.message
+
+
+def test_a_defaults_row_gives_model_aspect_and_count():
+    from aistudio._flow.page import _defaults_row
+
+    assert _defaults_row(IMAGE_SHOWN) == ("Nano Banana 2.1", "16:9", 2)
+    assert _defaults_row("Video defaults Veo 3.1 - Lite, 9:16, 1 output") == (
+        "Veo 3.1 - Lite", "9:16", 1)
+    assert _defaults_row("Video defaults Omni 1.1 Flash Leaving Dec 5, 16:9, 4 outputs") == (
+        "Omni 1.1 Flash", "16:9", 4)
+    assert _defaults_row("Add new") is None
+
+
+async def test_apply_defaults_in_the_list_picks_what_differs_and_saves_each_choice(fake_ui):
+    ui = fake_ui({"Kcr7Ub": [SAVED, SAVED]}, visible=GEAR,
+                 inner={VIDEO_ROW: ["videocam Video defaults Veo 3.1 - Lite, 9:16, 2 outputs "
+                                    "arrow_forward"]},
+                 checks={model_radio("Veo 3.1 - Lite"): [False],
+                         ("radio", r"(^|\s)9:16$", 0): [False],
+                         ("radio", r"^x2$", 0): [True], ALWAYS: [True]},
+                 url=f"https://flow.google.com/project/{PID}")
+    await FlowPage(ui).apply_defaults("video", Defaults("Veo 3.1 - Lite", "9:16", 2))
+    ops = ui.ops
+    # the model radios ignore Enter: a click event; the aspect radio takes Enter; x2 was set
+    assert ("dispatch", "radio", model_radio("Veo 3.1 - Lite")[1]) in ops
+    assert ("activate", "radio", r"(^|\s)9:16$", 0) in ops
+    assert not [op for op in ops if op[:3] == ("activate", "radio", r"^x2$")]
+    assert ops.index(("activate", "button", r"^Video defaults\b", 0)) > ops.index(
+        ("activate", "button", AGENT_SETTINGS, 0))
+    # no Save in this layout, and no tune panel button
+    assert not [op for op in ops if op[:3] in (("activate", "button", "Save"),
+                                               ("activate", "button", TUNE))]
+
+
+def test_the_model_radio_matches_its_leaving_note_but_not_a_longer_name():
+    pattern = re.compile(model_radio("Nano Banana 2.1")[1])
+    assert pattern.search("\U0001f34c Nano Banana 2.1")
+    assert pattern.search("Nano Banana 2.1 Leaving Dec 5")
+    assert not pattern.search("\U0001f34c Nano Banana 2.1 Lite")
+    assert not re.compile(model_radio("Nano Banana 2")[1]).search("\U0001f34c Nano Banana 2.1")
+
+
+async def test_a_list_choice_flow_never_saves_is_an_error(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui(visible=GEAR, checks={model_radio("Veo 3.1 - Lite"): [False]},
+                 url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui, now=Clock()).apply_defaults("video", Defaults("Veo 3.1 - Lite",
+                                                                         "9:16", 2))
+    assert "save" in info.value.message
+
+
+async def test_list_settings_that_do_not_take_effect_are_an_error(fake_ui):
+    from aistudio.exceptions import BrowserError
+
+    ui = fake_ui({"Kcr7Ub": [SAVED]}, visible=GEAR, inner={IMAGE_ROW: [IMAGE_SHOWN]},
+                 checks={model_radio("Nano Banana 2.1"): [True],
+                         ("radio", r"(^|\s)16:9$", 0): [True], ("radio", r"^x1$", 0): [False]},
+                 url=f"https://flow.google.com/project/{PID}")
+    with pytest.raises(BrowserError) as info:
+        await FlowPage(ui).apply_defaults("image", Defaults("Nano Banana 2.1", "16:9", 1))
+    assert "did not take effect" in info.value.message
+
+
 async def test_credits_from_the_account_menu(fake_ui):
     ui = fake_ui(texts={"body": ["Son 1,040 Google Flow credits Upgrade"]})
     assert await FlowPage(ui).credits() == 1040
@@ -236,6 +345,16 @@ async def test_new_session_expands_a_compact_prompt_box_first(fake_ui):
     await FlowPage(ui).new_session()
     assert ui.ops == [("activate", "button", "Expand", 0),
                       ("activate", "button", NEW_SESSION, 0)]
+
+
+async def test_new_session_goes_through_the_history_list_when_the_header_has_no_button(fake_ui):
+    # Live 2026-11-23: the chat header holds "Open session history", "Agent settings" and
+    # "Close"; the history list has "Back" and "Create new session".
+    ui = fake_ui(visible={("button", NEW_SESSION): [False],
+                          ("button", "Open session history"): [True]})
+    await FlowPage(ui).new_session()
+    assert ui.ops == [("activate", "button", "Open session history", 0),
+                      ("activate", "button", "Create new session", 0)]
 
 
 async def test_enter_waits_until_the_editor_shows_the_prompt(fake_ui):

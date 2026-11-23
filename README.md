@@ -211,6 +211,40 @@ aistudio profile list                      # * marks the active profile
 A command uses the profile named by `-p`, else `$AISTUDIO_PROFILE`, else the one chosen with
 `profile switch`, else `default`.
 
+### ShardX browser
+
+A profile can drive a ShardX anti-detect browser profile (its own fingerprint,
+proxy and cookies) instead of aistudio's own Chrome. aistudio reuses the `muse-browser-shardx`
+provider from muse-mcp, which must be on your `PATH`:
+
+```sh
+muse-browser-shardx setup                      # once: Launcher API URL, SSH host, token
+muse-browser-shardx list                       # your ShardX profiles
+aistudio -p work login --browser shardx:MY-SHARDX-PROFILE   # sign in there; saved for -p work
+aistudio -p work profile browser               # show the browser this profile drives
+aistudio -p work profile browser chrome        # or: --reset, back to aistudio's own Chrome
+```
+
+Every browser command of that profile (`generate`, `flow`, `app`, `dev capture`, ...) then
+starts the ShardX profile through the provider and attaches to it over Chrome DevTools. Notes:
+
+- aistudio never stops a ShardX profile. At the end it closes only the tab it opened, drops the
+  DevTools connection and stops the provider; your other tabs are left alone. Existing tabs are
+  never reused.
+- The window, size and fingerprint are the ShardX profile's own; `--fresh` is refused (it would
+  wipe a browser profile aistudio does not own).
+- The DevTools port must stay on localhost (`http://127.0.0.1:PORT`); anything else is refused.
+  For ShardX on a server, the provider reaches it through an SSH tunnel.
+- One browser command per profile at a time (a lock in the profile's folder).
+- Changing a profile's browser forgets its saved login (`storage_state.json`, `session.json`),
+  because another browser may be another Google account; run `aistudio -p NAME login` after.
+  aistudio's own Chrome folder is left alone.
+- Limitation: with ShardX on a remote server (SSH tunnel), the browser runs on that server, so
+  commands that hand it local files (`--image`, `transcribe FILE`, Flow uploads) or save the
+  browser's downloads to this machine do not work there. Use ShardX on this machine for them.
+- The attach and file lock need macOS or Linux.
+- `profile browser` also takes `cdp:http://127.0.0.1:PORT` for a browser that is already running.
+
 ### Google Colab, one account per profile
 
 `aistudio colab` runs Google's [Colab CLI](https://github.com/googlecolab/google-colab-cli)

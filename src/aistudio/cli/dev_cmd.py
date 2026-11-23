@@ -34,8 +34,9 @@ def _render_capture(data: dict[str, Any]) -> None:
 @dev.command("capture")
 @click.option("--out", type=click.Path(file_okay=False, path_type=Path),
               default=Path("tests/fixtures"), show_default=True, help="Fixture directory.")
-@click.option("--browser", type=click.Choice(["chrome", "chromium", "msedge"]), default="chrome",
-              show_default=True)
+@click.option("--browser", default=None, metavar="SPEC",
+              help="Browser to use (chrome, chromium, msedge, shardx:PROFILE); "
+                   "default is the profile's saved browser.")
 @click.option("--host-pattern", default=DEFAULT_HOST_PATTERN, show_default=True,
               help="Regex of request hosts to record.")
 @click.option("--redact", "redact_texts", multiple=True,
@@ -43,7 +44,7 @@ def _render_capture(data: dict[str, Any]) -> None:
 @json_option
 @click.pass_obj
 @handle_errors
-def capture(state: CliState, out: Path, browser: str, host_pattern: str,
+def capture(state: CliState, out: Path, browser: str | None, host_pattern: str,
             redact_texts: tuple[str, ...], json_output: bool) -> None:
     """Record AI Studio traffic, redacted, while you use the UI."""
     profile = state.profile()
