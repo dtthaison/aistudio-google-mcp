@@ -77,6 +77,7 @@ quotes and write each `'` as `'\''`.
 | Flow video / image, paid (spends Flow credits) | the same command plus `--max-credits <quote>` and `-o <path>` |
 | Many Flow images from a file of prompts (**the free model makes every one at once**) | `aistudio flow image --prompts-file <prompts.jsonl> -o <existing folder> [-m MODEL] [--aspect A] [--count N] [--character X] [--ingredient <media id>] [--max-credits <total of the quotes>] [--start-at N] --json`; see "Flow image batches" below |
 | Flow projects and media ids (free) | `aistudio flow projects --json`, `aistudio flow media [--project P] [--type video\|image\|audio] --json` |
+| New Flow project (free; always a new one) | `aistudio flow project create '<Title>' --json` -> `{"id", "title", "url"}`: the new project's id, then pass it as `--project <id>` |
 | Download Flow media (free) | `aistudio flow download <media-id> -o <path> --json` |
 | Frames (video) and reference images (video or image) | `--start-frame X`, `--end-frame X` (video only), `--ingredient X` (repeatable); X is a media id from `flow media`, or a local image plus `--i-have-rights` |
 | Flow character from a description (Nano Banana 2.1: 0 credits) | `aistudio flow character create '<Name>' '<description>' -o robot.png --json` |

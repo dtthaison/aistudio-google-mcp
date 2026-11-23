@@ -87,7 +87,7 @@ tracks your working copy. `uv tool uninstall aistudio-py` removes it; your sessi
 | Build apps | `app list/get/recent/export/diff`, `gallery list/get` | free |
 | Build apps | `app create`, `app prompt` | your Build quota |
 | Media | `generate image/speech/music`, `transcribe` | your AI Studio quota |
-| Google Flow | `flow projects/media/download/credits`, `flow scene ...`, `flow frame save` | free |
+| Google Flow | `flow projects/media/download/credits`, `flow project create TITLE`, `flow scene ...`, `flow frame save` | free |
 | Google Flow | `flow video/image/extend/edit`, `flow character ...` | Flow credits, only with `--max-credits` |
 | Google Flow | `flow storyboard FILE.yaml` (a whole scene from one file) | plan and quotes are free; Flow credits only with `--max-credits` |
 | Google Flow Music | `flow music list/get/download`, `flow credits --music` | free |

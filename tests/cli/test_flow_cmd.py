@@ -387,3 +387,44 @@ def test_flow_frame_save_passes_every_option(logged_in_profile, monkeypatch, tmp
     assert res.exit_code == 0, res.output
     assert calls[-1][1]["at"] is None
     assert "f1" in res.stdout and "00:03:12" in res.stdout and "--start-frame" in res.stdout
+
+
+PROJECT = {"id": "72df29b1-e119-4741-ad44-ba18bc1ad34a", "title": "My film",
+           "url": "https://flow.google.com/project/72df29b1-e119-4741-ad44-ba18bc1ad34a"}
+
+
+def test_flow_project_create_prints_the_id_title_and_link(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    calls = []
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_create_project", fake(PROJECT, calls))
+    res = CliRunner().invoke(cli, ["flow", "project", "create", "My film", "--visible", "--json"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == PROJECT
+    assert calls == [(("My film",), {"visible": True})]
+    res = CliRunner().invoke(cli, ["flow", "project", "create", "My film"])
+    assert res.exit_code == 0 and PROJECT["id"] in res.stdout and PROJECT["url"] in res.stdout
+
+
+def test_flow_project_create_needs_a_title(logged_in_profile):
+    logged_in_profile()
+    for title in ("", "   "):
+        res = CliRunner().invoke(cli, ["flow", "project", "create", title, "--json"])
+        assert res.exit_code == 1, res.output
+        assert json.loads(res.stdout)["code"] == "VALIDATION_ERROR"
+
+
+def test_flow_project_create_needs_the_browser(logged_in_profile):
+    logged_in_profile()
+    res = CliRunner().invoke(cli, ["--backend", "http", "flow", "project", "create", "x",
+                                   "--json"])
+    assert res.exit_code == 1
+    assert json.loads(res.stdout)["code"] == "VALIDATION_ERROR"
+
+
+def test_flow_projects_still_lists_next_to_the_project_group(logged_in_profile, monkeypatch):
+    logged_in_profile()
+    monkeypatch.setattr("aistudio.cli.flow_cmd.flow_projects", fake(
+        {"projects": [{"id": "p1", "title": "aistudio", "created": None}], "count": 1}, []))
+    res = CliRunner().invoke(cli, ["flow", "projects", "--json"])
+    assert res.exit_code == 0 and json.loads(res.stdout)["count"] == 1
+    assert CliRunner().invoke(cli, ["flow", "project", "--help"]).exit_code == 0

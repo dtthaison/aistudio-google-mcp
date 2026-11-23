@@ -685,6 +685,19 @@ async def flow_projects(profile: Profile, *, visible: bool = False,
                          for p in projects], "count": len(projects)}
 
 
+async def flow_create_project(profile: Profile, title: str, *, visible: bool = False,
+                              browser: Callable[..., Any] = open_browser,
+                              page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:
+    """Make a new Flow project called TITLE (always a new one; free)."""
+    title = title.strip()
+    if not title:
+        raise ValidationError("a project title cannot be empty",
+                              hint="pass a title, e.g. aistudio flow project create 'My film'")
+    async with browser(profile, window="visible" if visible else "minimized") as ui:
+        project_id = await page_factory(ui).create_project(title)
+    return {"id": project_id, "title": title, "url": PROJECT_URL.format(id=project_id)}
+
+
 async def flow_media(profile: Profile, *, project: str | None = None, kind: str | None = None,
                      visible: bool = False, browser: Callable[..., Any] = open_browser,
                      page_factory: Callable[[Any], Any] = FlowPage) -> dict[str, Any]:

@@ -8,6 +8,7 @@ import pytest
 from aistudio._app.flow import (
     STATE_FILE,
     flow_character,
+    flow_create_project,
     flow_download,
     flow_extend,
     flow_generate,
@@ -57,6 +58,7 @@ class FakePage:
         self.calls.append(("open", pid))
 
     async def create_project(self, title):
+        self.calls.append(("create", title))
         return PID
 
     async def media_details(self, media_id):
@@ -180,6 +182,26 @@ async def test_projects_and_media_lists(logged_in_profile):
     assert [(m["media_id"], m["title"], m["kind"]) for m in videos["media"]] == [
         (VID, "Red apple rolling on table", "video")]
     assert videos["media"][0]["prompt"] == "p"
+
+
+async def test_create_project_passes_the_title_and_returns_id_and_link(logged_in_profile):
+    profile = logged_in_profile()
+    kw, pages, _ = harness()
+    kw.pop("downloader"), kw.pop("now")
+    result = await flow_create_project(profile, "  My film ", **kw)
+    assert result == {"id": PID, "title": "My film",
+                      "url": f"https://flow.google.com/project/{PID}"}
+    assert ("create", "My film") in pages[0].calls
+
+
+@pytest.mark.parametrize("title", ["", "   ", "\n\t"])
+async def test_create_project_needs_a_title(logged_in_profile, title):
+    profile = logged_in_profile()
+    kw, pages, _ = harness()
+    kw.pop("downloader"), kw.pop("now")
+    with pytest.raises(ValidationError):
+        await flow_create_project(profile, title, **kw)
+    assert not pages  # the browser was never opened
 
 
 async def test_download_needs_a_finished_media(logged_in_profile, tmp_path):
