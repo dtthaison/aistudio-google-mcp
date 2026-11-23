@@ -84,6 +84,9 @@ def _render_browser(data: dict[str, Any]) -> None:
         stdout.print(f"Profile {data['profile']} uses {data['browser']} again")
     else:
         stdout.print(f"Profile {data['profile']} uses {data['browser']}")
+    if data.get("cleared"):
+        stdout.print(f"Forgot the saved login ({', '.join(data['cleared'])}); "
+                     f"{data['hint']}")
 
 
 @profile.command("browser")

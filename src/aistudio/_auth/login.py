@@ -14,12 +14,15 @@ from aistudio._auth.signer import API_HOST
 from aistudio._auth.storage import AccountInfo, save_session_info, save_state
 from aistudio._browser.provider import (
     BrowserSpec,
+    check_fresh_allowed,
     connect_browser,
     page_to_drive,
+    redact,
+    request_from_own_page,
     resolve_spec,
     save_spec,
 )
-from aistudio.exceptions import AIStudioError, BrowserError, ValidationError, WaitTimeoutError
+from aistudio.exceptions import AIStudioError, BrowserError, WaitTimeoutError
 from aistudio.paths import Profile
 
 APP_URL = "https://aistudio.google.com/"
@@ -132,12 +135,7 @@ async def run_login(
     """Sign in; ``browser`` (a spec such as ``chrome`` or ``shardx:work``) is saved to the
     profile once sign-in works, else the profile's saved browser is used."""
     spec = resolve_spec(profile, browser)
-    if fresh and spec.attached:
-        raise ValidationError(
-            "--fresh only resets aistudio's own Chrome profile; it never touches an attached "
-            f"browser ({spec})",
-            hint="drop --fresh, or sign out in that browser yourself",
-        )
+    check_fresh_allowed(spec, fresh)
     factory = playwright_factory or default_playwright_factory()
     profile.ensure()
     if fresh and profile.chrome_dir.exists():
@@ -149,6 +147,8 @@ async def run_login(
             keys: list[str] = []
 
             def on_request(request: Any) -> None:
+                if not request_from_own_page(context, request):
+                    return  # another tab of a shared browser may be another account
                 key = api_key_from_request(request.url, request.headers)
                 if key:
                     keys.append(key)
@@ -169,7 +169,13 @@ async def run_login(
                 await asyncio.sleep(min(poll, 0.5))
             api_key = keys[-1] if keys else _key_from_html(await page.content())
             account = AccountInfo(email=None, authuser=authuser_from_url(page.url))
-            save_state(profile, await context.storage_state(), account)
+            if spec.attached:
+                # only cookies are used, and storage_state() would visit the user's other tabs
+                cookies = await asyncio.wait_for(context.cookies(), 10.0)
+                state: dict[str, Any] = {"cookies": cookies, "origins": []}
+            else:
+                state = await context.storage_state()
+            save_state(profile, state, account)
             save_session_info(profile, api_key)
             if browser:
                 save_spec(profile, spec)
@@ -180,7 +186,7 @@ async def run_login(
             if "closed" in str(exc).lower():
                 raise BrowserError("the login window was closed before sign-in finished",
                                    hint='run "aistudio login" again') from exc
-            raise BrowserError(f"the login browser failed: {exc}",
+            raise BrowserError(f"the login browser failed: {redact(str(exc))}",
                                hint='run "aistudio login" again') from exc
         finally:
             await context.close()

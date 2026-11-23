@@ -1,9 +1,12 @@
 """An attached browser (ShardX through muse-browser-shardx): specs, the provider, close rules."""
 
+import asyncio
 import json
 import os
 import stat
 import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,7 +34,7 @@ PROVIDER_SCRIPT = """#!{python}
 import os, sys, time
 mode = sys.argv[2]
 marker = os.environ.get("FAKE_MARKER")
-if mode not in ("fail", "badurl", "silent"):  # any other profile works
+if mode not in ("fail", "badurl", "silent", "orphan", "stubborn", "longfail"):
     print("{url}", flush=True)
     sys.stdin.read()  # stays up until stdin closes
     if marker:
@@ -44,6 +47,22 @@ elif mode == "badurl":
     time.sleep(30)
 elif mode == "silent":
     time.sleep(30)
+elif mode == "orphan":  # the leader exits but leaves a tunnel in its group
+    import subprocess
+    child = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    open(os.environ["FAKE_CHILD"], "w").write(str(child.pid))
+    print("{url}", flush=True)
+elif mode == "stubborn":  # ignores stdin EOF and SIGTERM
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    print("{url}", flush=True)
+    while True:
+        time.sleep(0.1)
+elif mode == "longfail":
+    sys.stderr.write("x" * 200000 + "\\n")  # over asyncio's 64 KiB line limit
+    sys.stderr.write("boom api_token=zzz\\n")
+    sys.exit(2)
 """
 
 
@@ -396,6 +415,9 @@ async def test_login_with_an_attached_browser_saves_the_spec_and_never_wipes(
     page_url = {}
 
     class SignedInContext(FakeContext):
+        async def storage_state(self):
+            raise AssertionError("storage_state() would visit the user's other tabs")
+
         async def new_page(self):
             page = await super().new_page()
             page.url = "https://aistudio.google.com/prompts/new_chat"
@@ -410,3 +432,256 @@ async def test_login_with_an_attached_browser_saves_the_spec_and_never_wipes(
     assert profile.storage_state.exists()
     assert page_url["page"].closed is False  # the only tab: blanked rather than closed
     assert browser.closed
+
+
+# --- review fixes -----------------------------------------------------------------------------
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def _dies(pid, seconds=3.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_stopping_sweeps_a_tunnel_left_by_a_provider_that_already_exited(
+        aistudio_home, fake_provider, monkeypatch, tmp_path):
+    child_file = tmp_path / "child"
+    monkeypatch.setenv("FAKE_CHILD", str(child_file))
+    context = await connect_browser(FakePlaywright(FakeBrowser([FakeContext([])])),
+                                    get_profile("default"), parse_spec("fake:orphan"))
+    await asyncio.sleep(0.3)  # the leader has exited by now
+    pid = int(child_file.read_text())
+    assert _alive(pid)
+    await context.close()
+    assert await _dies(pid)
+
+
+async def test_a_cancelled_stop_still_kills_the_provider(aistudio_home, fake_provider,
+                                                          monkeypatch):
+    monkeypatch.setattr(prov, "PROVIDER_EXIT_WAIT_S", 5.0)
+    _url, provider = await prov.start_provider(parse_spec("fake:stubborn"))
+    pid = provider.proc.pid
+    task = asyncio.ensure_future(provider.stop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await _dies(pid)
+
+
+async def test_a_provider_that_ignores_eof_and_sigterm_is_killed(aistudio_home, fake_provider,
+                                                                  monkeypatch):
+    monkeypatch.setattr(prov, "PROVIDER_EXIT_WAIT_S", 0.3)
+    _url, provider = await prov.start_provider(parse_spec("fake:stubborn"))
+    await provider.stop()
+    assert provider.proc.returncode is not None
+
+
+async def test_a_stderr_line_over_64k_does_not_stop_the_draining(aistudio_home, fake_provider):
+    with pytest.raises(BrowserError) as err:
+        await connect_browser(FakePlaywright(FakeBrowser([])), get_profile("default"),
+                              parse_spec("fake:longfail"))
+    assert "boom" in str(err.value) and "zzz" not in str(err.value)
+    assert len(str(err.value)) < 2000
+
+
+async def test_close_runs_every_step_even_when_cancelled(aistudio_home, fake_provider):
+    profile = get_profile("default")
+    browser = FakeBrowser([FakeContext([])])
+    context = await connect_browser(FakePlaywright(browser), profile, parse_spec("fake:p1"))
+    page = await context.new_page()
+    await context.new_page()
+
+    async def cancelled():
+        raise asyncio.CancelledError
+
+    page.close = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await context.close()
+    assert browser.closed
+    assert fake_provider.read_text() == "stopped"
+    BrowserLock(profile.root / "browser.lock").acquire()  # the lock was released
+
+
+async def test_open_browser_still_closes_when_the_session_save_is_cancelled(
+        logged_in_profile, fake_provider, monkeypatch):
+    profile = logged_in_profile()
+    save_spec(profile, parse_spec("fake:p1"))
+    browser = FakeBrowser([FakeContext([FakePage()])])
+
+    async def cancelled(*args):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("aistudio._browser.ui._save_session", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        async with open_browser(profile, playwright_factory=lambda: FakePlaywright(browser)):
+            pass
+    assert browser.closed and fake_provider.read_text() == "stopped"
+
+
+async def test_a_failure_opening_the_tab_is_a_browser_error(aistudio_home, fake_provider):
+    class BadContext(FakeContext):
+        async def new_page(self):
+            raise RuntimeError("Target closed token=abc")
+
+    context = await connect_browser(FakePlaywright(FakeBrowser([BadContext([])])),
+                                    get_profile("default"), parse_spec("fake:p1"))
+    with pytest.raises(BrowserError, match="could not open a tab") as err:
+        await prov.page_to_drive(context)
+    assert "abc" not in str(err.value)
+    await context.close()
+
+
+async def test_a_context_that_cannot_be_opened_is_a_browser_error(aistudio_home, fake_provider):
+    class BadBrowser(FakeBrowser):
+        async def new_context(self):
+            raise RuntimeError("nope")
+
+    with pytest.raises(BrowserError, match="could not open a browser context"):
+        await connect_browser(FakePlaywright(BadBrowser([])), get_profile("default"),
+                              parse_spec("fake:p1"))
+    assert fake_provider.read_text() == "stopped"
+
+
+@pytest.mark.parametrize("raw", [
+    "launcher error: api_token=sx_secret",
+    "access_token: sx_secret retry",
+    '{"token": "sx_secret"}',
+    "Authorization: Bearer sx_secret",
+    "Cookie: SID=sx_secret; SAPISID=other_secret",
+    "Set-Cookie: SID=sx_secret; Path=/",
+    "x-goog-api-key: sx_secret",
+    "SAPISID=sx_secret",
+    "dial https://user:sx_secret@host/x failed",
+    "http://127.0.0.1:9222/devtools/browser/id?token=sx_secret&x=1",
+])
+def test_redact_masks_credential_looking_values(raw):
+    out = prov.redact(raw)
+    assert "sx_secret" not in out and "other_secret" not in out and "[redacted]" in out
+
+
+def test_redact_leaves_plain_text_alone():
+    text = "ShardX Launcher API is not reachable at 127.0.0.1:40325 (inside the sandbox)"
+    assert prov.redact(text) == text
+
+
+def test_a_rejected_devtools_url_is_redacted_in_the_error():
+    with pytest.raises(BrowserError) as err:
+        prov.check_devtools_url("https://u:sx_secret@evil.example.com/?token=sx_secret")
+    assert "sx_secret" not in str(err.value)
+
+
+async def test_attached_browsers_need_a_posix_system(aistudio_home, monkeypatch):
+    monkeypatch.setattr(prov, "_is_posix", lambda: False)
+    with pytest.raises(BrowserError, match="macOS or Linux"):
+        await connect_browser(FakePlaywright(FakeBrowser([])), get_profile("default"),
+                              parse_spec("cdp:http://127.0.0.1:9222"))
+    assert not (get_profile("default").root / "browser.lock").exists()
+
+
+# --- capture and login on a shared browser ---------------------------------------------------
+
+
+class CapturePage(FakePage):
+    def __init__(self):
+        super().__init__()
+        self.handlers = {}
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
+
+
+class CaptureContext(FakeContext):
+    def __init__(self, pages, goto):
+        super().__init__(pages)
+        self._goto = goto
+        self.subscribed = []
+        self.listeners = {}
+
+    def on(self, event, handler):
+        self.subscribed.append(event)
+        self.listeners[event] = handler
+
+    async def new_page(self):
+        page = CapturePage()
+        page.goto = lambda url, **kwargs: self._goto(page, url)
+        self.pages.append(page)
+        return page
+
+
+def _recorder():
+    handled = []
+
+    async def handle(request):
+        handled.append(request)
+
+    return SimpleNamespace(handle=handle), handled
+
+
+async def test_capture_failure_before_recording_still_cleans_up(logged_in_profile,
+                                                                 fake_provider):
+    from aistudio._dev.capture import run_capture
+
+    profile = logged_in_profile()
+    save_spec(profile, parse_spec("fake:p1"))
+
+    async def failing_goto(page, url):
+        raise RuntimeError("net::ERR_PROXY_CONNECTION_FAILED")
+
+    user_tab = FakePage("https://user-tab/")
+    context = CaptureContext([user_tab], failing_goto)
+    browser = FakeBrowser([context])
+    recorder, _ = _recorder()
+    with pytest.raises(RuntimeError, match="ERR_PROXY"):
+        await run_capture(profile, recorder, playwright_factory=lambda: FakePlaywright(browser))
+    assert browser.closed and fake_provider.read_text() == "stopped"
+    assert user_tab.closed is False
+    assert context.pages[1].closed  # the tab opened for the capture is gone
+    BrowserLock(profile.root / "browser.lock").acquire()
+
+
+async def test_capture_records_only_its_own_tab_of_a_shared_browser(logged_in_profile,
+                                                                     fake_provider):
+    from aistudio._dev.capture import run_capture
+
+    profile = logged_in_profile()
+    save_spec(profile, parse_spec("fake:p1"))
+    user_tab = CapturePage()
+
+    async def goto(page, url):
+        own = SimpleNamespace(frame=SimpleNamespace(page=page))
+        foreign = SimpleNamespace(frame=SimpleNamespace(page=user_tab))
+        worker = SimpleNamespace(frame=None)  # a service worker has no page
+        for request in (foreign, own, worker):
+            context.listeners["requestfinished"](request)
+        asyncio.get_running_loop().call_soon(lambda: [h(page) for h in page.handlers["close"]])
+
+    context = CaptureContext([user_tab], goto)
+    browser = FakeBrowser([context])
+    recorder, handled = _recorder()
+    await asyncio.wait_for(
+        run_capture(profile, recorder, playwright_factory=lambda: FakePlaywright(browser)), 3)
+    assert len(handled) == 1 and handled[0].frame.page is context.pages[1]
+    assert "page" not in context.subscribed  # tabs the user opens meanwhile are not tracked
+    assert user_tab.closed is False and not user_tab.handlers
+
+
+def test_login_command_rejects_fresh_for_an_attached_browser_before_opening(aistudio_home):
+    from click.testing import CliRunner
+
+    from aistudio.cli.main import cli
+
+    result = CliRunner().invoke(cli, ["login", "--browser", "shardx:x", "--fresh"])
+    assert result.exit_code != 0
+    assert "Opening" not in result.output and "--fresh" in result.output

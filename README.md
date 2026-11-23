@@ -235,6 +235,13 @@ starts the ShardX profile through the provider and attaches to it over Chrome De
 - The DevTools port must stay on localhost (`http://127.0.0.1:PORT`); anything else is refused.
   For ShardX on a server, the provider reaches it through an SSH tunnel.
 - One browser command per profile at a time (a lock in the profile's folder).
+- Changing a profile's browser forgets its saved login (`storage_state.json`, `session.json`),
+  because another browser may be another Google account; run `aistudio -p NAME login` after.
+  aistudio's own Chrome folder is left alone.
+- Limitation: with ShardX on a remote server (SSH tunnel), the browser runs on that server, so
+  commands that hand it local files (`--image`, `transcribe FILE`, Flow uploads) or save the
+  browser's downloads to this machine do not work there. Use ShardX on this machine for them.
+- The attach and file lock need macOS or Linux.
 - `profile browser` also takes `cdp:http://127.0.0.1:PORT` for a browser that is already running.
 
 ### A whole scene from one file

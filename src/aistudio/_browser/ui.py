@@ -834,8 +834,10 @@ async def open_browser(
                 await _maximize(context, page)
             yield PlaywrightUi(page)
         finally:
-            await _save_session(profile, context)
             try:
-                await context.close()
-            except Exception:  # noqa: S110 (the user may have closed the window already)
-                pass
+                await _save_session(profile, context)
+            finally:  # also when the save is cancelled: never leave the browser or provider
+                try:
+                    await context.close()
+                except Exception:  # noqa: S110 (the user may have closed the window already)
+                    pass

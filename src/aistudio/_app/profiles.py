@@ -27,19 +27,41 @@ def profile_list(current: str) -> dict[str, Any]:
     return {"profiles": profiles, "count": len(profiles), "current": current}
 
 
+def _forget_login(profile: Profile) -> list[str]:
+    """What ``auth logout`` removes of the login (not the Chrome folder): the saved cookies and
+    API key belong to the old browser's account, so they must not be mixed with a new one's."""
+    removed = []
+    for path in (profile.storage_state, profile.session):
+        if path.exists():
+            path.unlink()
+            removed.append(path.name)
+    return removed
+
+
 def profile_browser(profile: Profile, spec: str | None = None, *, reset: bool = False
                     ) -> dict[str, Any]:
-    """Show, set or reset (back to Chrome) the browser the profile drives."""
+    """Show, set or reset (back to Chrome) the browser the profile drives. Changing it forgets
+    the saved login (storage_state.json, session.json), since another browser may be another
+    Google account; run ``aistudio login`` after."""
     if spec and reset:
         raise ValidationError("give a browser or --reset, not both")
+    before = str(load_spec(profile))
     if reset:
         removed = reset_spec(profile)
-        return {"profile": profile.name, "browser": str(load_spec(profile)), "reset": removed}
-    if spec:
+        after = str(load_spec(profile))
+        data: dict[str, Any] = {"profile": profile.name, "browser": after, "reset": removed}
+    elif spec:
         parsed = parse_spec(spec)
+        after = str(parsed)
         save_spec(profile, parsed)
-        return {"profile": profile.name, "browser": str(parsed), "saved": True}
-    return {"profile": profile.name, "browser": str(load_spec(profile))}
+        data = {"profile": profile.name, "browser": after, "saved": True}
+    else:
+        return {"profile": profile.name, "browser": before}
+    cleared = _forget_login(profile) if after != before else []
+    if cleared:
+        data["cleared"] = cleared
+        data["hint"] = f'sign in with the new browser: aistudio -p {profile.name} login'
+    return data
 
 
 def profile_create(name: str) -> dict[str, Any]:

@@ -36,7 +36,18 @@ _STDERR_LINE_CHARS = 300
 
 _PROVIDER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _DEVTOOLS_URL = re.compile(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?/?$")
-_SECRET = re.compile(r"(?i)\b(bearer\s+|token[=:]\s*|authorization[=:]\s*)\S+")
+_REDACTIONS = (
+    # a whole cookie header: it can hold several values
+    (re.compile(r"(?i)\b((?:set-)?cookie\s*[=:]).*"), r"\1 [redacted]"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[\w.~+/=-]+"), r"\1 [redacted]"),
+    # user:password@ in a URL
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]*@"), r"\1[redacted]@"),
+    # api_token=x, "token": "x", x-goog-api-key: x, SAPISID=x, __Secure-1PSID=x ...
+    (re.compile(
+        r"(?i)([\w-]*(?:token|secret|passw(?:or)?d|api[-_]?key|authorization|sapisid|apisid"
+        r"|hsid|ssid|sidcc|__secure-\w+|\bsid)[\w-]*[\"']?\s*[=:]\s*[\"']?)[^\s\"',;&]+"),
+     r"\1[redacted]"),
+)
 
 _SETUP_HINT = (
     'run "muse-browser-shardx setup" once, and "muse-browser-shardx list" to see your '
@@ -76,7 +87,7 @@ def check_devtools_url(url: str) -> str:
     """A DevTools address must stay on this machine: it gives full control of the browser."""
     if not _DEVTOOLS_URL.match(url):
         raise BrowserError(
-            f"{url!r} is not a local DevTools address",
+            f"{redact(url)!r} is not a local DevTools address",
             hint="it must look like http://127.0.0.1:PORT (the DevTools port stays on localhost)",
         )
     return url.rstrip("/")
@@ -150,9 +161,39 @@ def has_browser_session(profile: Profile, spec: BrowserSpec) -> bool:
 async def page_to_drive(context: Any) -> Any:
     """The page a run works in: aistudio's own browser reuses its first tab, an attached
     browser gets a new tab (its existing tabs are the user's)."""
-    if getattr(context, "attached", False) or not context.pages:
-        return await context.new_page()
-    return context.pages[0]
+    if getattr(context, "attached", False):
+        try:
+            return await context.new_page()
+        except Exception as exc:  # playwright.async_api.Error
+            raise BrowserError(
+                f"could not open a tab in the attached browser: {_first_line(exc)}",
+                hint="check that the browser is running and its window is not blocked",
+            ) from exc
+    return context.pages[0] if context.pages else await context.new_page()
+
+
+def request_from_own_page(context: Any, request: Any) -> bool:
+    """Whether a request on ``context`` comes from a tab aistudio opened. An attached browser's
+    context is shared with the user's other tabs, whose traffic must not be read or recorded."""
+    if not getattr(context, "attached", False):
+        return True
+    try:
+        return bool(request.frame.page in context.opened_pages)
+    except Exception:  # a service worker or a closed frame has no page: not ours
+        return False
+
+
+def check_fresh_allowed(spec: BrowserSpec, fresh: bool) -> None:
+    if fresh and spec.attached:
+        raise ValidationError(
+            "--fresh only resets aistudio's own Chrome profile; it never touches an attached "
+            f"browser ({spec})",
+            hint="drop --fresh, or sign out in that browser yourself",
+        )
+
+
+def _is_posix() -> bool:
+    return os.name == "posix"
 
 
 # --- one browser run per profile ---------------------------------------------------------------
@@ -190,8 +231,16 @@ class BrowserLock:
 # --- provider process --------------------------------------------------------------------------
 
 
+def redact(text: str) -> str:
+    """Cheap, general masking of values that look like credentials, for messages that may reach
+    the screen or a log (a provider's stderr, a browser error)."""
+    for pattern, repl in _REDACTIONS:
+        text = pattern.sub(repl, text)
+    return text
+
+
 def _clean(line: str) -> str:
-    return _SECRET.sub(r"\1[redacted]", line.strip())[:_STDERR_LINE_CHARS]
+    return redact(line.strip())[:_STDERR_LINE_CHARS]
 
 
 class ProviderProcess:
@@ -206,14 +255,22 @@ class ProviderProcess:
         self._stopped = False
 
     async def _read_stderr(self) -> None:
+        """Keep the last lines. Chunked reads: a line over asyncio's 64 KiB line limit must not
+        end the draining, or a full pipe would block the provider."""
         stream = self.proc.stderr
         if stream is None:
             return
+        buf = ""
         with contextlib.suppress(Exception):
-            async for raw in stream:
-                text = _clean(raw.decode("utf-8", "replace"))
-                if text:
-                    self.stderr_tail.append(text)
+            while chunk := await stream.read(4096):
+                buf += chunk.decode("utf-8", "replace")
+                *lines, buf = buf.split("\n")
+                buf = buf[-4 * _STDERR_LINE_CHARS:]
+                for line in lines:
+                    if text := _clean(line):
+                        self.stderr_tail.append(text)
+        if text := _clean(buf):
+            self.stderr_tail.append(text)
 
     def report(self) -> str:
         return "\n".join(self.stderr_tail)
@@ -232,27 +289,30 @@ class ProviderProcess:
         if self._stopped:
             return
         self._stopped = True
-        stdin = self.proc.stdin
-        if stdin is not None:
-            with contextlib.suppress(Exception):
-                stdin.close()
-        for sig in (None, signal.SIGTERM, signal.SIGKILL):
-            if sig is not None:
-                self._signal_group(sig)
-            try:
-                await asyncio.wait_for(self.proc.wait(), PROVIDER_EXIT_WAIT_S)
-                break
-            except asyncio.TimeoutError:
-                continue
-        with contextlib.suppress(Exception):  # let the last stderr lines arrive
-            await asyncio.wait_for(asyncio.shield(self._stderr_task), 1.0)
-        for task in (self._stderr_task, *self._tasks):
-            task.cancel()
-        await asyncio.gather(self._stderr_task, *self._tasks, return_exceptions=True)
+        try:
+            stdin = self.proc.stdin
+            if stdin is not None:
+                with contextlib.suppress(Exception):
+                    stdin.close()
+            for sig in (None, signal.SIGTERM, signal.SIGKILL):
+                if sig is not None:
+                    self._signal_group(sig)
+                try:
+                    await asyncio.wait_for(self.proc.wait(), PROVIDER_EXIT_WAIT_S)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+            with contextlib.suppress(Exception):  # let the last stderr lines arrive
+                await asyncio.wait_for(asyncio.shield(self._stderr_task), 1.0)
+        finally:
+            # Also when cancelled, or when the leader died and left a tunnel in its group.
+            self._signal_group(signal.SIGKILL if self.proc.returncode is None else signal.SIGTERM)
+            for task in (self._stderr_task, *self._tasks):
+                task.cancel()
 
     def _signal_group(self, sig: int) -> None:
         # The provider leads its own process group, so a tunnel it left behind goes too.
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
             os.killpg(self.proc.pid, sig)
 
 
@@ -332,6 +392,11 @@ class AttachedContext:
     def pages(self) -> list[Any]:
         return list(self._context.pages)
 
+    @property
+    def opened_pages(self) -> list[Any]:
+        """The tabs aistudio opened (the only ones it touches)."""
+        return list(self._opened)
+
     async def new_page(self) -> Any:
         page = await self._context.new_page()
         self._opened.append(page)
@@ -350,23 +415,36 @@ class AttachedContext:
         return await self._context.new_cdp_session(page)
 
     async def close(self) -> None:
+        """Every step runs even if an earlier one fails or this is cancelled; the first
+        cancellation (a BaseException) is re-raised at the end."""
         if self._closed:
             return
         self._closed = True
-        try:
-            await self._close_own_pages()
-            if self._owns_context:  # only a context aistudio created itself
-                with contextlib.suppress(Exception):
-                    await self._context.close()
-            # On a CDP-connected browser this drops the connection; it does not quit the browser.
-            with contextlib.suppress(Exception):
-                await self._browser.close()
-        finally:
+        interrupted: BaseException | None = None
+        steps = (self._close_own_pages, self._close_owned_context, self._disconnect,
+                 self._stop_provider)
+        for step in steps:
             try:
-                if self._provider is not None:
-                    await self._provider.stop()
-            finally:
-                self._lock.release()
+                await step()
+            except Exception:  # noqa: S110 (best effort: the user may have closed things)
+                pass
+            except BaseException as exc:  # CancelledError, KeyboardInterrupt
+                interrupted = interrupted or exc
+        self._lock.release()
+        if interrupted is not None:
+            raise interrupted
+
+    async def _close_owned_context(self) -> None:
+        if self._owns_context:  # only a context aistudio created itself
+            await self._context.close()
+
+    async def _disconnect(self) -> None:
+        # On a CDP-connected browser this drops the connection; it does not quit the browser.
+        await self._browser.close()
+
+    async def _stop_provider(self) -> None:
+        if self._provider is not None:
+            await asyncio.shield(self._provider.stop())
 
     async def _close_own_pages(self) -> None:
         for page in self._opened:
@@ -382,6 +460,11 @@ class AttachedContext:
 
 async def connect_browser(playwright: Any, profile: Profile, spec: BrowserSpec) -> AttachedContext:
     """Attach to a provider's (or an already running) browser over CDP."""
+    if not _is_posix():
+        raise BrowserError(
+            "attaching to a ShardX or CDP browser needs macOS or Linux",
+            hint="use aistudio's own Chrome here: aistudio profile browser --reset",
+        )
     profile.ensure()
     lock = BrowserLock(profile.root / "browser.lock")
     lock.acquire()
@@ -392,24 +475,33 @@ async def connect_browser(playwright: Any, profile: Profile, spec: BrowserSpec) 
             url, provider = await start_provider(spec)
         else:
             url = check_devtools_url(spec.url)
+        hint = (_SETUP_HINT if spec.kind == "provider"
+                else "check that the browser runs with its DevTools port open on localhost")
         try:
             browser = await playwright.chromium.connect_over_cdp(url)
         except Exception as exc:  # playwright.async_api.Error
             raise BrowserError(
-                f"could not attach to the browser at {url}: {_first_line(exc)}",
-                hint=_SETUP_HINT if spec.kind == "provider"
-                else "check that the browser runs with its DevTools port open on localhost",
+                f"could not attach to the browser at {url}: {_first_line(exc)}", hint=hint
             ) from exc
         owns = not browser.contexts
-        context = await browser.new_context() if owns else browser.contexts[0]
+        try:
+            context = await browser.new_context() if owns else browser.contexts[0]
+        except Exception as exc:
+            raise BrowserError(
+                f"could not open a browser context at {url}: {_first_line(exc)}", hint=hint
+            ) from exc
         return AttachedContext(browser, context, owns_context=owns, provider=provider, lock=lock)
     except BaseException:
-        if browser is not None:
-            with contextlib.suppress(Exception):
-                await browser.close()
-        if provider is not None:
-            await asyncio.shield(provider.stop())
-        lock.release()
+        try:
+            if browser is not None:
+                with contextlib.suppress(Exception):
+                    await browser.close()
+        finally:
+            try:
+                if provider is not None:
+                    await asyncio.shield(provider.stop())
+            finally:
+                lock.release()
         raise
 
 

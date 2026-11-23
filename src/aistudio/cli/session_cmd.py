@@ -10,7 +10,7 @@ import click
 from aistudio._app.auth import auth_status, http_probe
 from aistudio._auth.login import run_login
 from aistudio._auth.storage import delete_credentials
-from aistudio._browser.provider import resolve_spec
+from aistudio._browser.provider import check_fresh_allowed, resolve_spec
 from aistudio.cli.error_handler import handle_errors
 from aistudio.cli.output import confirm_or_fail, emit, json_option, stderr, stdout
 from aistudio.cli.state import CliState
@@ -97,8 +97,10 @@ def login(state: CliState, browser: str | None, fresh: bool, timeout: int,
           json_output: bool) -> None:
     """Sign in to AI Studio in a browser window and save the session."""
     profile = state.profile()
+    spec = resolve_spec(profile, browser)
+    check_fresh_allowed(spec, fresh)  # before saying anything is opening
     if not json_output:
-        stderr.print(f"Opening {resolve_spec(profile, browser)}. "
+        stderr.print(f"Opening {spec}. "
                      "Sign in to AI Studio in the window that appears.")
     result = asyncio.run(run_login(profile, browser=browser, fresh=fresh, timeout=timeout))
     data = {

@@ -41,3 +41,30 @@ def test_profile_browser_rejects_a_bad_spec_and_both_arguments(aistudio_home):
 def test_login_rejects_a_bad_browser_spec(aistudio_home):
     result = run("login", "--browser", "shardx:")
     assert result.exit_code != 0
+
+
+def test_changing_the_browser_forgets_the_old_logins_files_only(aistudio_home, logged_in_profile):
+    profile = logged_in_profile("work")
+    profile.chrome_dir.mkdir()
+    result = run("-p", "work", "profile", "browser", "shardx:acct1", "--json")
+    data = json.loads(result.stdout)
+    assert sorted(data["cleared"]) == ["session.json", "storage_state.json"]
+    assert "aistudio -p work login" in data["hint"]
+    assert not profile.storage_state.exists() and not profile.session.exists()
+    assert profile.chrome_dir.exists()  # Chrome's own folder is not touched
+
+
+def test_setting_the_same_browser_again_keeps_the_login(aistudio_home, logged_in_profile):
+    profile = logged_in_profile("work")
+    run("-p", "work", "profile", "browser", "shardx:acct1")
+    logged_in_profile("work")
+    data = json.loads(run("-p", "work", "profile", "browser", "shardx:acct1", "--json").stdout)
+    assert "cleared" not in data and profile.storage_state.exists()
+
+
+def test_reset_forgets_the_login_of_the_attached_browser(aistudio_home, logged_in_profile):
+    profile = logged_in_profile("work")
+    run("-p", "work", "profile", "browser", "shardx:acct1")
+    logged_in_profile("work")
+    result = run("-p", "work", "profile", "browser", "--reset")
+    assert "Forgot the saved login" in result.output and not profile.storage_state.exists()
